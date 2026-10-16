@@ -32,6 +32,7 @@ func main() {
 
 func run() error {
 	migrateOnly := flag.Bool("migrate", false, "накатить миграции и выйти")
+	healthcheck := flag.Bool("healthcheck", false, "проверить, что запущенный сервер отвечает, и выйти")
 	flag.Parse()
 	// Фильтр секретов на всех логах: ключ мог оказаться в тексте ошибки
 	// провайдера (ТЗ §13).
@@ -40,6 +41,13 @@ func run() error {
 	cfg, err := config.Load()
 	if err != nil {
 		return err
+	}
+	if *healthcheck {
+		url, err := healthURL(cfg.HTTPAddr)
+		if err != nil {
+			return err
+		}
+		return probeHealth(context.Background(), url)
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
