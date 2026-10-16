@@ -7,6 +7,7 @@ package main
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"log/slog"
 	"os"
@@ -31,6 +32,9 @@ func main() {
 }
 
 func run() error {
+	// Флагов нет, но разбор нужен: `worker -h` или опечатка во флаге не
+	// должны молча запускать ещё один рабочий процесс.
+	flag.Parse()
 	slog.SetDefault(slog.New(logging.NewRedactingHandler(slog.NewTextHandler(os.Stderr, nil))))
 	cfg, err := config.Load()
 	if err != nil {
