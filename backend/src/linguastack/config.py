@@ -27,6 +27,9 @@ class Settings(BaseSettings):
     # поздно уезжает в продакшен. Пустая строка означает «не настроен», и обращение
     # к нему падает с понятным сообщением — см. require_secret_key().
     secret_key: str = ""
+    # В продакшене обязательно True (cookie только по HTTPS). По умолчанию
+    # False, иначе разработка и тесты по http вообще не получают сессию.
+    session_cookie_secure: bool = False
     storage_root: Path = Path("./storage")
     ollama_base_url: str = "http://localhost:11434"
 

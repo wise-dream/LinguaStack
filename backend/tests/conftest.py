@@ -66,3 +66,34 @@ async def session(engine):
 @pytest.fixture
 def anyio_backend():
     return "asyncio"
+
+
+@pytest_asyncio.fixture
+async def app(session):
+    """Приложение, работающее в транзакции теста.
+
+    get_session переопределён на ту же сессию, что видит тест, поэтому
+    записи эндпоинтов и проверки теста смотрят на одни данные, а откат
+    в конце теста убирает и то, и другое.
+    """
+    from linguastack.db.base import get_session
+    from linguastack.main import create_app
+
+    application = create_app()
+
+    async def _override_session():
+        yield session
+
+    application.dependency_overrides[get_session] = _override_session
+    return application
+
+
+@pytest_asyncio.fixture
+async def client(app):
+    """Неаутентифицированный HTTP-клиент."""
+    from httpx import ASGITransport, AsyncClient
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as http_client:
+        yield http_client
