@@ -88,3 +88,18 @@ func Last4(plain string) string {
 	}
 	return string(runes[len(runes)-4:])
 }
+
+// BoxFromKey — шифратор для настроенного ключа; nil, если ключ не задан.
+// Без ключа сервис работает (Ollama ключ не нужен), но конфигурации с
+// ключами API недоступны. Неверно заданный ключ — ошибка запуска, а не
+// сюрприз при первой загрузке.
+func BoxFromKey(configured string, require func() ([]byte, error)) (*SecretBox, error) {
+	if configured == "" {
+		return nil, nil
+	}
+	key, err := require()
+	if err != nil {
+		return nil, err
+	}
+	return NewSecretBox(key)
+}

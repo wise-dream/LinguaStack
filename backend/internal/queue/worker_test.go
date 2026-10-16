@@ -1,0 +1,417 @@
+package queue_test
+
+import (
+	"context"
+	"fmt"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
+
+	"github.com/vnovels/linguastack/internal/config"
+	"github.com/vnovels/linguastack/internal/db/models"
+	"github.com/vnovels/linguastack/internal/importers"
+	"github.com/vnovels/linguastack/internal/providers"
+	"github.com/vnovels/linguastack/internal/queue"
+	"github.com/vnovels/linguastack/internal/testdb"
+)
+
+// workerEnv — worker с Fake-провайдером поверх коммитящей базы пакета.
+type workerEnv struct {
+	t        *testing.T
+	db       *gorm.DB
+	cfg      config.Settings
+	provider providers.Provider
+	fake     *providers.Fake
+	hook     func(project uuid.UUID, batch int)
+	batches  int
+}
+
+func newWorkerEnv(t *testing.T) *workerEnv {
+	t.Helper()
+	cfg, err := config.Load()
+	require.NoError(t, err)
+	cfg.MaxBatchSegments = 2 // несколько батчей даже на маленькой книге
+	fake := providers.NewFake("prefix")
+	return &workerEnv{t: t, db: testdb.Committing(t, "queue"), cfg: cfg, provider: fake, fake: fake}
+}
+
+func (e *workerEnv) worker(id string) *queue.Worker {
+	w := queue.NewWorker(id, e.db, func(context.Context, *models.TranslationProject) (providers.Provider, error) {
+		return e.provider, nil
+	}, e.cfg)
+	w.RetryBackoff = func(int) time.Duration { return 0 }
+	w.AfterBatch = func(project uuid.UUID) {
+		e.batches++
+		if e.hook != nil {
+			e.hook(project, e.batches)
+		}
+	}
+	return w
+}
+
+func (e *workerEnv) projectFromMarkdown(md string) *models.TranslationProject {
+	e.t.Helper()
+	res, err := importers.NewMarkdown().Load([]byte(md), "book.md")
+	require.NoError(e.t, err)
+	project := testdb.MakeProject(e.t, e.db, &testdb.ProjectOptions{Document: &res.Document})
+	_, err = queue.Enqueue(e.t.Context(), e.db, project, 0, e.cfg.MaxSegmentAttempts)
+	require.NoError(e.t, err)
+	return project
+}
+
+func paragraphs(n int) string {
+	parts := make([]string, n)
+	for i := range parts {
+		parts[i] = fmt.Sprintf("Para %d.", i)
+	}
+	return "# Ch\n\n" + strings.Join(parts, "\n\n")
+}
+
+// runUntilIdle выполняет задачи, пока очередь не опустеет.
+func (e *workerEnv) runUntilIdle(w *queue.Worker) {
+	e.t.Helper()
+	for range 50 {
+		worked, err := w.RunOnce(e.t.Context())
+		require.NoError(e.t, err)
+		if !worked {
+			return
+		}
+	}
+	e.t.Fatal("очередь не опустела за 50 итераций")
+}
+
+func (e *workerEnv) reload(p *models.TranslationProject) models.TranslationProject {
+	e.t.Helper()
+	var fresh models.TranslationProject
+	require.NoError(e.t, e.db.First(&fresh, "id = ?", p.ID).Error)
+	return fresh
+}
+
+func (e *workerEnv) segments(p *models.TranslationProject) []models.TranslationSegment {
+	e.t.Helper()
+	var segs []models.TranslationSegment
+	require.NoError(e.t, e.db.Where("project_id = ?", p.ID).Order("chapter_index, ordinal").Find(&segs).Error)
+	return segs
+}
+
+func (e *workerEnv) setStatus(p uuid.UUID, status string) {
+	require.NoError(e.t, e.db.Model(&models.TranslationProject{}).Where("id = ?", p).Update("status", status).Error)
+}
+
+func (e *workerEnv) requeue(p *models.TranslationProject) {
+	e.t.Helper()
+	e.setStatus(p.ID, models.ProjectQueued)
+	fresh := e.reload(p)
+	_, err := queue.Enqueue(e.t.Context(), e.db, &fresh, 0, e.cfg.MaxSegmentAttempts)
+	require.NoError(e.t, err)
+}
+
+func TestWorkerTranslatesWholeBook(t *testing.T) {
+	e := newWorkerEnv(t)
+	project := e.projectFromMarkdown("# Ch\n\nOne.\n\nTwo.\n\n```go\ncode()\n```\n\nThree.")
+	e.runUntilIdle(e.worker("w"))
+
+	done := e.reload(project)
+	require.Equal(t, models.ProjectCompleted, done.Status)
+	require.Equal(t, 4, done.SegmentsTotal, "заголовок и три абзаца; код не переводится")
+	require.Equal(t, 4, done.SegmentsDone)
+	require.Zero(t, done.SegmentsFailed)
+	require.NotNil(t, done.StartedAt)
+	require.NotNil(t, done.FinishedAt)
+
+	var texts []string
+	for _, s := range e.segments(project) {
+		require.Equal(t, models.SegmentCompleted, s.Status)
+		texts = append(texts, *s.TranslatedText)
+	}
+	require.Equal(t, []string{"RU:Ch", "RU:One.", "RU:Two.", "RU:Three."}, texts)
+
+	var revisions int64
+	require.NoError(t, e.db.Model(&models.TranslationSegmentRevision{}).Where("origin = ?", models.OriginMachine).Count(&revisions).Error)
+	require.EqualValues(t, 4, revisions, "каждая машинная версия сохранена (ТЗ §5.1)")
+
+	var task models.TranslationTask
+	require.NoError(t, e.db.First(&task, "project_id = ?", project.ID).Error)
+	require.Equal(t, models.TaskCompleted, task.Status)
+}
+
+func TestRerunDoesNotRetranslateCompleted(t *testing.T) {
+	// ТЗ §7, §17: идемпотентность — повторный прогон пропускает готовое.
+	e := newWorkerEnv(t)
+	project := e.projectFromMarkdown("# Ch\n\nOne.\n\nTwo.")
+	e.runUntilIdle(e.worker("w"))
+	calls := e.fake.CallCount()
+
+	e.requeue(project)
+	e.runUntilIdle(e.worker("w"))
+	require.Equal(t, calls, e.fake.CallCount(), "модель не вызывается снова")
+	require.Equal(t, models.ProjectCompleted, e.reload(project).Status)
+}
+
+func TestProgressSurvivesWorkerCrash(t *testing.T) {
+	// ТЗ §15.8: перевод продолжается после перезапуска сервера.
+	e := newWorkerEnv(t)
+	project := e.projectFromMarkdown(paragraphs(6)) // 7 сегментов — 4 батча
+	e.hook = func(_ uuid.UUID, batch int) {
+		if batch == 2 {
+			panic("kill -9")
+		}
+	}
+	func() {
+		defer func() { require.NotNil(t, recover()) }()
+		_, _ = e.worker("doomed").RunOnce(t.Context())
+	}()
+	partial := e.reload(project)
+	require.Equal(t, 4, partial.SegmentsDone, "два батча по два сегмента сохранены до падения")
+
+	// Аренда упавшего worker-а истекает — задачу берёт новый.
+	e.hook = nil
+	require.NoError(t, e.db.Model(&models.TranslationTask{}).Where("project_id = ?", project.ID).
+		Update("locked_until", time.Now().Add(-time.Second)).Error)
+	e.runUntilIdle(e.worker("survivor"))
+
+	done := e.reload(project)
+	require.Equal(t, models.ProjectCompleted, done.Status)
+	require.Equal(t, 7, done.SegmentsDone)
+	require.Equal(t, 7, e.fake.TranslatedCount(), "переведённое до падения не переводится снова")
+}
+
+func TestPauseStopsBetweenBatchesKeepingProgress(t *testing.T) {
+	e := newWorkerEnv(t)
+	project := e.projectFromMarkdown(paragraphs(9))
+	e.hook = func(p uuid.UUID, batch int) {
+		if batch == 1 {
+			e.setStatus(p, models.ProjectPaused) // пользователь нажал «Пауза»
+		}
+	}
+	e.runUntilIdle(e.worker("w"))
+
+	paused := e.reload(project)
+	require.Equal(t, models.ProjectPaused, paused.Status)
+	require.Equal(t, 2, paused.SegmentsDone, "сделанное не теряется")
+	var task models.TranslationTask
+	require.NoError(t, e.db.First(&task, "project_id = ?", project.ID).Error)
+	require.Equal(t, models.TaskCancelled, task.Status, "пауза живёт на проекте, задача завершается")
+}
+
+func TestResumeContinuesWithoutRetranslating(t *testing.T) {
+	e := newWorkerEnv(t)
+	project := e.projectFromMarkdown(paragraphs(9))
+	e.hook = func(p uuid.UUID, batch int) {
+		if batch == 1 {
+			e.setStatus(p, models.ProjectPaused)
+		}
+	}
+	e.runUntilIdle(e.worker("w"))
+	e.hook = nil
+
+	e.requeue(project)
+	e.runUntilIdle(e.worker("w"))
+	done := e.reload(project)
+	require.Equal(t, models.ProjectCompleted, done.Status)
+	require.Equal(t, 10, done.SegmentsDone)
+	require.Equal(t, 10, e.fake.TranslatedCount())
+}
+
+// cancellingProvider отменяет проект, пока запрос к модели «в полёте».
+type cancellingProvider struct {
+	*providers.Fake
+	onCall func(n int)
+	n      int
+}
+
+func (c *cancellingProvider) Complete(ctx context.Context, model string, req providers.CompletionRequest) (providers.CompletionResult, error) {
+	c.n++
+	c.onCall(c.n)
+	return c.Fake.Complete(ctx, model, req)
+}
+
+func TestCancelDuringBatchKeepsPaidResult(t *testing.T) {
+	// Review Focus №5: ответ модели уже оплачен — его нельзя потерять,
+	// но и отменённый проект не должен ожить.
+	e := newWorkerEnv(t)
+	project := e.projectFromMarkdown(paragraphs(7))
+	e.fake.CostPerCall = 0.5
+	e.provider = &cancellingProvider{Fake: e.fake, onCall: func(n int) {
+		if n == 2 {
+			e.setStatus(project.ID, models.ProjectCancelled)
+		}
+	}}
+	e.runUntilIdle(e.worker("w"))
+
+	cancelled := e.reload(project)
+	require.Equal(t, models.ProjectCancelled, cancelled.Status, "запись результата не воскрешает проект")
+	require.Equal(t, 4, cancelled.SegmentsDone, "батч, отменённый в полёте, сохранён")
+	require.InDelta(t, 1.0, cancelled.CostUSD, 1e-9, "его стоимость учтена")
+	require.Equal(t, 2, e.fake.CallCount(), "после отмены новых запросов нет")
+}
+
+func TestCancelledBeforeStartDoesNotRun(t *testing.T) {
+	e := newWorkerEnv(t)
+	project := e.projectFromMarkdown("# Ch\n\nOne.")
+	e.setStatus(project.ID, models.ProjectCancelled)
+	e.runUntilIdle(e.worker("w"))
+	require.Equal(t, models.ProjectCancelled, e.reload(project).Status)
+	require.Zero(t, e.fake.CallCount())
+}
+
+func TestBookWithoutTranslatableBlocksCompletes(t *testing.T) {
+	// Review Focus №1: глава из одного кода — 0/0, статус completed, 100%.
+	e := newWorkerEnv(t)
+	project := e.projectFromMarkdown("```python\nprint(1)\n```\n")
+	e.runUntilIdle(e.worker("w"))
+	done := e.reload(project)
+	require.Equal(t, models.ProjectCompleted, done.Status)
+	require.Zero(t, done.SegmentsTotal)
+	require.InDelta(t, 100.0, done.ProgressPercent(), 0)
+	require.Zero(t, e.fake.CallCount())
+}
+
+func TestUnavailableProviderFailsTaskAfterAttempts(t *testing.T) {
+	e := newWorkerEnv(t)
+	project := e.projectFromMarkdown("# Ch\n\nOne.")
+	e.fake.SetUnavailable(true)
+	e.runUntilIdle(e.worker("w"))
+
+	failed := e.reload(project)
+	require.Equal(t, models.ProjectFailed, failed.Status)
+	require.Contains(t, failed.LastError, "недоступен")
+	var task models.TranslationTask
+	require.NoError(t, e.db.First(&task, "project_id = ?", project.ID).Error)
+	require.Equal(t, models.TaskFailed, task.Status)
+	require.Equal(t, e.cfg.MaxSegmentAttempts, task.Attempts)
+}
+
+func TestAuthErrorFailsImmediately(t *testing.T) {
+	// Неверный ключ — повторять бессмысленно; попытки не тратятся впустую.
+	e := newWorkerEnv(t)
+	project := e.projectFromMarkdown("# Ch\n\nOne.")
+	w := queue.NewWorker("w", e.db, func(context.Context, *models.TranslationProject) (providers.Provider, error) {
+		return nil, fmt.Errorf("%w: ключ отозван", providers.ErrAuth)
+	}, e.cfg)
+	e.runUntilIdle(w)
+	failed := e.reload(project)
+	require.Equal(t, models.ProjectFailed, failed.Status)
+	require.Contains(t, failed.LastError, "ключ отозван")
+	var task models.TranslationTask
+	require.NoError(t, e.db.First(&task, "project_id = ?", project.ID).Error)
+	require.Equal(t, 1, task.Attempts)
+}
+
+func TestOneBadSegmentDoesNotStopBook(t *testing.T) {
+	e := newWorkerEnv(t)
+	project := e.projectFromMarkdown("# Ch\n\nGood.\n\nBad.\n\nAlso good.")
+	e.fake.FailForTexts = map[string]bool{"Bad.": true}
+	e.runUntilIdle(e.worker("w"))
+
+	done := e.reload(project)
+	require.Equal(t, models.ProjectFailed, done.Status, "есть сегмент, исчерпавший попытки (ADD §5)")
+	require.Equal(t, 3, done.SegmentsDone, "остальные сегменты переведены")
+	require.Equal(t, 1, done.SegmentsFailed)
+	for _, s := range e.segments(project) {
+		if s.SourceText == "Bad." {
+			require.Equal(t, models.SegmentFailed, s.Status)
+			require.Nil(t, s.TranslatedText)
+			require.NotEmpty(t, s.LastError, "последний ответ модели сохранён для разбора")
+		}
+	}
+}
+
+func TestWarningsMakeCompletedWithWarnings(t *testing.T) {
+	e := newWorkerEnv(t)
+	project := e.projectFromMarkdown("This is a reasonably long English sentence that should change.")
+	e.fake.Scenario = "echo"
+	e.runUntilIdle(e.worker("w"))
+	done := e.reload(project)
+	require.Equal(t, models.ProjectCompletedWithWarnings, done.Status)
+	require.Equal(t, 1, done.WarningsCount)
+}
+
+func TestOversizedBlockFailsAloneWithClearMessage(t *testing.T) {
+	// Review Focus №3: слишком длинный абзац — понятная ошибка, книга идёт дальше.
+	e := newWorkerEnv(t)
+	e.cfg.MaxBatchChars = 100
+	project := e.projectFromMarkdown("# Ch\n\n" + strings.Repeat("x", 500) + "\n\nShort.")
+	e.runUntilIdle(e.worker("w"))
+	done := e.reload(project)
+	require.Equal(t, 2, done.SegmentsDone)
+	require.Equal(t, 1, done.SegmentsFailed)
+	for _, s := range e.segments(project) {
+		if s.Status == models.SegmentFailed {
+			require.Contains(t, s.LastError, "длиннее лимита")
+		}
+	}
+}
+
+func TestExternalEgressRevokedMidwayIsRespected(t *testing.T) {
+	// ТЗ §6.4: если пользователь запретил передачу наружу, следующий батч
+	// к внешнему сервису не уходит.
+	e := newWorkerEnv(t)
+	project := e.projectFromMarkdown("# Ch\n\nOne.")
+	w := queue.NewWorker("w", e.db, queue.ConfigResolver(e.db, nil, providers.BuildOptions{}), e.cfg)
+	require.NoError(t, e.db.Model(&models.ProviderConfig{}).Where("id = ?", project.ProviderConfigID).
+		Updates(map[string]any{"provider_id": "openai_compatible", "base_url": "https://api.example.com/v1", "allow_external": false}).Error)
+	e.runUntilIdle(w)
+	failed := e.reload(project)
+	require.Equal(t, models.ProjectFailed, failed.Status)
+	require.Contains(t, failed.LastError, "запрещ")
+}
+
+func TestWorkerStopsGracefullyFinishingCurrentBatch(t *testing.T) {
+	// SIGTERM: текущий батч дописывается, задача отпускается без траты попытки.
+	e := newWorkerEnv(t)
+	project := e.projectFromMarkdown(paragraphs(7))
+	ctx, stop := context.WithCancel(t.Context())
+	e.hook = func(_ uuid.UUID, batch int) {
+		if batch == 1 {
+			stop()
+		}
+	}
+	require.NoError(t, e.worker("w").Run(ctx))
+
+	stopped := e.reload(project)
+	require.Equal(t, 2, stopped.SegmentsDone, "батч, начатый до остановки, дописан")
+	var task models.TranslationTask
+	require.NoError(t, e.db.First(&task, "project_id = ?", project.ID).Error)
+	require.Equal(t, models.TaskPending, task.Status)
+	require.Zero(t, task.Attempts, "остановка сервиса — не сбой")
+
+	e.hook = nil
+	e.runUntilIdle(e.worker("w2"))
+	require.Equal(t, models.ProjectCompleted, e.reload(project).Status)
+}
+
+func TestCancelDuringLastBatchDoesNotRevive(t *testing.T) {
+	// Review Focus №5: отмена пришла во время последнего батча — после него
+	// цикл кончается, и итоговый статус не должен затереть отмену.
+	e := newWorkerEnv(t)
+	project := e.projectFromMarkdown("# Ch\n\nOnly.")
+	e.provider = &cancellingProvider{Fake: e.fake, onCall: func(int) { e.setStatus(project.ID, models.ProjectCancelled) }}
+	e.runUntilIdle(e.worker("w"))
+	cancelled := e.reload(project)
+	require.Equal(t, models.ProjectCancelled, cancelled.Status)
+	require.Equal(t, 2, cancelled.SegmentsDone, "и результат последнего батча сохранён")
+}
+
+func TestPartialBatchResultsSavedOnInfraFailure(t *testing.T) {
+	// Review Focus №5 на уровне worker-а: сервис вернул часть переводов и
+	// сбой провайдера — переводы записаны, остальное ждёт повтора.
+	e := newWorkerEnv(t)
+	project := e.projectFromMarkdown("Good.\n\nBad.")
+	e.fake.FailForTexts = map[string]bool{"Bad.": true}
+	e.fake.FailAfterCalls = 4 // 3 попытки батча, одиночный «Good.», затем сбой
+	worked, err := e.worker("w").RunOnce(t.Context())
+	require.NoError(t, err)
+	require.True(t, worked)
+
+	partial := e.reload(project)
+	require.Equal(t, 1, partial.SegmentsDone)
+	require.Zero(t, partial.SegmentsFailed, "непереведённый из-за сбоя сегмент — не ошибка, он ждёт повтора")
+	var task models.TranslationTask
+	require.NoError(t, e.db.First(&task, "project_id = ?", project.ID).Error)
+	require.Equal(t, models.TaskPending, task.Status)
+}

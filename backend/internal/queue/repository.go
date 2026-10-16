@@ -89,11 +89,13 @@ UPDATE translation_tasks SET locked_until = now() + make_interval(secs => ?)
 }
 
 // Finish завершает задачу статусом completed, failed или cancelled.
-func Finish(ctx context.Context, db *gorm.DB, taskID [16]byte, workerID, status string) error {
+// errText — причина для failed (неверный ключ, нет модели): такие сбои
+// повторять бессмысленно, задача завершается сразу.
+func Finish(ctx context.Context, db *gorm.DB, taskID [16]byte, workerID, status, errText string) error {
 	res := db.WithContext(ctx).Exec(`
 UPDATE translation_tasks
-   SET status = ?, finished_at = now(), locked_by = NULL, locked_until = NULL
- WHERE id = ? AND locked_by = ? AND status = 'running'`, status, taskID, workerID)
+   SET status = ?, last_error = ?, finished_at = now(), locked_by = NULL, locked_until = NULL
+ WHERE id = ? AND locked_by = ? AND status = 'running'`, status, clip(errText), taskID, workerID)
 	if res.Error != nil {
 		return fmt.Errorf("завершение задачи: %w", res.Error)
 	}

@@ -195,7 +195,7 @@ func TestCompleteAndNeverReclaimed(t *testing.T) {
 	gdb := testdb.Committing(t, "queue")
 	enqueueFor(t, gdb, nil, 0)
 	task := claim(t, gdb, "w", 3)
-	require.NoError(t, queue.Finish(t.Context(), gdb, task.ID, "w", models.TaskCompleted))
+	require.NoError(t, queue.Finish(t.Context(), gdb, task.ID, "w", models.TaskCompleted, ""))
 	done := reload(t, gdb, task.ID)
 	require.Equal(t, models.TaskCompleted, done.Status)
 	require.NotNil(t, done.FinishedAt)
@@ -209,7 +209,7 @@ func TestFinishByNonHolderIsLeaseLost(t *testing.T) {
 	gdb := testdb.Committing(t, "queue")
 	enqueueFor(t, gdb, nil, 0)
 	task := claim(t, gdb, "holder", 3)
-	err := queue.Finish(t.Context(), gdb, task.ID, "intruder", models.TaskCompleted)
+	err := queue.Finish(t.Context(), gdb, task.ID, "intruder", models.TaskCompleted, "")
 	require.True(t, errors.Is(err, queue.ErrLeaseLost))
 	require.Equal(t, models.TaskRunning, reload(t, gdb, task.ID).Status)
 }

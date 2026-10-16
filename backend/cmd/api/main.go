@@ -64,9 +64,12 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	secrets, err := openSecrets(cfg)
+	secrets, err := security.BoxFromKey(cfg.SecretKey, cfg.RequireSecretKey)
 	if err != nil {
 		return err
+	}
+	if secrets == nil {
+		slog.Warn("LINGUASTACK_SECRET_KEY не задан: конфигурации провайдеров с ключами API недоступны")
 	}
 
 	server := &http.Server{
@@ -98,19 +101,4 @@ func run() error {
 	defer cancel()
 	slog.Info("останавливаю сервер")
 	return server.Shutdown(shutdownCtx)
-}
-
-// openSecrets — шифратор ключей API. Без LINGUASTACK_SECRET_KEY сервер
-// работает (Ollama ключ не нужен), но конфигурации с ключами недоступны;
-// неверно заданный ключ — ошибка запуска, а не сюрприз при первой загрузке.
-func openSecrets(cfg config.Settings) (*security.SecretBox, error) {
-	if cfg.SecretKey == "" {
-		slog.Warn("LINGUASTACK_SECRET_KEY не задан: конфигурации провайдеров с ключами API недоступны")
-		return nil, nil
-	}
-	key, err := cfg.RequireSecretKey()
-	if err != nil {
-		return nil, err
-	}
-	return security.NewSecretBox(key)
 }
