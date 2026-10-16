@@ -4,6 +4,7 @@ package main
 import (
 	"context"
 	"errors"
+	"flag"
 	"log/slog"
 	"net/http"
 	"os"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"github.com/vnovels/linguastack/internal/config"
+	"github.com/vnovels/linguastack/internal/db"
 	"github.com/vnovels/linguastack/internal/httpapi"
 )
 
@@ -25,19 +27,37 @@ func main() {
 }
 
 func run() error {
+	migrateOnly := flag.Bool("migrate", false, "накатить миграции и выйти")
+	flag.Parse()
+
 	cfg, err := config.Load()
 	if err != nil {
 		return err
 	}
 
-	server := &http.Server{
-		Addr:              cfg.HTTPAddr,
-		Handler:           httpapi.NewServer(httpapi.Deps{Cfg: cfg}),
-		ReadHeaderTimeout: 10 * time.Second,
-	}
-
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+
+	gdb, err := db.Open(ctx, cfg.DatabaseURL, os.Stderr)
+	if err != nil {
+		return err
+	}
+	// Миграции накатываются и при обычном старте: забытый накат означает
+	// неработающий сервис, а advisory-lock goose делает одновременный старт
+	// нескольких процессов безопасным.
+	if err := db.Migrate(ctx, gdb); err != nil {
+		return err
+	}
+	if *migrateOnly {
+		slog.Info("миграции накатаны")
+		return nil
+	}
+
+	server := &http.Server{
+		Addr:              cfg.HTTPAddr,
+		Handler:           httpapi.NewServer(httpapi.Deps{Cfg: cfg, DB: gdb}),
+		ReadHeaderTimeout: 10 * time.Second,
+	}
 
 	errs := make(chan error, 1)
 	go func() {

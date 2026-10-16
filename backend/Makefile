@@ -3,7 +3,7 @@
 GO ?= go
 LINT ?= golangci-lint
 
-.PHONY: test test-live lint build run-api
+.PHONY: test test-live lint build run-api migrate
 
 test:
 	$(GO) test ./...
@@ -19,3 +19,6 @@ build:
 
 run-api:
 	$(GO) run ./cmd/api
+
+migrate:
+	$(GO) run ./cmd/api -migrate
