@@ -445,12 +445,16 @@ Expected: PASS (4 passed)
 
 ```python
 # backend/tests/test_security_primitives.py
+import base64
+
 import pytest
 
 from linguastack.security.passwords import hash_password, verify_password
 from linguastack.security.secrets import SecretBox
 
-KEY = "ZmFrZS1kZXYta2V5LW5vdC1mb3ItcHJvZHVjdGlvbi0xMjM0NTY="
+# Fernet требует РОВНО 32 url-safe base64-байта — короткая или длинная
+# строка падает с ValueError ещё в конструкторе.
+KEY = base64.urlsafe_b64encode(b"linguastack-test-key-32-bytes!!!").decode()
 
 
 def test_password_hash_is_argon2id_and_verifies():
