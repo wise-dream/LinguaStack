@@ -1,6 +1,6 @@
 # LinguaStack — Дополнение к ТЗ (разрешение открытых решений)
 
-**Версия:** 1.0 · **Дата:** 2026-10-16 · **Базовый документ:** [`PROJECT`](../../PROJECT) (ТЗ v1.1)
+**Версия:** 1.1 · **Дата:** 2026-10-16 (1.1 — бэкенд переведён на Go) · **Базовый документ:** [`PROJECT`](../../PROJECT) (ТЗ v1.1)
 
 ТЗ v1.1 определяет *что* должно работать, но оставляет открытыми инженерные решения,
 которые иначе принимались бы по ходу реализации и разошлись бы между модулями.
@@ -14,6 +14,8 @@
 | Внешние провайдеры | **оба** адаптера: generic OpenAI-compatible и Anthropic (§15.6) |
 | Объём первой итерации | Этапы 1–3 ТЗ (§16); UI, PDF/DOCX, Telegram — следующим планом |
 | Способ исполнения | Native (реализация в одной сессии, ревью всей ветки в конце) |
+| **Язык бэкенда** | **Go** — вместо Python + FastAPI из ТЗ §10 (решение владельца, 2026-10-16) |
+| Слой данных | GORM; схема — версионированными миграциями goose (см. §0.2) |
 
 ---
 
@@ -23,26 +25,62 @@
 
 | Компонент | Версия | Примечание |
 |---|---|---|
-| Python | 3.10.12 | **верхняя граница зависимостей**, см. §0.1 |
+| Go | язык `1.26.0`, тулчейн `go1.27.2` | см. §0.1 |
+| golangci-lint | v2.14.0, собран на go1.27.2 | см. §0.1 |
 | Node | 22.22.2 | понадобится на этапе 4 (Vue) |
 | Docker / Compose | 29.1.3 / v2.27.0 | `postgres:17-alpine` загружен |
 | Ollama | 0.18.2, доступен на `http://localhost:11434` | модели: `qwen3:8b`, `qwen2.5-coder:14b`, `deepseek-coder:6.7b` |
 
-### 0.1. Python 3.10 — ограничение, а не предпочтение
+### 0.1. Тулчейн Go
 
-В Ubuntu 22.04 (jammy) единственный кандидат `python3.11` — это `3.11.0~rc1`,
-release candidate. Менять системный интерпретатор ради свежих библиотек —
-несоразмерный риск, поэтому **целевая версия — 3.10**, а зависимости
-подобраны как последние релизы, поддерживающие 3.10:
+* `/usr/bin/go` на машине разработки — **gccgo 1.16**, он не разбирает
+  современный `go.mod`. Рабочий `go` лежит в `/usr/local/go/bin` (1.23.1) и при
+  `GOTOOLCHAIN=auto` сам скачивает тулчейн из `go.mod`.
+* `go mod tidy` поначалу поднял модуль до `go1.25.0` (из-за `golang.org/x/text`,
+  которому нужен 1.24). **Go 1.25 уже вне поддержки** — поддерживаются 1.27 и 1.26,
+  а `.0`-релиз ещё и без патчей. Зафиксировано: язык `go 1.26.0` (минимальный
+  поддерживаемый — соберётся у любого на поддерживаемом Go), тулчейн `go1.27.2`.
+* golangci-lint проверяет, что собран не более старым Go, чем целевой тулчейн.
+  Поэтому v2.14.0 ставится явно этим тулчейном:
+  `GOTOOLCHAIN=go1.27.2 go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.14.0`.
 
-* `sqlalchemy==2.0.54` (не 2.1.x — требует ≥3.11);
-* `pydantic-settings==2.15.0` (не 2.16.0 — требует ≥3.11).
+### 0.2. GORM и миграции
 
-Полный набор проверен на совместимость (`pip install --dry-run`) — конфликтов нет.
+ТЗ §10 называет миграции обязательными. `AutoMigrate` у GORM этого не даёт:
+он не удаляет и не переименовывает колонки, не умеет откатываться и не оставляет
+версионированной истории для ревью. Поэтому:
 
-Следствия для кода: **нельзя** использовать `typing.Self`, `except*`,
-`enum.StrEnum`, `datetime.UTC`. Вместо них — `typing_extensions.Self`,
-`str`-миксин для enum, `datetime.timezone.utc`.
+* модели и запросы — GORM (выбор владельца проекта);
+* схема — SQL-миграции **goose** в `backend/migrations/`, встроенные в бинарь
+  через `embed`;
+* **тестовая БД собирается теми же миграциями**, а не `AutoMigrate`. Так каждый
+  прогон тестов проверяет миграции, а расхождение модели со схемой всплывает
+  как упавший запрос в тесте, без отдельной сверки. Накат на пустую базу
+  занимает миллисекунды. Параллельные пакеты тестов не мешают друг другу —
+  goose берёт advisory-lock Postgres.
+
+Запросы, которые ORM не выражает (захват задачи с `FOR UPDATE SKIP LOCKED`, §7),
+пишутся через `db.Raw`/`db.Exec`.
+
+### 0.3. Зависимости
+
+| Назначение | Модуль |
+|---|---|
+| ORM + драйвер | `gorm.io/gorm` v1.31.2, `gorm.io/driver/postgres` v1.6.3 (pgx v5), `gorm.io/datatypes` v1.2.7 (JSONB) |
+| миграции | `github.com/pressly/goose/v3` v3.29.0 |
+| HTTP | `net/http` (`ServeMux` с шаблонами Go 1.22+) — без роутера |
+| конфигурация | `github.com/caarlos0/env/v11` v11.4.1 |
+| пароли | `github.com/alexedwards/argon2id` v1.0.0 (поверх `x/crypto/argon2`) |
+| секреты | `crypto/aes` + `crypto/cipher` (AES-256-GCM, stdlib) |
+| Anthropic | `github.com/anthropics/anthropic-sdk-go` v1.82.0 |
+| Markdown | `github.com/yuin/goldmark` v1.8.6 |
+| HTML глав EPUB | `golang.org/x/net/html` v0.61.0 |
+| EPUB, ZIP | `archive/zip` + `encoding/xml` (stdlib) |
+| нормализация Unicode | `golang.org/x/text/unicode/norm` |
+| UUID, тесты | `github.com/google/uuid` v1.6.0, `github.com/stretchr/testify` v1.12.1 |
+
+EPUB разбирается стандартной библиотекой: формат — это ZIP с OPF/NCX в XML.
+`go-shiori/go-epub` — писатель, а не читатель; он пригодится на этапе 5 для экспорта.
 
 ---
 
@@ -56,8 +94,8 @@ release candidate. Менять системный интерпретатор р
 Детерминирован, читаем в логах, устойчив к правке *содержимого* блока.
 
 **`source_hash` — отпечаток содержимого.**
-`blake2s(normalized_text, digest_size=16).hexdigest()`, где нормализация —
-`unicodedata.normalize("NFC", text).strip()` со сверткой пробелов.
+первые 16 байт `sha256(normalized_text)` в hex, где нормализация — NFC
+(`golang.org/x/text/unicode/norm`) + обрезка краёв + свёртка пробелов.
 
 Зачем оба: при повторном импорте обновлённого исходника `node_id` совпадает, и мы
 сравниваем `source_hash`. Изменился — перевод этого блока помечается `stale` и
@@ -175,8 +213,14 @@ HTML-теги, уже существующие маркеры-плейсхолд
 провайдеров — ошибка запроса. Поэтому интерфейс выражает **намерение**, а не
 параметры генерации:
 
-```python
-Determinism = Literal["strict", "balanced", "creative"]
+```go
+type Determinism string
+
+const (
+	Strict   Determinism = "strict"
+	Balanced Determinism = "balanced"
+	Creative Determinism = "creative"
+)
 ```
 
 Каждый адаптер переводит намерение в свои параметры и отбрасывает то, чего
@@ -191,17 +235,17 @@ Determinism = Literal["strict", "balanced", "creative"]
 Возможности модели описываются явно и доступны UI (§5.2: «список языков и моделей
 должен определяться возможностями провайдера»):
 
-```python
-@dataclass(frozen=True)
-class ModelCapabilities:
-    model_id: str
-    context_tokens: int | None            # None = неизвестно
-    max_output_tokens: int | None
-    supports_temperature: bool
-    supports_system_prompt: bool
-    supported_languages: frozenset[str] | None   # None = ограничений нет/неизвестны
-    input_cost_per_mtok: float | None     # None = провайдер не сообщает стоимость
-    output_cost_per_mtok: float | None
+```go
+type ModelCapabilities struct {
+	ModelID              string
+	ContextTokens        *int     // nil = неизвестно
+	MaxOutputTokens      *int
+	SupportsTemperature  bool
+	SupportsSystemPrompt bool
+	SupportedLanguages   []string // nil = ограничений нет или они неизвестны
+	InputCostPerMTok     *float64 // nil = провайдер не сообщает стоимость
+	OutputCostPerMTok    *float64
+}
 ```
 
 ### 6.1. Таксономия ошибок провайдера
@@ -211,15 +255,19 @@ class ModelCapabilities:
 
 | Исключение | Повторять? | Источники |
 |---|---|---|
-| `ProviderUnavailable` | да, с backoff | сеть, 5xx, Ollama не запущен |
-| `ProviderRateLimited(retry_after)` | да, после `retry_after` | HTTP 429 |
-| `ProviderAuthError` | **нет** | 401/403, неверный ключ |
-| `ModelNotAvailable` | **нет** | 404, модель не загружена в Ollama |
-| `ProviderRefused(category)` | **нет** | `stop_reason == "refusal"` у Anthropic |
-| `ProviderBadRequest` | **нет** | 400 — дефект кода, не среды |
-| `ProtocolError` | да, по §3 | ответ не соответствует конверту |
+| `ErrUnavailable` | да, с backoff | сеть, 5xx, Ollama не запущен |
+| `*RateLimitedError{RetryAfter}` | да, после `RetryAfter` | HTTP 429 |
+| `ErrAuth` | **нет** | 401/403, неверный ключ |
+| `ErrModelNotAvailable` | **нет** | 404, модель не загружена в Ollama |
+| `*RefusedError{Category}` | **нет** | `stop_reason == "refusal"` у Anthropic |
+| `ErrBadRequest` | **нет** | 400 — дефект кода, не среды |
+| `*ProtocolError` | да, по §3 | ответ не соответствует конверту |
 
-`ProviderRefused` — отдельный случай: Claude может отказать по политике
+Сигнальные ошибки сравниваются через `errors.Is`, типизированные — через
+`errors.As`; функция `providers.Retryable(err) bool` — единственное место,
+где решается вопрос о повторе.
+
+`RefusedError` — отдельный случай: Claude может отказать по политике
 (HTTP 200, `stop_reason="refusal"`, категория в `stop_details`). Ответ 200
 с отказом нельзя принять за успешный перевод, поэтому `stop_reason`
 проверяется **до** чтения `content`.
@@ -235,7 +283,7 @@ class ModelCapabilities:
 | Claude Haiku 5.5 | `claude-haiku-5-5` | 0.10 | 0.50 |
 
 Системный промпт (инструкция + глоссарий) одинаков для всех батчей книги,
-поэтому помечается `cache_control={"type": "ephemeral"}`: при переводе книги это
+поэтому помечается `cache_control: {type: "ephemeral"}`: при переводе книги это
 основная статья экономии. Факт попадания в кэш проверяется по
 `usage.cache_read_input_tokens` — если он стабильно 0, в префиксе есть
 невидимый инвалидатор.
@@ -284,7 +332,7 @@ RETURNING *;
 
 ## 8. Авторизация и секреты
 
-**Пароли:** Argon2id (`argon2-cffi`), параметры по умолчанию библиотеки.
+**Пароли:** Argon2id (`alexedwards/argon2id`, параметры `argon2id.DefaultParams`).
 
 **Сессии:** непрозрачный токен — 32 случайных байта, в БД хранится `sha256`,
 клиенту уходит httpOnly + SameSite=Lax cookie. Выбор против JWT осознанный:
@@ -295,10 +343,14 @@ RETURNING *;
 `(email, ip)`; 10 неудач за 15 минут → блокировка попыток на 15 минут.
 Ответ при неверных данных одинаков независимо от существования аккаунта.
 
-**Пользовательские API-ключи** (§6.3): `cryptography.fernet`, ключ шифрования —
-из `LINGUASTACK_SECRET_KEY`. API **никогда** не возвращает ключ: только
-`key_fingerprint` (первые 8 символов sha256) и `key_last4`. Логи фильтруются
-через `logging.Filter`, вырезающий значения, похожие на ключи. На это есть
+**Пользовательские API-ключи** (§6.3): AES-256-GCM из стандартной библиотеки,
+ключ — 32 байта из `LINGUASTACK_SECRET_KEY` (base64). Каждое шифрование берёт
+случайный 12-байтовый nonce; хранится `base64(nonce ‖ ciphertext ‖ tag)`.
+GCM — аутентифицированное шифрование: подмена шифртекста обнаруживается при
+расшифровке. (Fernet из исходного плана в Go отсутствует; AES-GCM — более
+современный примитив той же роли.) API **никогда** не возвращает ключ: только
+`key_fingerprint` (первые 8 символов sha256) и `key_last4`. Логи идут через
+`slog`-обработчик, вырезающий значения, похожие на ключи. На это есть
 отдельный тест: ключ не встречается ни в одном теле ответа, ни в одной
 записи лога.
 
@@ -307,9 +359,10 @@ RETURNING *;
 §2.2 требует проверки прав на каждом запросе. Чтобы это не зависело от
 дисциплины в каждом хендлере, доступ к ресурсу идёт через одну зависимость:
 
-```python
-async def owned(model, resource_id, user, session):  # -> ORM row
-    """SELECT ... WHERE id = :id AND owner_id = :user.id; иначе 404."""
+```go
+// Owned грузит ресурс по id только если он принадлежит пользователю,
+// иначе возвращает ErrNotFound, который HTTP-слой превращает в 404.
+func Owned[T any](ctx context.Context, db *gorm.DB, id, ownerID uuid.UUID) (*T, error)
 ```
 
 Два важных свойства:
@@ -360,7 +413,7 @@ ISO-639-1. Не удалось — пользователь выбирает я�
 ## 13. Прогресс без перезагрузки страницы
 
 §8.4 требует обновления без ручной перезагрузки. Выбран SSE
-(`sse-starlette`), а не WebSocket: поток односторонний, проходит через
+(`net/http` + `http.Flusher`, без зависимостей), а не WebSocket: поток односторонний, проходит через
 обычные прокси, переподключается браузером сам.
 
 `GET /api/translations/{id}/events` раз в секунду отдаёт
@@ -377,8 +430,8 @@ ISO-639-1. Не удалось — пользователь выбирает я�
 `refusal` · `empty`.
 
 Все тесты очереди, валидации, повторов и деградации по §3 используют его и
-проходят без сети. Тесты против живой Ollama помечаются
-`@pytest.mark.live` и выполняются только при `LINGUASTACK_LIVE_OLLAMA=1`.
+проходят без сети. Тесты против живой Ollama называются `TestLive…` и пропускаются
+(`t.Skip`), если не задано `LINGUASTACK_LIVE_OLLAMA=1`.
 
 ---
 

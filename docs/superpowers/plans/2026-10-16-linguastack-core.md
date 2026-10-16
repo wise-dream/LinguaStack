@@ -1,2930 +1,626 @@
-# LinguaStack Core (Этапы 1–3) Implementation Plan
+# LinguaStack Core (Этапы 1–3) Implementation Plan — Go
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> **Ревизия 2 (2026-10-16).** Первая ревизия плана была на Python/FastAPI по ТЗ §10;
+> владелец проекта выбрал Go. Декомпозиция на 27 задач, тестовые сценарии и все
+> проектные решения сохранены, переписан слой реализации. Python-версия — в истории git.
+> Тесты в задачах заданы как «имя теста → что именно он утверждает»; это
+> однозначная спецификация, а код тестов появляется в репозитории вместе с задачей.
+
 **Goal:** Довести LinguaStack до состояния, в котором загруженная книга (Markdown, ZIP, EPUB, TXT) реально переводится в фоне через Ollama или внешний API, с сохранением прогресса, проверкой структуры и изоляцией пользователей.
 
-**Architecture:** FastAPI-бэкенд поверх PostgreSQL 17 (asyncpg + SQLAlchemy 2.0). Импортёры приводят любой формат к Canonical Document Model; сегментатор нарезает CDM на блоки 1:1 и группирует в батчи; сервис перевода маскирует защищённые фрагменты, говорит с моделью по нумерованному конверту и валидирует результат; очередь на арендах (lease) в Postgres с `FOR UPDATE SKIP LOCKED` даёт фоновое выполнение, честность между пользователями и восстановление после перезапуска. Провайдеры (Ollama, OpenAI-compatible, Anthropic) скрыты за `LLMProvider`, который выражает намерение, а не параметры генерации.
+**Architecture:** Go-сервис на `net/http` поверх PostgreSQL 17 (GORM + pgx, схема — миграции goose). Импортёры приводят любой формат к Canonical Document Model; сегментатор нарезает CDM на блоки 1:1 и группирует в батчи; сервис перевода маскирует защищённые фрагменты, говорит с моделью по нумерованному конверту и валидирует результат; очередь на арендах (lease) в Postgres с `FOR UPDATE SKIP LOCKED` даёт фоновое выполнение, честность между пользователями и восстановление после перезапуска. Провайдеры (Ollama, OpenAI-compatible, Anthropic) скрыты за интерфейсом `providers.Provider`, который выражает намерение, а не параметры генерации.
 
-**Tech Stack:** Python 3.10, FastAPI 0.143, SQLAlchemy 2.0.54 (async), Alembic, PostgreSQL 17, pydantic 2.14, argon2-cffi, cryptography (Fernet), httpx, anthropic 1.x, ebooklib, markdown-it-py, pytest + pytest-asyncio, ruff.
+**Tech Stack:** Go 1.26 (тулчейн go1.27.2), GORM v1.31 + pgx v5, goose v3, `net/http`, argon2id, AES-256-GCM (stdlib), anthropic-sdk-go v1.82, goldmark, `x/net/html`, testify, golangci-lint v2.14.
 
-**Spec:** [`PROJECT`](../../../PROJECT) (ТЗ v1.1) + [`docs/spec/SPEC-ADDENDUM.md`](../../spec/SPEC-ADDENDUM.md) — дополнение фиксирует все решения, которые ТЗ оставил открытыми. **Исполнитель читает оба документа.** Ссылки «ТЗ §N» и «ADD §N» указывают на них соответственно.
+**Spec:** [`PROJECT`](../../../PROJECT) (ТЗ v1.1) + [`docs/spec/SPEC-ADDENDUM.md`](../../spec/SPEC-ADDENDUM.md) v1.1. **Исполнитель читает оба.** «ТЗ §N» и «ADD §N» ссылаются на них.
 
 ## Global Constraints
 
-- **Python 3.10.12** — целевая версия. Запрещены `typing.Self`, `except*`, `enum.StrEnum`, `datetime.UTC`. Использовать `typing_extensions.Self`, `class X(str, Enum)`, `datetime.timezone.utc`. Причина — ADD §0.1.
-- **Точные пины зависимостей** (последние, поддерживающие 3.10): `fastapi==0.143.2`, `uvicorn[standard]==0.54.0`, `sqlalchemy[asyncio]==2.0.54`, `alembic==1.20.0`, `asyncpg==0.32.0`, `greenlet==3.5.6`, `pydantic==2.14.1`, `pydantic-settings==2.15.0`, `argon2-cffi==25.1.0`, `cryptography==50.0.2`, `httpx==0.28.1`, `python-multipart==0.0.32`, `email-validator==2.3.0`, `sse-starlette==3.5.0`, `anthropic==1.15.0`, `ebooklib==0.20`, `markdown-it-py==4.2.0`, `beautifulsoup4==4.15.0`, `lxml==6.1.3`, `pytest==9.1.1`, `pytest-asyncio==1.4.0`, `ruff==0.17.1`. **Не поднимать `sqlalchemy` до 2.1.x и `pydantic-settings` до 2.16.0** — требуют ≥3.11.
-- **Anthropic model IDs — без суффиксов даты:** `claude-opus-5-5`, `claude-sonnet-5-5`, `claude-haiku-5-5`. Цены — ADD §6.2.
-- **Anthropic: не передавать `temperature`, `top_p`, `top_k`** — Opus/Sonnet 5.5 отвечают 400. Глубина — через `output_config={"effort": ...}`. ADD §6.
-- **Anthropic: проверять `response.stop_reason == "refusal"` до чтения `content`.** ADD §6.1.
-- **Оригинал неизменен** (ТЗ §4.1): загруженный файл после записи только читается. Нормализованный CDM и переводы — отдельные записи.
-- **Изоляция:** любой доступ к ресурсу — через зависимость `owned()`; чужой ресурс → **404, не 403**; роль `admin` обхода не даёт. ADD §9.
-- **Секреты:** API-ключи пользователей никогда не возвращаются клиентом и не попадают в логи. ADD §8.
-- **Коммит после каждой задачи**, сообщение в Conventional Commits. Коммит-сообщения заканчиваются строкой `Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>`.
-- **TDD:** сначала падающий тест, затем минимальная реализация. Тесты не требуют сети: сеть только в тестах с `@pytest.mark.live`.
-- Все timestamp-поля — `TIMESTAMP WITH TIME ZONE`, значения — timezone-aware UTC.
+- **Go:** язык `go 1.26.0`, `toolchain go1.27.2` в `go.mod`. Не понижать до 1.25 — вне поддержки (ADD §0.1). `/usr/bin/go` на машине — gccgo 1.16, использовать `export PATH=/root/go/bin:/usr/local/go/bin:$PATH`.
+- **Зависимости — только из ADD §0.3.** Новая зависимость — осознанное решение с записью в ADD, а не мимоходом.
+- **Схема БД — только миграциями goose** в `backend/migrations/`; `AutoMigrate` не используется нигде, включая тесты (ADD §0.2).
+- **Anthropic model IDs без суффиксов даты:** `claude-opus-5-5` (по умолчанию), `claude-sonnet-5-5`, `claude-haiku-5-5`. Цены — ADD §6.2.
+- **Anthropic: никогда не передавать `temperature`, `top_p`, `top_k`** — Opus/Sonnet 5.5 отвечают 400. Глубина — `output_config.effort` (ADD §6).
+- **Anthropic: проверять `stop_reason == "refusal"` до чтения `content`** (ADD §6.1).
+- **Перед написанием кода против Anthropic SDK** — прочитать `go/claude-api/README.md` из навыка `claude-api`; сигнатуры SDK не угадывать.
+- **Оригинал неизменен** (ТЗ §4.1): загруженный файл после записи только читается.
+- **Изоляция:** доступ к ресурсу — только через `store.Owned[T]`; чужой ресурс → **404, не 403**; роль `admin` обхода не даёт (ADD §9).
+- **Секреты:** API-ключи пользователей не попадают ни в ответы, ни в логи (ADD §8).
+- **Ошибки:** сигнальные — `errors.Is`, типизированные — `errors.As`; оборачивать через `%w`. Сравнение ошибок через `==` запрещено (линтер `errorlint`).
+- **Контекст:** каждый сетевой и DB-вызов принимает `context.Context` первым аргументом (линтер `noctx`).
+- **TDD:** сначала падающий тест, затем минимальная реализация. Тесты без сети; живые — `TestLive…` + `LINGUASTACK_LIVE_OLLAMA=1`.
+- **Время:** все колонки `timestamptz`, все значения в UTC.
+- **Коммит после каждой задачи**, Conventional Commits, сообщение заканчивается строкой `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
+- **Готовность задачи:** `make test` и `make lint` зелёные.
 
 ## Review Focus
 
-Пять классов входных данных, которые ТЗ подразумевает, но ни одна задача не проверяет естественным образом. Молчание спецификации про вход — не разрешение ломаться на нём. Для каждого указана задача, в которую добавлен тест.
+Пять классов входа, которые ТЗ подразумевает, но ни одна задача не проверяет естественным образом. Молчание спецификации про вход — не разрешение ломаться на нём.
 
-1. **Глава без переводимых блоков** (целиком код или только изображения) — прогресс `0/0` не должен давать делением на ноль и не должен «висеть» навсегда; проект обязан дойти до `completed`. → тест в задаче 19 (сегментатор) и 25 (worker).
-2. **Исходник, в котором уже встречаются маркеры `⟦1⟧`** — маскирование обязано их экранировать, иначе восстановление подставит чужой фрагмент и тихо испортит текст. → тест в задаче 7.
-3. **Один блок больше контекста модели** (глава одним абзацем на мегабайт) — требуется явная ошибка с понятным сообщением, а не молчаливое обрезание текста. → тест в задаче 19.
-4. **Повторный импорт того же файла и два проекта перевода на одну книгу** — ТЗ §5.1 прямо разрешает несколько проектов; нельзя допустить коллизии в хранилище и перезапись чужого прогресса. → тест в задаче 13 и 22.
-5. **Отмена/пауза проекта в момент, когда worker держит батч** — уже полученный (оплаченный) ответ модели не должен теряться, и записи после отмены не должны «воскрешать» проект. → тест в задаче 25.
+1. **Глава без переводимых блоков** (целиком код или изображения) — прогресс `0/0` не должен давать деление на ноль или вечное «в работе»; проект обязан дойти до `completed`. → тесты в задачах 19 и 25.
+2. **Исходник, в котором уже есть маркеры `⟦1⟧`** — маскирование обязано их экранировать, иначе восстановление подставит чужой фрагмент. → тест в задаче 7.
+3. **Один блок больше лимита батча** (глава одним абзацем на мегабайт) — явная ошибка с именем блока, не молчаливое обрезание. → тест в задаче 19.
+4. **Повторный импорт того же файла и два проекта перевода на одну книгу** — ТЗ §5.1 разрешает несколько проектов; нельзя допустить коллизий в хранилище и перезаписи чужого прогресса. → тесты в задачах 13 и 22.
+5. **Пауза или отмена, пока worker держит батч** — оплаченный ответ модели не теряется, а запись после отмены не «воскрешает» проект. → тесты в задаче 25.
 
-Дополнительно по данным: TXT с BOM, CRLF и в cp1251; пустые абзацы; текст RTL; EPUB без `toc.ncx`. → тесты в задачах 9, 12.
+Дополнительно по данным: TXT с BOM, CRLF и в cp1251; пустые абзацы; EPUB без `toc.ncx`. → задачи 9, 12.
 
 ---
 
 ## File Structure
 
-Ответственность по файлам. Файлы, которые меняются вместе, лежат вместе; разделение — по ответственности, не по техническому слою.
-
-| Файл | Ответственность |
+| Путь | Ответственность |
 |---|---|
-| `docker-compose.yml` | PostgreSQL 17 для разработки и тестов |
-| `backend/pyproject.toml` | пины, настройки ruff и pytest |
-| `backend/alembic/` | миграции (обязательны по ТЗ §10) |
-| `src/linguastack/config.py` | `Settings` — все лимиты из ADD §10 |
-| `src/linguastack/main.py` | фабрика приложения, подключение роутеров |
-| `src/linguastack/db/base.py` | `Base`, движок, фабрика сессий |
-| `src/linguastack/db/models/*.py` | ORM-модели по сущностям ТЗ §11 |
-| `src/linguastack/cdm/model.py` | Canonical Document Model (pydantic) |
-| `src/linguastack/cdm/ids.py` | `node_id` и `source_hash` (ADD §1) |
-| `src/linguastack/cdm/masking.py` | маскирование защищённых фрагментов (ADD §4) |
-| `src/linguastack/importers/base.py` | протокол импортёра, `ImportReport` |
-| `src/linguastack/importers/{txt,markdown,zip_repo,epub}.py` | по одному адаптеру на формат (ТЗ §4.2) |
-| `src/linguastack/providers/base.py` | `LLMProvider`, `ModelCapabilities`, таксономия ошибок |
-| `src/linguastack/providers/{ollama,openai_compat,anthropic_provider,fake}.py` | адаптеры |
-| `src/linguastack/translation/segmenter.py` | CDM → сегменты → батчи (ADD §2) |
-| `src/linguastack/translation/prompt.py` | конверт `<<<SEG n>>>` и его парсер (ADD §3) |
-| `src/linguastack/translation/validation.py` | проверки и severity (ADD §5) |
-| `src/linguastack/translation/service.py` | перевод батча: маска → модель → валидация → запись |
-| `src/linguastack/queue/repository.py` | захват/аренда/heartbeat задач (ADD §7) |
-| `src/linguastack/queue/worker.py` | цикл worker-а, восстановление, идемпотентность |
-| `src/linguastack/security/{passwords,sessions,secrets,ratelimit}.py` | по одному механизму на файл (ADD §8) |
-| `src/linguastack/storage/files.py` | безопасные пути, UUID-имена, лимиты (ADD §11) |
-| `src/linguastack/api/deps.py` | `current_user`, `owned()` — единственная точка проверки прав |
-| `src/linguastack/api/*.py` | роутеры по эндпоинтам ТЗ §12 |
+| `docker-compose.yml` | PostgreSQL 17 на `127.0.0.1:5434` |
+| `backend/go.mod`, `Makefile`, `.golangci.yml` | тулчейн, команды, линтер |
+| `backend/cmd/api/main.go` | HTTP-сервер, корректное завершение |
+| `backend/cmd/worker/main.go` | worker очереди |
+| `backend/migrations/*.sql`, `embed.go` | схема БД (goose), встроена в бинарь |
+| `internal/config` | `Settings`, лимиты ADD §10, `RequireSecretKey` |
+| `internal/db` | открытие GORM, накат миграций |
+| `internal/db/models` | модели сущностей ТЗ §11 |
+| `internal/store` | `Owned[T]` — единственная проверка владения |
+| `internal/testdb` | тестовая БД: накат миграций, транзакция на тест |
+| `internal/security` | пароли, `SecretBox`, сессии, лимит входа — файл на механизм |
+| `internal/storage` | безопасные пути, UUID-имена, лимиты |
+| `internal/cdm` | Canonical Document Model, `NodeID`/`ContentHash`, маскирование |
+| `internal/importers` | интерфейс `Importer`, реестр, по файлу на формат |
+| `internal/providers` | интерфейс `Provider`, ошибки, `Fake`, Ollama, OpenAI-compatible, Anthropic |
+| `internal/translation` | сегментатор, конверт, валидация, сервис перевода батча |
+| `internal/queue` | захват/аренда задач, worker |
+| `internal/httpapi` | маршруты, middleware аутентификации, обработчики по ресурсам |
 
 ---
 
 ## Этап 1 — Фундамент
 
-### Task 1: Каркас проекта, Postgres, настройки, health-эндпоинт
+### Task 1: Каркас, конфигурация, health-эндпоинт — ✅ сделано (`f7ee23b`)
 
-**Files:**
-- Create: `.gitignore`, `docker-compose.yml`, `.env.example`, `README.md`
-- Create: `backend/pyproject.toml`, `backend/src/linguastack/__init__.py`
-- Create: `backend/src/linguastack/config.py`, `backend/src/linguastack/main.py`
-- Create: `backend/tests/conftest.py`, `backend/tests/test_health.py`
-
-**Interfaces:**
-- Produces: `get_settings() -> Settings` (кэширована через `lru_cache`); `create_app() -> FastAPI`; `Settings` с полями `database_url`, `test_database_url`, `secret_key`, `storage_root`, `max_upload_bytes`, `max_zip_entries`, `max_zip_total_bytes`, `max_zip_ratio`, `max_tasks_per_user`, `max_projects_per_user`, `max_segment_attempts`, `max_batch_segments`, `max_batch_chars`, `task_lease_seconds`, `ollama_base_url`.
-
-- [ ] **Step 1: Написать падающий тест**
-
-```python
-# backend/tests/test_health.py
-from fastapi.testclient import TestClient
-
-from linguastack.main import create_app
-
-
-def test_health_reports_ok():
-    client = TestClient(create_app())
-    response = client.get("/api/health")
-    assert response.status_code == 200
-    assert response.json() == {"status": "ok"}
-
-
-def test_settings_expose_limits_from_spec():
-    from linguastack.config import get_settings
-
-    settings = get_settings()
-    # Значения по умолчанию из ADD §10 — лимиты обязаны быть настраиваемыми.
-    assert settings.max_upload_bytes == 50 * 1024 * 1024
-    assert settings.max_zip_entries == 2000
-    assert settings.max_tasks_per_user == 3
-    assert settings.max_segment_attempts == 3
-```
-
-- [ ] **Step 2: Запустить тест и убедиться, что он падает**
-
-Run: `cd backend && python -m pytest tests/test_health.py -v`
-Expected: FAIL — `ModuleNotFoundError: No module named 'linguastack'`
-
-- [ ] **Step 3: Создать `docker-compose.yml` и `.env.example`**
-
-```yaml
-# docker-compose.yml
-services:
-  db:
-    image: postgres:17-alpine
-    environment:
-      POSTGRES_USER: linguastack
-      POSTGRES_PASSWORD: linguastack
-      POSTGRES_DB: linguastack
-    ports:
-      - "5433:5432"
-    volumes:
-      - pgdata:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U linguastack"]
-      interval: 3s
-      timeout: 3s
-      retries: 20
-    restart: unless-stopped
-
-volumes:
-  pgdata:
-```
-
-Порт 5433 снаружи — чтобы не конфликтовать с возможным локальным Postgres.
-`restart: unless-stopped` закрывает требование ТЗ §13 «автоматический запуск после перезагрузки».
-
-```bash
-# .env.example
-LINGUASTACK_DATABASE_URL=postgresql+asyncpg://linguastack:linguastack@localhost:5433/linguastack
-LINGUASTACK_TEST_DATABASE_URL=postgresql+asyncpg://linguastack:linguastack@localhost:5433/linguastack_test
-# Сгенерировать: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
-LINGUASTACK_SECRET_KEY=
-LINGUASTACK_STORAGE_ROOT=./storage
-LINGUASTACK_OLLAMA_BASE_URL=http://localhost:11434
-```
-
-- [ ] **Step 4: Создать `backend/pyproject.toml`**
-
-```toml
-[project]
-name = "linguastack"
-version = "0.1.0"
-requires-python = ">=3.10,<3.11"
-dependencies = [
-    "fastapi==0.143.2",
-    "uvicorn[standard]==0.54.0",
-    "sqlalchemy[asyncio]==2.0.54",
-    "alembic==1.20.0",
-    "asyncpg==0.32.0",
-    "greenlet==3.5.6",
-    "pydantic==2.14.1",
-    "pydantic-settings==2.15.0",
-    "argon2-cffi==25.1.0",
-    "cryptography==50.0.2",
-    "httpx==0.28.1",
-    "python-multipart==0.0.32",
-    "email-validator==2.3.0",
-    "sse-starlette==3.5.0",
-    "anthropic==1.15.0",
-    "ebooklib==0.20",
-    "markdown-it-py==4.2.0",
-    "beautifulsoup4==4.15.0",
-    "lxml==6.1.3",
-]
-
-[project.optional-dependencies]
-dev = ["pytest==9.1.1", "pytest-asyncio==1.4.0", "ruff==0.17.1"]
-
-[build-system]
-requires = ["setuptools>=68"]
-build-backend = "setuptools.build_meta"
-
-[tool.setuptools.packages.find]
-where = ["src"]
-
-[tool.pytest.ini_options]
-testpaths = ["tests"]
-asyncio_mode = "auto"
-markers = [
-    "live: обращается к реальному провайдеру; требует LINGUASTACK_LIVE_OLLAMA=1",
-]
-
-[tool.ruff]
-target-version = "py310"
-line-length = 100
-
-[tool.ruff.lint]
-select = ["E", "F", "I", "UP", "B", "ASYNC", "S"]
-ignore = ["S101"]  # assert разрешён в тестах
-
-[tool.ruff.lint.per-file-ignores]
-"tests/*" = ["S105", "S106"]  # пароли-константы в тестах — это норма
-```
-
-- [ ] **Step 5: Написать `config.py`**
-
-```python
-# backend/src/linguastack/config.py
-"""Настройки приложения. Все лимиты из ADD §10 задаются здесь."""
-from functools import lru_cache
-from pathlib import Path
-
-from pydantic_settings import BaseSettings, SettingsConfigDict
-
-
-class Settings(BaseSettings):
-    model_config = SettingsConfigDict(
-        env_prefix="LINGUASTACK_",
-        env_file=".env",
-        extra="ignore",
-    )
-
-    database_url: str = (
-        "postgresql+asyncpg://linguastack:linguastack@localhost:5433/linguastack"
-    )
-    test_database_url: str = (
-        "postgresql+asyncpg://linguastack:linguastack@localhost:5433/linguastack_test"
-    )
-    # Fernet-ключ; в разработке допустим дефолт, в продакшене обязателен в окружении.
-    secret_key: str = "ZmFrZS1kZXYta2V5LW5vdC1mb3ItcHJvZHVjdGlvbi0xMjM0NTY="
-    storage_root: Path = Path("./storage")
-    ollama_base_url: str = "http://localhost:11434"
-
-    # --- лимиты, ADD §10 ---
-    max_upload_bytes: int = 50 * 1024 * 1024
-    max_zip_entries: int = 2000
-    max_zip_total_bytes: int = 200 * 1024 * 1024
-    max_zip_ratio: int = 100
-    max_tasks_per_user: int = 3
-    max_projects_per_user: int = 20
-    max_segment_attempts: int = 3
-    login_max_attempts: int = 10
-    login_window_seconds: int = 15 * 60
-
-    # --- батчинг, ADD §2 ---
-    max_batch_segments: int = 20
-    max_batch_chars: int = 6000
-
-    # --- очередь, ADD §7 ---
-    task_lease_seconds: int = 120
-
-
-@lru_cache(maxsize=1)
-def get_settings() -> Settings:
-    return Settings()
-```
-
-- [ ] **Step 6: Написать `main.py`**
-
-```python
-# backend/src/linguastack/main.py
-from fastapi import FastAPI
-
-
-def create_app() -> FastAPI:
-    app = FastAPI(title="LinguaStack", version="0.1.0")
-
-    @app.get("/api/health")
-    async def health() -> dict[str, str]:
-        return {"status": "ok"}
-
-    return app
-
-
-app = create_app()
-```
-
-- [ ] **Step 7: Поднять окружение и установить зависимости**
-
-```bash
-cd /root/Git/LinguaStack
-docker compose up -d db
-cd backend && python3 -m venv .venv && .venv/bin/pip install -e ".[dev]"
-```
-
-- [ ] **Step 8: Запустить тесты — должны пройти**
-
-Run: `cd backend && .venv/bin/python -m pytest tests/test_health.py -v`
-Expected: PASS (2 passed)
-
-- [ ] **Step 9: Коммит**
-
-```bash
-git add -A
-git commit -m "$(cat <<'MSG'
-feat: каркас проекта, настройки и health-эндпоинт
-
-Postgres 17 в compose, пины под Python 3.10, лимиты из дополнения к ТЗ.
-
-Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
-MSG
-)"
-```
-
-### Task 2: Слой БД, Alembic и тестовая база
-
-**Files:**
-- Create: `backend/src/linguastack/db/__init__.py`, `backend/src/linguastack/db/base.py`
-- Create: `backend/src/linguastack/db/models/__init__.py`, `backend/src/linguastack/db/models/user.py`
-- Create: `backend/alembic.ini`, `backend/alembic/env.py`, `backend/alembic/script.py.mako`
-- Modify: `backend/tests/conftest.py`
-- Create: `backend/tests/test_db.py`
-
-**Interfaces:**
-- Consumes: `get_settings()` (задача 1).
-- Produces: `Base` (`DeclarativeBase` с `type_annotation_map` для `dict` → `JSONB`); `make_engine(url) -> AsyncEngine`; `session_factory(engine) -> async_sessionmaker[AsyncSession]`; `get_session()` — зависимость FastAPI; модель `User(id: UUID, email: str, password_hash: str, role: str, is_active: bool, created_at: datetime)`; фикстуры pytest `engine`, `session`, `client`.
-
-- [ ] **Step 1: Написать падающий тест**
-
-```python
-# backend/tests/test_db.py
-import pytest
-from sqlalchemy import select
-
-from linguastack.db.models.user import User
-
-
-async def test_user_roundtrip(session):
-    user = User(email="a@example.com", password_hash="x", role="user")
-    session.add(user)
-    await session.flush()
-    assert user.id is not None
-    assert user.created_at.tzinfo is not None, "timestamp обязан быть timezone-aware"
-
-    found = (await session.execute(select(User).where(User.email == "a@example.com"))).scalar_one()
-    assert found.id == user.id
-    assert found.role == "user"
-
-
-async def test_email_is_unique(session):
-    from sqlalchemy.exc import IntegrityError
-
-    session.add(User(email="dup@example.com", password_hash="x", role="user"))
-    await session.flush()
-    session.add(User(email="dup@example.com", password_hash="y", role="user"))
-    with pytest.raises(IntegrityError):
-        await session.flush()
-```
-
-- [ ] **Step 2: Запустить и убедиться, что падает**
-
-Run: `cd backend && .venv/bin/python -m pytest tests/test_db.py -v`
-Expected: FAIL — `ModuleNotFoundError: linguastack.db`
-
-- [ ] **Step 3: Написать `db/base.py`**
-
-```python
-# backend/src/linguastack/db/base.py
-from collections.abc import AsyncIterator
-from datetime import datetime
-from typing import Any
-
-from sqlalchemy.dialects.postgresql import JSONB
-from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
-from sqlalchemy.orm import DeclarativeBase
-
-from linguastack.config import get_settings
-
-
-class Base(DeclarativeBase):
-    # dict-поля (CDM-блоки, настройки) ложатся в JSONB — ADD §0 решение по Postgres.
-    type_annotation_map = {dict[str, Any]: JSONB, datetime: __import__("sqlalchemy").DateTime(timezone=True)}
-
-
-def make_engine(url: str) -> AsyncEngine:
-    return create_async_engine(url, pool_pre_ping=True)
-
-
-def session_factory(engine: AsyncEngine) -> async_sessionmaker[AsyncSession]:
-    return async_sessionmaker(engine, expire_on_commit=False)
-
-
-_engine: AsyncEngine | None = None
-_factory: async_sessionmaker[AsyncSession] | None = None
-
-
-async def get_session() -> AsyncIterator[AsyncSession]:
-    global _engine, _factory
-    if _factory is None:
-        _engine = make_engine(get_settings().database_url)
-        _factory = session_factory(_engine)
-    async with _factory() as session:
-        yield session
-```
-
-Примечание для исполнителя: `__import__` в `type_annotation_map` выше — некрасиво; при реализации вынести `from sqlalchemy import DateTime` наверх и использовать `DateTime(timezone=True)`.
-
-- [ ] **Step 4: Написать модель `User`**
-
-`id` — `UUID(as_uuid=True)` с `default=uuid.uuid4`; `email` — `String(320)`, `unique=True`, `index=True`; `role` — `String(16)`, `default="user"`; `created_at` — `DateTime(timezone=True)`, `server_default=func.now()`.
-
-- [ ] **Step 5: Настроить Alembic и создать первую миграцию**
-
-`alembic/env.py` читает `get_settings().database_url`, импортирует `Base.metadata`, работает в async-режиме (`connectable.run_sync`). Затем:
-
-```bash
-cd backend && .venv/bin/alembic revision --autogenerate -m "users"
-.venv/bin/alembic upgrade head
-```
-
-- [ ] **Step 6: Написать `conftest.py` с изолированной тестовой базой**
-
-Фикстура `engine` (scope=session) создаёт базу `linguastack_test`, если её нет (через подключение к `postgres`), и выполняет `Base.metadata.create_all`. Фикстура `session` даёт `AsyncSession` во **вложенной транзакции с откатом после теста** — тесты не видят данных друг друга. Фикстура `client` отдаёт `AsyncClient` с переопределённой зависимостью `get_session`.
-
-- [ ] **Step 7: Запустить тесты — должны пройти**
-
-Run: `cd backend && .venv/bin/python -m pytest tests/ -v`
-Expected: PASS (4 passed)
-
-- [ ] **Step 8: Коммит** — `feat: слой БД, модель User, Alembic и тестовая база`
+`internal/config` (`Settings`, `Load`, `RequireSecretKey`, `GenerateSecretKey`), `internal/httpapi` (`Deps`, `NewServer`, `GET /api/health`), `cmd/api` с завершением по SIGTERM, `Makefile`, `.golangci.yml`. Проверено: 8 тестов, линтер, реальный бинарь отвечает на `/api/health` и корректно завершается.
 
 ---
 
-### Task 3: Хеширование паролей и шифрование секретов
+### Task 2: Слой БД, миграции goose, тестовая база
 
 **Files:**
-- Create: `backend/src/linguastack/security/__init__.py`, `.../security/passwords.py`, `.../security/secrets.py`
-- Create: `backend/tests/test_security_primitives.py`
+- Create: `backend/internal/db/db.go`, `backend/internal/db/migrate.go`
+- Create: `backend/migrations/embed.go`, `backend/migrations/00001_users.sql`
+- Create: `backend/internal/db/models/base.go`, `backend/internal/db/models/user.go`
+- Create: `backend/internal/testdb/testdb.go`
+- Test: `backend/internal/db/db_test.go`
 
 **Interfaces:**
-- Produces: `hash_password(plain: str) -> str`; `verify_password(plain: str, hashed: str) -> bool`; `needs_rehash(hashed: str) -> bool`; `SecretBox(key: str)` с `encrypt(plain: str) -> str`, `decrypt(token: str) -> str`, `fingerprint(plain: str) -> str` (первые 8 символов sha256), `last4(plain: str) -> str`.
+- Produces:
+  - `db.Open(ctx context.Context, url string) (*gorm.DB, error)` — GORM поверх pgx; логгер GORM пишет в `slog` **без значений параметров** (в них могут быть пароли и ключи).
+  - `db.Migrate(ctx context.Context, gdb *gorm.DB) error` — `goose.Up` из `migrations.FS` с `lock.NewPostgresSessionLocker()`.
+  - `migrations.FS embed.FS`.
+  - `models.Base{ID uuid.UUID; CreatedAt time.Time}` с хуком `BeforeCreate`, ставящим `uuid.New()` при нулевом ID.
+  - `models.User{Base; Email string; PasswordHash string; Role string; IsActive bool}`; константы `models.RoleUser`, `models.RoleAdmin`.
+  - `testdb.New(t *testing.T) *gorm.DB` — один раз на процесс: создать `linguastack_test` (гонку `CREATE DATABASE` между пакетами переживать по коду `42P04`), накатить миграции; на каждый тест — `Begin()` и `t.Cleanup(Rollback)`. Если БД недоступна — `t.Skip` с инструкцией `docker compose up -d db`.
 
-- [ ] **Step 1: Написать падающий тест**
-
-```python
-# backend/tests/test_security_primitives.py
-import base64
-
-import pytest
-
-from linguastack.security.passwords import hash_password, verify_password
-from linguastack.security.secrets import SecretBox
-
-# Fernet требует РОВНО 32 url-safe base64-байта — короткая или длинная
-# строка падает с ValueError ещё в конструкторе.
-KEY = base64.urlsafe_b64encode(b"linguastack-test-key-32-bytes!!!").decode()
-
-
-def test_password_hash_is_argon2id_and_verifies():
-    hashed = hash_password("correct horse battery staple")
-    assert hashed.startswith("$argon2id$"), "ТЗ §13 требует безопасного хеширования"
-    assert verify_password("correct horse battery staple", hashed)
-    assert not verify_password("wrong", hashed)
-
-
-def test_password_hash_is_salted():
-    assert hash_password("same") != hash_password("same")
-
-
-def test_secret_roundtrip_and_non_reversible_metadata():
-    box = SecretBox(KEY)
-    api_key = "sk-ant-secret-value-12345"
-    token = box.encrypt(api_key)
-    assert api_key not in token, "шифртекст не должен содержать открытый ключ"
-    assert box.decrypt(token) == api_key
-    # Клиенту отдаём только это — ADD §8.
-    assert box.last4(api_key) == "2345"
-    assert len(box.fingerprint(api_key)) == 8
-
-
-def test_decrypt_rejects_tampered_token():
-    from cryptography.fernet import InvalidToken
-
-    box = SecretBox(KEY)
-    token = box.encrypt("value")
-    with pytest.raises(InvalidToken):
-        box.decrypt(token[:-4] + "AAAA")
-```
-
-- [ ] **Step 2: Запустить — FAIL (модуль отсутствует)**
-- [ ] **Step 3: Реализовать `passwords.py`** через `argon2.PasswordHasher`; `verify_password` ловит `VerifyMismatchError`/`InvalidHashError` и возвращает `False`.
-- [ ] **Step 4: Реализовать `secrets.py`** через `cryptography.fernet.Fernet`; `fingerprint` — `hashlib.sha256(plain.encode()).hexdigest()[:8]`.
-- [ ] **Step 5: Запустить — PASS (4 passed)**
-- [ ] **Step 6: Коммит** — `feat: argon2id для паролей и Fernet для секретов`
+- [ ] **Step 1: Тесты** (`db_test.go`):
+  - `TestUserRoundTrip` → после `Create` у пользователя ненулевой UUID и `CreatedAt` в UTC; повторное чтение по email возвращает тот же ID и роль `user`.
+  - `TestEmailIsUnique` → второй `Create` с тем же email возвращает ошибку, и `errors.Is(err, gorm.ErrDuplicatedKey)` истинно (нужен `TranslateError: true` в конфиге GORM).
+  - `TestTestsAreIsolated` → запись из `TestUserRoundTrip` в этом тесте не видна.
+  - `TestMigrationsAreIdempotent` → повторный `db.Migrate` на уже накаченной базе не ошибается.
+  - `TestGormLoggerDoesNotPrintParameters` → SQL-лог при `Create(&User{PasswordHash: "secret-hash-value"})` не содержит `secret-hash-value`.
+- [ ] **Step 2:** `go test ./internal/db/...` → FAIL (пакета нет).
+- [ ] **Step 3:** Реализовать. Миграция `00001_users.sql`: таблица `users` (`id uuid pk`, `email varchar(320) not null unique`, `password_hash varchar(255) not null`, `role varchar(16) not null default 'user'`, `is_active boolean not null default true`, `created_at timestamptz not null default now()`), секции `-- +goose Up` / `-- +goose Down`.
+- [ ] **Step 4:** `go test ./internal/db/...` → PASS; `make lint` → 0 issues.
+- [ ] **Step 5:** Добавить в `Makefile` цель `migrate` (накат на `LINGUASTACK_DATABASE_URL` через `cmd/api -migrate` либо `goose` CLI), прогнать на dev-базе.
+- [ ] **Step 6:** Коммит — `feat: слой БД на GORM, миграции goose, изолированная тестовая база`.
 
 ---
 
-### Task 4: Сессии, регистрация, вход, троттлинг входа
+### Task 3: Пароли и шифрование секретов
 
 **Files:**
-- Create: `.../security/sessions.py`, `.../security/ratelimit.py`
-- Create: `.../db/models/session.py`, `.../db/models/login_attempt.py`
-- Create: `.../api/__init__.py`, `.../api/deps.py`, `.../api/auth.py`, `.../api/schemas.py`
-- Modify: `.../main.py` (подключить роутер), `backend/alembic/versions/*` (миграция)
-- Create: `backend/tests/test_auth.py`
+- Create: `internal/security/passwords.go`, `internal/security/secretbox.go`
+- Test: `internal/security/passwords_test.go`, `internal/security/secretbox_test.go`
 
 **Interfaces:**
-- Produces: `POST /api/auth/register`, `POST /api/auth/login`, `POST /api/auth/logout`, `GET /api/me` (ТЗ §12); `current_user` — зависимость FastAPI, возвращает `User` или 401; `issue_session(session, user) -> str` (возвращает открытый токен, в БД хранит sha256); `revoke_session(session, token)`.
+- Produces: `security.HashPassword(plain string) (string, error)`; `security.VerifyPassword(plain, encoded string) bool` (никогда не паникует и не возвращает ошибку — повреждённая запись означает «не совпало»); `security.NewSecretBox(key []byte) (*SecretBox, error)`; `(*SecretBox).Encrypt(plain string) (string, error)`; `(*SecretBox).Decrypt(token string) (string, error)` (ошибка `security.ErrDecrypt` при подмене или чужом ключе); `security.Fingerprint(plain string) string` (8 hex-символов sha256); `security.Last4(plain string) string`.
 
-- [ ] **Step 1: Написать падающий тест** — ключевые проверки:
+- [ ] **Step 1: Тесты:**
+  - `TestHashIsArgon2idAndVerifies` → хеш начинается с `$argon2id$`; верный пароль проходит, неверный нет.
+  - `TestHashIsSalted` → два хеша одного пароля различаются.
+  - `TestVerifyRejectsGarbage` → `VerifyPassword("x", "not-a-hash")` и `VerifyPassword("x", "")` возвращают `false`.
+  - `TestSecretRoundTrip` → `Decrypt(Encrypt(k)) == k`; шифртекст не содержит `k`.
+  - `TestEncryptionIsRandomised` → два шифрования одного значения различаются (случайный nonce).
+  - `TestDecryptRejectsTampering` → изменение одного байта шифртекста → `errors.Is(err, ErrDecrypt)`.
+  - `TestDecryptRejectsForeignKey` → шифртекст одного ключа не расшифровывается другим.
+  - `TestDecryptRejectsTruncatedToken` → токен короче nonce → `ErrDecrypt`, не паника.
+  - `TestNewSecretBoxRejectsWrongKeyLength` → ключ 16 и 31 байт → ошибка.
+  - `TestFingerprintAndLast4` → стабильны, различаются для разных значений; `Last4("sk-…2345") == "2345"`; `Last4` короткой строки не паникует.
+- [ ] **Step 2:** FAIL. **Step 3:** Реализовать: `argon2id.CreateHash(plain, argon2id.DefaultParams)`; AES-256-GCM, токен `base64.RawStdEncoding(nonce‖sealed)`. **Step 4:** PASS + lint.
+- [ ] **Step 5:** Коммит — `feat: argon2id для паролей и AES-256-GCM для пользовательских API-ключей`.
 
-```python
-# backend/tests/test_auth.py
-async def test_register_then_login_sets_httponly_cookie(client):
-    assert (await client.post("/api/auth/register",
-            json={"email": "u@example.com", "password": "pw-at-least-12"})).status_code == 201
-    response = await client.post("/api/auth/login",
-            json={"email": "u@example.com", "password": "pw-at-least-12"})
-    assert response.status_code == 200
-    cookie = response.cookies.jar._cookies  # наличие флагов проверяем по заголовку
-    set_cookie = response.headers["set-cookie"]
-    assert "HttpOnly" in set_cookie and "SameSite=Lax" in set_cookie
+---
 
+### Task 4: Сессии, регистрация, вход, защита от перебора
 
-async def test_me_requires_authentication(client):
-    assert (await client.get("/api/me")).status_code == 401
+**Files:**
+- Create: `migrations/00002_sessions.sql`, `internal/db/models/session.go`, `internal/db/models/login_attempt.go`
+- Create: `internal/security/sessions.go`, `internal/security/ratelimit.go`
+- Create: `internal/httpapi/auth.go`, `internal/httpapi/middleware.go`, `internal/httpapi/respond.go`
+- Test: `internal/httpapi/auth_test.go`, `internal/httpapi/helpers_test.go`
 
+**Interfaces:**
+- Produces:
+  - `security.SessionCookie = "linguastack_session"`; `security.IssueSession(ctx, db, userID uuid.UUID, ttl time.Duration) (token string, err error)` — в БД только `sha256(token)`; `security.LookupSessionUser(ctx, db, token) (*models.User, error)` → `security.ErrNoSession` для неизвестной, истёкшей сессии или неактивного пользователя; `security.RevokeSession(ctx, db, token) error`.
+  - `security.RecentFailures(ctx, db, email, ip string, window time.Duration) (int64, error)`; `security.RecordAttempt(ctx, db, email, ip string, succeeded bool) error` — успех удаляет накопленные неудачи этой пары.
+  - `httpapi.UserFromContext(ctx) *models.User`; middleware `requireUser(next http.Handler) http.Handler` → 401 без валидной сессии.
+  - Эндпоинты ТЗ §12: `POST /api/auth/register` (201 / 409 / 422), `POST /api/auth/login` (200 + cookie / 401 / 429), `POST /api/auth/logout` (204), `GET /api/me` (200 / 401).
+  - `respond.go`: `writeJSON`, `writeError(w, status, message)` с телом `{"error": "..."}`, `decodeJSON(r, dst, maxBytes)` — тело запроса ограничено (`http.MaxBytesReader`), неизвестные поля отвергаются.
+  - Тестовые помощники: `newTestServer(t) (*httptest.Server, *gorm.DB)` и `newClient(t, srv)` с cookie jar.
 
-async def test_password_never_echoed_back(client):
-    r = await client.post("/api/auth/register",
-        json={"email": "p@example.com", "password": "super-secret-pw"})
-    assert "super-secret-pw" not in r.text
-    assert "password_hash" not in r.text
-
-
-async def test_login_failure_message_does_not_reveal_account_existence(client):
-    missing = await client.post("/api/auth/login",
-        json={"email": "nobody@example.com", "password": "whatever-12345"})
-    await client.post("/api/auth/register",
-        json={"email": "real@example.com", "password": "correct-pw-123"})
-    wrong = await client.post("/api/auth/login",
-        json={"email": "real@example.com", "password": "wrong-pw-1234"})
-    assert missing.status_code == wrong.status_code == 401
-    assert missing.json() == wrong.json(), "ответ не должен выдавать существование аккаунта"
-
-
-async def test_login_throttled_after_limit(client, monkeypatch):
-    await client.post("/api/auth/register",
-        json={"email": "t@example.com", "password": "correct-pw-123"})
-    for _ in range(10):
-        await client.post("/api/auth/login",
-            json={"email": "t@example.com", "password": "bad-password"})
-    # 11-я попытка блокируется даже с верным паролем — ТЗ §13, защита от перебора.
-    blocked = await client.post("/api/auth/login",
-        json={"email": "t@example.com", "password": "correct-pw-123"})
-    assert blocked.status_code == 429
-
-
-async def test_logout_invalidates_session(client):
-    await client.post("/api/auth/register", json={"email": "l@example.com", "password": "pw-123456789"})
-    await client.post("/api/auth/login", json={"email": "l@example.com", "password": "pw-123456789"})
-    assert (await client.get("/api/me")).status_code == 200
-    await client.post("/api/auth/logout")
-    assert (await client.get("/api/me")).status_code == 401
-```
-
-- [ ] **Step 2: Запустить — FAIL**
-- [ ] **Step 3: Модели `UserSession(token_hash, user_id, expires_at, created_at)` и `LoginAttempt(email, ip, succeeded, created_at)`; миграция.**
-- [ ] **Step 4: `sessions.py`** — `secrets.token_urlsafe(32)`, хранить `sha256`, срок жизни 30 дней.
-- [ ] **Step 5: `ratelimit.py`** — `check_login_allowed(session, email, ip)` считает неудачи за `login_window_seconds`, при превышении `login_max_attempts` поднимает 429.
-- [ ] **Step 6: Роутер `auth.py`** — register (валидация email через `EmailStr`, пароль ≥12 символов), login, logout, `/api/me`. Пароль принимается только в теле запроса, в логи не попадает.
-- [ ] **Step 7: Запустить — PASS (6 passed)**
-- [ ] **Step 8: Коммит** — `feat: регистрация, вход по сессионной cookie и защита от перебора`
+- [ ] **Step 1: Тесты** — перенос 15 сценариев из Python-ревизии:
+  - `TestRegisterCreatesAccount` → 201, тело содержит email и роль `user`.
+  - `TestRegisterRejectsDuplicateEmail` → второй раз 409.
+  - `TestRegisterValidatesInput` (табличный) → пароль короче 12 символов, невалидный email, неизвестное поле, тело больше лимита → 422 (а для лимита — 413).
+  - `TestLoginSetsHttpOnlySameSiteCookie` → `Set-Cookie` содержит `HttpOnly` и `SameSite=Lax` (сравнение без учёта регистра — RFC 6265).
+  - `TestMeRequiresAuthentication` → 401.
+  - `TestMeReturnsCurrentUser` → после входа 200 и свой email.
+  - `TestPasswordNeverEchoed` → ни пароль, ни `password_hash` не встречаются в ответе регистрации и `/api/me`.
+  - `TestLoginFailureDoesNotRevealAccountExistence` → «нет аккаунта» и «неверный пароль» дают одинаковые код и тело.
+  - `TestLoginThrottledAfterLimit` → после 10 неудач 11-я попытка с **верным** паролем → 429.
+  - `TestThrottleScopedPerEmail` → перебор одного адреса не блокирует вход другому.
+  - `TestSuccessfulLoginClearsFailures` → 9 неудач, успешный вход, ещё 9 неудач → вход по-прежнему возможен.
+  - `TestLogoutInvalidatesSession` → после logout `/api/me` → 401, даже если клиент сохранил старую cookie.
+  - `TestSessionTokenStoredHashed` → значение cookie не совпадает ни с одним `token_hash` в БД.
+  - `TestUnknownCookieRejected` → выдуманный токен → 401.
+  - `TestDeactivatedUserCannotAuthenticate` → и вход, и ранее выданная сессия перестают работать.
+- [ ] **Step 2:** FAIL. **Step 3:** Реализовать; лимит проверяется **до** сверки пароля. IP — `r.RemoteAddr` без порта (доверие `X-Forwarded-For` — только за явно настроенным прокси, этап 7). **Step 4:** PASS + lint.
+- [ ] **Step 5:** Коммит — `feat: регистрация, вход по сессионной cookie, защита от перебора`.
 
 ---
 
 ### Task 5: Файловое хранилище с защитой путей
 
-**Files:**
-- Create: `backend/src/linguastack/storage/__init__.py`, `.../storage/files.py`
-- Create: `backend/tests/test_storage.py`
+**Files:** Create `internal/storage/files.go`; Test `internal/storage/files_test.go`
 
 **Interfaces:**
-- Produces: `FileStore(root: Path)` с `book_dir(user_id, book_id) -> Path`, `save_original(user_id, book_id, suffix, data: bytes | BinaryIO) -> Path`, `save_normalized(user_id, book_id, payload: dict) -> Path`, `open_original(user_id, book_id, suffix) -> BinaryIO`, `delete_book(user_id, book_id) -> None`, `safe_extract_member(target_dir, member_name) -> Path`; исключения `FileTooLarge`, `UnsafePath`, `DisallowedExtension`.
-- ALLOWED_SUFFIXES = `{".txt", ".md", ".markdown", ".epub", ".zip", ".pdf", ".docx", ".html", ".htm"}`.
+- Produces: `storage.New(root string, maxBytes int64) (*FileStore, error)`; `(*FileStore).BookDir(userID, bookID uuid.UUID) string`; `SaveOriginal(userID, bookID uuid.UUID, suffix string, r io.Reader) (string, error)`; `SaveNormalized(userID, bookID uuid.UUID, v any) (string, error)`; `OpenOriginal(userID, bookID uuid.UUID, suffix string) (*os.File, error)`; `DeleteBook(userID, bookID uuid.UUID) error`; `SafeExtractMember(targetDir, member string) (string, error)`; ошибки `ErrUnsafePath`, `ErrFileTooLarge`, `ErrDisallowedExtension`.
+- Идентификаторы — `uuid.UUID`, не строки: обход каталога через идентификатор невозможен по построению, проверка — на уровне типа.
 
-- [ ] **Step 1: Написать падающий тест** — существенные случаи (ADD §11, ТЗ §13):
-
-```python
-# backend/tests/test_storage.py
-import pytest
-
-from linguastack.storage.files import DisallowedExtension, FileStore, FileTooLarge, UnsafePath
-
-
-def test_path_never_contains_user_supplied_name(tmp_path):
-    store = FileStore(tmp_path, max_bytes=1024)
-    user_id, book_id = "11111111-1111-1111-1111-111111111111", "22222222-2222-2222-2222-222222222222"
-    path = store.save_original(user_id, book_id, ".txt", b"hello")
-    # ТЗ §2.2: имена на диске непрогнозируемы и не зависят от имени, данного пользователем.
-    assert "../../etc/passwd" not in str(path)
-    assert path.name == "original.txt"
-    assert user_id in str(path) and book_id in str(path)
-
-
-@pytest.mark.parametrize("member", [
-    "../escape.md",
-    "/absolute/path.md",
-    "nested/../../escape.md",
-    "a/b/../../../escape.md",
-])
-def test_zip_member_escaping_target_dir_is_rejected(tmp_path, member):
-    store = FileStore(tmp_path, max_bytes=1024)
-    with pytest.raises(UnsafePath):
-        store.safe_extract_member(tmp_path / "out", member)
-
-
-def test_oversized_upload_rejected(tmp_path):
-    store = FileStore(tmp_path, max_bytes=10)
-    with pytest.raises(FileTooLarge):
-        store.save_original("u", "b", ".txt", b"x" * 11)
-
-
-def test_unknown_extension_rejected(tmp_path):
-    store = FileStore(tmp_path, max_bytes=1024)
-    with pytest.raises(DisallowedExtension):
-        store.save_original("u", "b", ".exe", b"MZ")
-
-
-def test_delete_book_removes_directory(tmp_path):
-    store = FileStore(tmp_path, max_bytes=1024)
-    store.save_original("u", "b", ".txt", b"data")
-    store.delete_book("u", "b")
-    assert not store.book_dir("u", "b").exists()
-```
-
-- [ ] **Step 2: Запустить — FAIL**
-- [ ] **Step 3: Реализовать.** `safe_extract_member` сравнивает `os.path.realpath` итогового пути с `realpath` целевого каталога через `Path.is_relative_to`; отвергает абсолютные пути и компоненты `..` ещё до склейки. Запись оригинала — потоковая с подсчётом байт, чтобы лимит срабатывал до исчерпания диска.
-- [ ] **Step 4: Запустить — PASS (8 passed)**
-- [ ] **Step 5: Коммит** — `feat: файловое хранилище с защитой от path traversal`
+- [ ] **Step 1: Тесты** — перенос 22 сценариев:
+  - `TestPathNeverContainsUserSuppliedName` → файл называется `original.txt`, путь содержит оба UUID.
+  - `TestSafeExtractMemberRejects` (табличный) → `../escape.md`, `/abs/path.md`, `nested/../../escape.md`, `a/b/../../../escape.md`, `./../escape.md`, `..\..\escape.md`, `""`, `dir/` → `ErrUnsafePath`.
+  - `TestSafeExtractMemberAccepts` (табличный) → `ch1.md`, `nested/ch2.md`, `a/b/c/ch3.md` лежат внутри целевого каталога.
+  - `TestSafeExtractMemberRejectsSymlinkEscape` → если внутри цели есть симлинк наружу, запись через него отвергается.
+  - `TestOversizedStreamRejectedAndNotLeftBehind` → поток 5000 байт при лимите 10 → `ErrFileTooLarge`, файла на диске нет.
+  - `TestStreamWithinLimitSaved`, `TestUnknownExtensionRejected` (`.exe`), `TestExtensionCaseInsensitive` (`.EPUB` → `original.epub`).
+  - `TestNormalizedSavedAsJSON`, `TestOpenOriginalRoundTrip`.
+  - `TestDeleteBookRemovesDirectory`, `TestDeleteBookIdempotent`, `TestDeleteBookDoesNotTouchOtherBooks`.
+- [ ] **Step 2:** FAIL. **Step 3:** Реализовать; поток читается через `io.LimitReader(r, maxBytes+1)`, превышение — удаление частичного файла; `SafeExtractMember` отвергает абсолютные пути, `..`, `\`, затем сверяет `filepath.EvalSymlinks` родителя с целью. **Step 4:** PASS + lint.
+- [ ] **Step 5:** Коммит — `feat: файловое хранилище с защитой от path traversal`.
 
 ---
 
 ### Task 6: Canonical Document Model и стабильные идентификаторы
 
-**Files:**
-- Create: `backend/src/linguastack/cdm/__init__.py`, `.../cdm/model.py`, `.../cdm/ids.py`
-- Create: `backend/tests/test_cdm.py`
+**Files:** Create `internal/cdm/model.go`, `internal/cdm/ids.go`; Test `internal/cdm/model_test.go`, `internal/cdm/ids_test.go`
 
 **Interfaces:**
-- Produces (pydantic-модели): `BlockType` (str-Enum: `heading`, `paragraph`, `list_item`, `table_cell`, `caption`, `blockquote`, `code_block`, `math_block`, `image`, `thematic_break`, `raw_html`); `Block(node_id: str, type: BlockType, text: str, level: int | None, source_hash: str, meta: dict)`; `Chapter(index: int, title: str, blocks: list[Block], children: list[Chapter])`; `BookMeta(title, author, language, source_format)`; `CanonicalDocument(meta: BookMeta, chapters: list[Chapter])` с методами `iter_blocks()`, `translatable_blocks()`, `toc()`.
-- `TRANSLATABLE: frozenset[BlockType]` = heading, paragraph, list_item, table_cell, caption, blockquote.
-- `make_node_id(chapter_index: int, ordinal: int) -> str`; `content_hash(text: str) -> str`; `normalize_text(text: str) -> str`.
+- Produces:
+  - `cdm.BlockType` (string) с константами `Heading, Paragraph, ListItem, TableCell, Caption, Blockquote, CodeBlock, MathBlock, Image, ThematicBreak, RawHTML`; `cdm.IsTranslatable(BlockType) bool` — первые шесть.
+  - `cdm.Block{NodeID, Type, Text string; Level int; SourceHash string; Meta map[string]string}` (JSON-теги snake_case).
+  - `cdm.Chapter{Index int; Title string; Blocks []Block; Children []Chapter}`; `cdm.BookMeta{Title, Author, Language, SourceFormat string}`; `cdm.Document{Meta BookMeta; Chapters []Chapter}`.
+  - `(*Document).Blocks() []Block` (обход в глубину, порядок сохраняется); `TranslatableBlocks() []Block`; `TOC() []TOCEntry`; `TOCEntry{Index int; Title string; Children []TOCEntry}`; `Validate() error` — уникальность `NodeID`.
+  - `cdm.NodeID(chapterIndex, ordinal int) string` → `ch0003/b0017`; `cdm.NormalizeText(string) string` (NFC + свёртка пробелов + обрезка); `cdm.ContentHash(string) string` (первые 16 байт sha256, hex).
+  - `cdm.NewBuilder(meta BookMeta) *Builder` — общий помощник импортёров: `StartChapter(title string, depth int)`, `Add(type, text string, level int, meta map[string]string)`, `Build() Document`. Сам выдаёт глобальные индексы глав в порядке обхода и `NodeID`/`SourceHash` блокам, чтобы импортёры не дублировали эту логику.
 
-- [ ] **Step 1: Написать падающий тест**
-
-```python
-# backend/tests/test_cdm.py
-from linguastack.cdm.ids import content_hash, make_node_id, normalize_text
-from linguastack.cdm.model import Block, BlockType, CanonicalDocument, Chapter, BookMeta
-
-
-def test_node_id_is_deterministic_and_readable():
-    assert make_node_id(3, 17) == "ch0003/b0017"
-    assert make_node_id(3, 17) == make_node_id(3, 17)
-
-
-def test_content_hash_ignores_insignificant_whitespace():
-    # ADD §1: хеш содержимого не должен дёргаться от переформатирования.
-    assert content_hash("Hello   world") == content_hash("Hello world")
-    assert content_hash("  Hello world\n") == content_hash("Hello world")
-    assert content_hash("Hello world") != content_hash("Hello worlds")
-
-
-def test_content_hash_normalizes_unicode():
-    # "é" как один символ и как e + combining acute — один и тот же текст.
-    assert content_hash("café") == content_hash("café")
-
-
-def test_translatable_blocks_exclude_code_and_images():
-    doc = CanonicalDocument(
-        meta=BookMeta(title="T", author=None, language="en", source_format="md"),
-        chapters=[Chapter(index=0, title="C", blocks=[
-            Block(node_id="ch0000/b0000", type=BlockType.paragraph, text="Hello",
-                  source_hash=content_hash("Hello")),
-            Block(node_id="ch0000/b0001", type=BlockType.code_block, text="print(1)",
-                  source_hash=content_hash("print(1)")),
-            Block(node_id="ch0000/b0002", type=BlockType.image, text="",
-                  source_hash=content_hash("")),
-        ])],
-    )
-    assert [b.node_id for b in doc.translatable_blocks()] == ["ch0000/b0000"]
-
-
-def test_node_ids_are_unique_across_document():
-    doc = CanonicalDocument(
-        meta=BookMeta(title="T", author=None, language="en", source_format="md"),
-        chapters=[
-            Chapter(index=0, title="A", blocks=[Block(node_id=make_node_id(0, 0),
-                    type=BlockType.paragraph, text="a", source_hash=content_hash("a"))]),
-            Chapter(index=1, title="B", blocks=[Block(node_id=make_node_id(1, 0),
-                    type=BlockType.paragraph, text="b", source_hash=content_hash("b"))]),
-        ],
-    )
-    ids = [b.node_id for b in doc.iter_blocks()]
-    assert len(ids) == len(set(ids))
-
-
-def test_toc_preserves_order_and_nesting():
-    doc = CanonicalDocument(
-        meta=BookMeta(title="T", author=None, language="en", source_format="md"),
-        chapters=[Chapter(index=0, title="Part", blocks=[], children=[
-            Chapter(index=1, title="Sub", blocks=[])])],
-    )
-    toc = doc.toc()
-    assert toc[0]["title"] == "Part"
-    assert toc[0]["children"][0]["title"] == "Sub"
-```
-
-- [ ] **Step 2: Запустить — FAIL**
-- [ ] **Step 3: Реализовать `ids.py`**
-
-```python
-# backend/src/linguastack/cdm/ids.py
-"""Идентификаторы блоков CDM. Обоснование схемы — ADD §1."""
-import hashlib
-import re
-import unicodedata
-
-_WHITESPACE = re.compile(r"\s+")
-
-
-def normalize_text(text: str) -> str:
-    """NFC + свёртка пробелов. Чтобы переформатирование не меняло хеш."""
-    return _WHITESPACE.sub(" ", unicodedata.normalize("NFC", text)).strip()
-
-
-def content_hash(text: str) -> str:
-    return hashlib.blake2s(normalize_text(text).encode("utf-8"), digest_size=16).hexdigest()
-
-
-def make_node_id(chapter_index: int, ordinal: int) -> str:
-    return f"ch{chapter_index:04d}/b{ordinal:04d}"
-```
-
-- [ ] **Step 4: Реализовать `model.py`** на pydantic `BaseModel`. `iter_blocks()` обходит главы в глубину, сохраняя порядок.
-- [ ] **Step 5: Запустить — PASS (6 passed)**
-- [ ] **Step 6: Коммит** — `feat: Canonical Document Model и стабильные идентификаторы блоков`
+- [ ] **Step 1: Тесты:**
+  - `TestNodeIDDeterministicAndReadable` → `NodeID(3, 17) == "ch0003/b0017"`.
+  - `TestContentHashIgnoresWhitespace` → `"Hello   world"`, `"  Hello world\n"` и `"Hello world"` дают один хеш; `"Hello worlds"` — другой.
+  - `TestContentHashNormalizesUnicode` → `"café"` и `"café"` дают один хеш.
+  - `TestTranslatableBlocksExcludeCodeAndImages`.
+  - `TestBuilderAssignsUniqueNodeIDsAcrossChapters` и `TestValidateDetectsDuplicateNodeIDs`.
+  - `TestBuilderNestsChaptersByDepth` → глава глубины 2 становится `Children` предыдущей главы глубины 1; индексы глобальны и уникальны.
+  - `TestTOCPreservesOrderAndNesting`.
+  - `TestDocumentJSONRoundTrip` → сериализация и обратное чтение дают равный документ (CDM хранится в JSONB).
+- [ ] **Step 2:** FAIL. **Step 3:** Реализовать. **Step 4:** PASS + lint. **Step 5:** Коммит — `feat: Canonical Document Model и стабильные идентификаторы блоков`.
 
 ---
 
 ### Task 7: Маскирование защищённых фрагментов
 
-**Files:**
-- Create: `backend/src/linguastack/cdm/masking.py`
-- Create: `backend/tests/test_masking.py`
+**Files:** Create `internal/cdm/masking.go`; Test `internal/cdm/masking_test.go`
 
 **Interfaces:**
-- Produces: `mask(text: str) -> MaskResult`; `MaskResult(masked: str, placeholders: dict[str, str])`; `unmask(masked: str, placeholders: dict[str, str]) -> str`; `placeholder_multiset(text: str) -> collections.Counter`; исключение `PlaceholderMismatch(expected, actual)`.
-- Маркер: `⟦N⟧` (U+27E6 / U+27E7). Экранирование уже присутствующих в исходнике маркеров — обязательно (**Review Focus №2**).
+- Produces: `cdm.Mask(text string) Masked`; `cdm.Masked{Text string; Placeholders map[string]string}`; `cdm.Unmask(text string, placeholders map[string]string) string`; `cdm.VerifyPlaceholders(masked, translated string) error` → `*PlaceholderMismatchError{Missing, Extra []string}`.
+- Маркер `⟦N⟧` (U+27E6/U+27E7). Порядок: сначала экранировать существующие `⟦`/`⟧` (символы Private Use Area), затем маскировать: fenced-код → inline-код → `$$…$$` → `$…$` → изображения целиком → цели ссылок (текст ссылки остаётся видимым) → HTML-теги.
 
-- [ ] **Step 1: Написать падающий тест**
-
-```python
-# backend/tests/test_masking.py
-import pytest
-
-from linguastack.cdm.masking import (
-    PlaceholderMismatch, mask, placeholder_multiset, unmask, verify_placeholders,
-)
-
-
-def test_inline_code_is_masked_and_restored():
-    result = mask("Вызовите `get_user()` затем `save()`.")
-    assert "get_user()" not in result.masked
-    assert result.masked.count("⟦") == 2
-    assert unmask(result.masked, result.placeholders) == "Вызовите `get_user()` затем `save()`."
-
-
-def test_link_target_masked_but_link_text_translatable():
-    result = mask("См. [документацию](https://example.com/docs) здесь.")
-    # Текст ссылки обязан остаться видимым для модели, URL — нет.
-    assert "документацию" in result.masked
-    assert "https://example.com/docs" not in result.masked
-
-
-def test_math_is_masked():
-    result = mask("Формула $E = mc^2$ известна.")
-    assert "mc^2" not in result.masked
-    assert unmask(result.masked, result.placeholders) == "Формула $E = mc^2$ известна."
-
-
-def test_preexisting_placeholder_markers_are_escaped():
-    """Review Focus №2: исходник уже содержит ⟦1⟧.
-
-    Без экранирования unmask() подставит сюда чужой фрагмент и тихо испортит текст.
-    """
-    original = "Литерал ⟦1⟧ в тексте и код `x`."
-    result = mask(original)
-    assert unmask(result.masked, result.placeholders) == original
-
-
-def test_roundtrip_is_identity_for_text_without_protected_spans():
-    text = "Обычный абзац без кода и ссылок."
-    result = mask(text)
-    assert result.masked == text
-    assert result.placeholders == {}
-    assert unmask(result.masked, result.placeholders) == text
-
-
-def test_verify_placeholders_detects_dropped_marker():
-    result = mask("Код `a` и `b`.")
-    broken = result.masked.replace("⟦2⟧", "")
-    with pytest.raises(PlaceholderMismatch):
-        verify_placeholders(result.masked, broken)
-
-
-def test_verify_placeholders_detects_duplicated_marker():
-    result = mask("Код `a`.")
-    doubled = result.masked + " ⟦1⟧"
-    with pytest.raises(PlaceholderMismatch):
-        verify_placeholders(result.masked, doubled)
-
-
-def test_verify_placeholders_allows_reordering():
-    # Порядок слов при переводе меняется — это нормально, важно мультимножество.
-    result = mask("`a` затем `b`")
-    reordered = "⟦2⟧ then ⟦1⟧"
-    verify_placeholders(result.masked, reordered)  # не должно бросать
-```
-
-- [ ] **Step 2: Запустить — FAIL**
-- [ ] **Step 3: Реализовать.** Порядок важен: сначала экранировать существующие `⟦`/`⟧` (заменить на приватные символы-escape), затем маскировать по приоритету: fenced-код → inline-код → математика → изображения → цели ссылок → HTML-теги. `verify_placeholders` сравнивает `Counter` маркеров и бросает `PlaceholderMismatch` с деталями.
-- [ ] **Step 4: Запустить — PASS (8 passed)**
-- [ ] **Step 5: Коммит** — `feat: маскирование кода, ссылок и формул перед переводом`
+- [ ] **Step 1: Тесты** (табличный `TestMaskRoundTrip` + отдельные):
+  - inline-код маскируется и возвращается дословно; модель не видит `get_user()`.
+  - у ссылки `[документацию](https://x/docs)` текст виден, URL — нет.
+  - формулы `$E = mc^2$` и `$$…$$` маскируются.
+  - **Review Focus №2:** `"Литерал ⟦1⟧ в тексте и код `x`."` после `Unmask(Mask(..))` возвращается точно.
+  - текст без защищённых фрагментов — `Mask` не меняет его, `Placeholders` пуст.
+  - `TestVerifyDetectsDroppedMarker`, `TestVerifyDetectsDuplicatedMarker`, `TestVerifyAllowsReordering` (порядок слов при переводе меняется — важно мультимножество).
+  - `TestDollarAmountsAreNotMath` → `"стоит $5 и $10"` не маскируется как формула (цена, а не математика).
+- [ ] **Step 2:** FAIL. **Step 3:** Реализовать. **Step 4:** PASS + lint. **Step 5:** Коммит — `feat: маскирование кода, ссылок и формул перед переводом`.
 
 ---
 
-### Task 8: Единая точка проверки прав и каркас теста изоляции
+### Task 8: Единая проверка владения
 
-**Files:**
-- Modify: `backend/src/linguastack/api/deps.py`
-- Create: `backend/tests/test_isolation.py`, `backend/tests/factories.py`
+**Files:** Create `internal/store/owned.go`; Test `internal/store/owned_test.go`
 
 **Interfaces:**
-- Produces: `async def owned(model: type[T], resource_id, user, session) -> T` — `SELECT ... WHERE id = :id AND owner_id = :user.id`, иначе `HTTPException(404)`; фикстуры `user_client`, `other_client` (две независимые аутентифицированные сессии); хелпер `assert_cross_user_404(client, method, url)`.
+- Produces: `store.ErrNotFound`; `store.Owned[T any](ctx, db *gorm.DB, id, ownerID uuid.UUID) (*T, error)` — `WHERE id = ? AND owner_id = ?`; `store.OwnedScope(ownerID uuid.UUID) func(*gorm.DB) *gorm.DB` для списков. В HTTP-слое `ErrNotFound` → 404.
+- Модель с владельцем обязана иметь колонку `owner_id`; тест проверяет, что вызов `Owned` для модели без неё — ошибка конфигурации, а не «найдено».
 
-- [ ] **Step 1: Написать падающий тест**
+- [ ] **Step 1: Тесты** (на временной модели `ownedFixture` из миграции `00003_books.sql` задачи 13 нельзя — её ещё нет, поэтому тест создаёт таблицу в транзакции теста):
+  - `TestOwnedReturnsResourceToOwner`.
+  - `TestOwnedReturnsNotFoundForForeignResource` → `errors.Is(err, store.ErrNotFound)`.
+  - `TestAdminRoleDoesNotBypass` → пользователь с ролью `admin` получает `ErrNotFound` на чужой ресурс (ТЗ §2.1).
+  - `TestOwnedNotFoundForMissingID`.
+- [ ] **Step 2:** FAIL. **Step 3:** Реализовать. **Step 4:** PASS + lint.
+- [ ] **Step 5:** Коммит — `feat: единая проверка владения ресурсом (404, без обхода для admin)`.
 
-```python
-# backend/tests/test_isolation.py
-import pytest
-
-
-async def test_owned_returns_404_not_403_for_foreign_resource(session, make_user, make_book):
-    from fastapi import HTTPException
-
-    from linguastack.api.deps import owned
-    from linguastack.db.models.book import Book
-
-    owner, intruder = await make_user("o@example.com"), await make_user("i@example.com")
-    book = await make_book(owner)
-
-    with pytest.raises(HTTPException) as exc:
-        await owned(Book, book.id, intruder, session)
-    # 403 подтвердил бы существование ресурса — ADD §9.
-    assert exc.value.status_code == 404
-
-
-async def test_admin_role_does_not_bypass_ownership(session, make_user, make_book):
-    """ТЗ §2.1: доступ к содержимому книг не должен возникать из одной роли admin."""
-    from fastapi import HTTPException
-
-    from linguastack.api.deps import owned
-    from linguastack.db.models.book import Book
-
-    owner = await make_user("o2@example.com")
-    admin = await make_user("admin@example.com", role="admin")
-    book = await make_book(owner)
-
-    with pytest.raises(HTTPException) as exc:
-        await owned(Book, book.id, admin, session)
-    assert exc.value.status_code == 404
-
-
-async def test_owned_returns_resource_for_its_owner(session, make_user, make_book):
-    from linguastack.db.models.book import Book
-
-    from linguastack.api.deps import owned
-
-    owner = await make_user("o3@example.com")
-    book = await make_book(owner)
-    assert (await owned(Book, book.id, owner, session)).id == book.id
-```
-
-- [ ] **Step 2: Запустить — FAIL**
-- [ ] **Step 3: Реализовать `owned()` и фабрики** (`make_user`, `make_book`, `make_project` в `tests/factories.py`, подключённые как фикстуры в `conftest.py`).
-- [ ] **Step 4: Запустить — PASS (3 passed)**
-- [ ] **Step 5: Коммит** — `feat: единая проверка владения ресурсом (404 вместо 403, без обхода для admin)`
-
-**Примечание:** параметризованный тест по *всем* ресурсным эндпоинтам добавляется в задаче 26, когда эндпоинты существуют.
+Параметризованный тест по **всем** ресурсным эндпоинтам — в задаче 26.
 
 ---
 
 ## Этап 2 — Импорт
 
-### Task 9: Протокол импортёра, реестр форматов и TxtImporter
+### Task 9: Интерфейс импортёра, реестр, TXT
 
-**Files:**
-- Create: `.../importers/__init__.py`, `.../importers/base.py`, `.../importers/registry.py`, `.../importers/txt.py`
-- Create: `backend/tests/test_import_txt.py`, `backend/tests/fixtures/books/plain.txt`
+**Files:** Create `internal/importers/importer.go`, `registry.go`, `txt.go`; Test `txt_test.go`, `registry_test.go`
 
 **Interfaces:**
-- Produces: `class Importer(Protocol)` с `format_id: str`, `suffixes: frozenset[str]`, `def sniff(data: bytes, filename: str) -> bool`, `def load(data: bytes, filename: str) -> ImportResult`.
-- `ImportIssue(severity: Literal["info","warning","error"], code: str, message: str, node_id: str | None)`.
-- `ImportResult(document: CanonicalDocument, issues: list[ImportIssue])` — ТЗ §3.1 требует сообщать о проблемах **до** начала перевода.
-- `registry.pick(data, filename) -> Importer`; исключение `UnsupportedFormat`.
+- Produces:
+  - `importers.Severity` (`Info`, `Warning`, `Error`); `importers.Issue{Severity; Code, Message, NodeID string}`; `importers.Result{Document cdm.Document; Issues []Issue}`.
+  - `type Importer interface { FormatID() string; Sniff(data []byte, filename string) bool; Load(data []byte, filename string) (Result, error) }`.
+  - **Семантика двух каналов:** `Issues` — проблемы, которые пользователь проверяет до перевода (ТЗ §3.1: пустой документ, угаданная кодировка, отсутствующая глава, повреждённый файл). `error` — только отказ принять загрузку (нарушение безопасности: `storage.ErrUnsafePath`, лимиты ZIP).
+  - `importers.Pick(data []byte, filename string) (Importer, error)` → `ErrUnsupportedFormat`; `importers.Default(cfg config.Settings) *Registry`.
+  - `importers.NewTXT() Importer` (`FormatID() == "txt"`).
 
-- [ ] **Step 1: Написать падающий тест** (включая кодировки — Review Focus, доп. пункт)
-
-```python
-# backend/tests/test_import_txt.py
-import pytest
-
-from linguastack.cdm.model import BlockType
-from linguastack.importers.registry import UnsupportedFormat, pick
-from linguastack.importers.txt import TxtImporter
-
-
-def test_paragraphs_split_on_blank_lines():
-    data = "Первый абзац.\n\nВторой абзац.\n\n\nТретий.".encode()
-    result = TxtImporter().load(data, "book.txt")
-    blocks = result.document.translatable_blocks()
-    assert [b.text for b in blocks] == ["Первый абзац.", "Второй абзац.", "Третий."]
-    assert all(b.type is BlockType.paragraph for b in blocks)
-
-
-def test_bom_is_stripped():
-    result = TxtImporter().load("﻿Текст с BOM.".encode(), "b.txt")
-    assert result.document.translatable_blocks()[0].text == "Текст с BOM."
-
-
-def test_crlf_handled():
-    result = TxtImporter().load(b"A\r\n\r\nB", "b.txt")
-    assert [b.text for b in result.document.translatable_blocks()] == ["A", "B"]
-
-
-def test_cp1251_decoded_with_issue_recorded():
-    """ТЗ §3.1: TXT обязан обрабатывать кодировки, а не падать на них."""
-    result = TxtImporter().load("Привет мир".encode("cp1251"), "b.txt")
-    assert "Привет мир" in result.document.translatable_blocks()[0].text
-    assert any(i.code == "encoding_guessed" for i in result.issues)
-
-
-def test_empty_file_yields_error_issue_not_exception():
-    result = TxtImporter().load(b"", "b.txt")
-    assert result.document.translatable_blocks() == []
-    assert any(i.severity == "error" and i.code == "empty_document" for i in result.issues)
-
-
-def test_registry_picks_txt_and_rejects_unknown():
-    assert pick(b"text", "a.txt").format_id == "txt"
-    with pytest.raises(UnsupportedFormat):
-        pick(b"\x00\x01", "a.bin")
-```
-
-- [ ] **Step 2: Запустить — FAIL**
-- [ ] **Step 3: Реализовать.** Декодирование: пробовать `utf-8-sig`, затем `cp1251`, затем `latin-1` с записью `ImportIssue("warning", "encoding_guessed", ...)`. Один блок = один абзац; `node_id` через `make_node_id(0, i)`.
-- [ ] **Step 4: Запустить — PASS (6 passed)**
-- [ ] **Step 5: Коммит** — `feat: протокол импортёра, реестр форматов и импорт TXT`
+- [ ] **Step 1: Тесты:**
+  - `TestTXTSplitsParagraphsOnBlankLines` → `"А.\n\nБ.\n\n\nВ."` → три блока `Paragraph`.
+  - `TestTXTStripsBOM`, `TestTXTHandlesCRLF`.
+  - `TestTXTDecodesCP1251WithIssue` → кириллица в cp1251 читается, есть `Issue{Code: "encoding_guessed"}`.
+  - `TestTXTEmptyFileIsIssueNotError` → `err == nil`, нет блоков, есть `Issue{Severity: Error, Code: "empty_document"}`.
+  - `TestTXTTitleFromFilename` → `Meta.Title == "my-book"` для `my-book.txt`.
+  - `TestPickByExtensionAndRejectUnknown` → `.txt` → txt; `.bin` с бинарным содержимым → `ErrUnsupportedFormat`.
+- [ ] **Step 2:** FAIL. **Step 3:** Реализовать: `utf8.Valid` → UTF-8; иначе `charmap.Windows1251` из `x/text/encoding` с Issue. **Step 4:** PASS + lint. **Step 5:** Коммит — `feat: интерфейс импортёра, реестр форматов и импорт TXT`.
 
 ---
 
-### Task 10: MarkdownImporter
+### Task 10: Markdown
 
-**Files:**
-- Create: `.../importers/markdown.py`
-- Create: `backend/tests/test_import_markdown.py`, `backend/tests/fixtures/books/sample.md`
+**Files:** Create `internal/importers/markdown.go`; Test `markdown_test.go`, `testdata/sample.md`
 
 **Interfaces:**
-- Produces: `MarkdownImporter` (`format_id = "markdown"`). Главы режутся по заголовкам `#`/`##`; вложенность заголовков даёт дерево `Chapter.children`.
-- Consumes: `markdown_it.MarkdownIt` (`"commonmark"` + таблицы), `Block`, `BlockType`, `make_node_id`, `content_hash`.
+- Produces: `importers.NewMarkdown() Importer` (`FormatID() == "markdown"`). Разбор `goldmark` с расширением таблиц (`extension.Table`); обход AST. Главы — по заголовкам; глубина заголовка задаёт вложенность через `cdm.Builder`. **Текст блока — исходный Markdown из сегментов AST** (`node.Lines()` / позиции в исходнике), а не отрендеренный HTML: маскирование и валидация работают с разметкой.
 
-- [ ] **Step 1: Написать падающий тест** — существенные проверки:
-
-```python
-# backend/tests/test_import_markdown.py
-from linguastack.cdm.model import BlockType
-from linguastack.importers.markdown import MarkdownImporter
-
-DOC = """\
-# Глава первая
-
-Вступительный абзац.
-
-```python
-print("этот код не переводится")
-```
-
-## Раздел 1.1
-
-- первый пункт
-- второй пункт
-
-| Колонка | Значение |
-|---|---|
-| a | b |
-
-# Глава вторая
-
-Текст второй главы.
-"""
-
-
-def test_chapters_split_on_headings():
-    doc = MarkdownImporter().load(DOC.encode(), "s.md").document
-    assert [c.title for c in doc.chapters] == ["Глава первая", "Глава вторая"]
-
-
-def test_subsection_becomes_child_chapter():
-    doc = MarkdownImporter().load(DOC.encode(), "s.md").document
-    assert [c.title for c in doc.chapters[0].children] == ["Раздел 1.1"]
-
-
-def test_code_block_present_but_not_translatable():
-    doc = MarkdownImporter().load(DOC.encode(), "s.md").document
-    code = [b for b in doc.iter_blocks() if b.type is BlockType.code_block]
-    assert len(code) == 1
-    assert 'print("этот код не переводится")' in code[0].text
-    assert code[0] not in doc.translatable_blocks()
-
-
-def test_list_items_are_separate_blocks():
-    doc = MarkdownImporter().load(DOC.encode(), "s.md").document
-    items = [b.text for b in doc.iter_blocks() if b.type is BlockType.list_item]
-    assert items == ["первый пункт", "второй пункт"]
-
-
-def test_table_cells_are_translatable_blocks():
-    doc = MarkdownImporter().load(DOC.encode(), "s.md").document
-    cells = [b.text for b in doc.iter_blocks() if b.type is BlockType.table_cell]
-    assert "Колонка" in cells and "a" in cells
-
-
-def test_heading_blocks_carry_level():
-    doc = MarkdownImporter().load(DOC.encode(), "s.md").document
-    headings = [b for b in doc.iter_blocks() if b.type is BlockType.heading]
-    assert headings[0].level == 1
-
-
-def test_document_without_headings_yields_single_chapter():
-    doc = MarkdownImporter().load(b"Just a paragraph.\n\nAnd another.", "s.md").document
-    assert len(doc.chapters) == 1
-    assert len(doc.chapters[0].blocks) == 2
-```
-
-- [ ] **Step 2: Запустить — FAIL**
-- [ ] **Step 3: Реализовать** через `MarkdownIt("commonmark").enable("table")` и обход потока токенов: `heading_open`/`inline`/`heading_close`, `paragraph_open`, `fence`/`code_block`, `list_item_open`, `th_open`/`td_open`, `blockquote_open`, `math_block` (если встретится — как `math_block`). Для каждого блока сохранять исходный Markdown-текст (не HTML).
-- [ ] **Step 4: Запустить — PASS (7 passed)**
-- [ ] **Step 5: Коммит** — `feat: импорт Markdown с разбором глав, кода, списков и таблиц`
+- [ ] **Step 1: Тесты** (на фикстуре с двумя главами, подразделом, кодом, списком, таблицей):
+  - `TestChaptersSplitOnHeadings`, `TestSubsectionBecomesChild`.
+  - `TestCodeBlockPresentButNotTranslatable` → один `CodeBlock` с исходным текстом, отсутствует в `TranslatableBlocks`.
+  - `TestListItemsAreSeparateBlocks`, `TestTableCellsAreBlocks`, `TestHeadingCarriesLevel`.
+  - `TestInlineMarkupPreservedInBlockText` → блок `"Это **важно** и `код`."` хранится с `**` и обратными кавычками.
+  - `TestDocumentWithoutHeadingsYieldsOneChapter`.
+- [ ] **Step 2:** FAIL. **Step 3:** Реализовать. **Step 4:** PASS + lint. **Step 5:** Коммит — `feat: импорт Markdown`.
 
 ---
 
-### Task 11: ZipRepoImporter — порядок глав и защита от зип-бомб
+### Task 11: ZIP-репозитории — порядок глав и защита от зип-бомб
 
-**Files:**
-- Create: `.../importers/zip_repo.py`
-- Create: `backend/tests/test_import_zip.py`
+**Files:** Create `internal/importers/zip_repo.go`; Test `zip_repo_test.go`
 
 **Interfaces:**
-- Produces: `ZipRepoImporter` (`format_id = "zip_repo"`), `discover_order(names: list[str], manifest: dict | None) -> list[str]`.
-- Порядок глав определяется по приоритету (ТЗ §4.3: сортировка по имени **не** должна быть единственным способом): `SUMMARY.md` / `mkdocs.yml` / `_toc.yml` → числовые префиксы файлов → порядок относительных ссылок из корневого `README.md`/`index.md` → только затем алфавит. Выбранный способ записывается в `ImportIssue("info", "order_source", ...)`, чтобы пользователь видел, откуда взялся порядок, и мог поправить (ТЗ §4.3).
+- Produces: `importers.NewZipRepo(maxEntries int, maxTotal int64, maxRatio int) Importer` (`FormatID() == "zip_repo"`); `importers.DiscoverOrder(names []string, summary []byte) (order []string, source string)`.
+- Порядок глав (ТЗ §4.3 — алфавит не единственный способ): `SUMMARY.md` → `mkdocs.yml` (`nav`) → числовые префиксы с естественной сортировкой → ссылки из корневого `README.md`/`index.md` → алфавит. Источник порядка — `Issue{Info, "order_source"}`.
+- Каждый `.md` разбирается `NewMarkdown()` — переиспользование, не копия.
 
-- [ ] **Step 1: Написать падающий тест**
-
-```python
-# backend/tests/test_import_zip.py
-import io
-import zipfile
-
-import pytest
-
-from linguastack.importers.zip_repo import ZipRepoImporter
-from linguastack.storage.files import UnsafePath
-
-
-def make_zip(files: dict[str, bytes]) -> bytes:
-    buf = io.BytesIO()
-    with zipfile.ZipFile(buf, "w") as zf:
-        for name, data in files.items():
-            zf.writestr(name, data)
-    return buf.getvalue()
-
-
-def test_summary_file_determines_chapter_order():
-    data = make_zip({
-        "SUMMARY.md": b"- [Intro](zzz.md)\n- [Body](aaa.md)\n",
-        "zzz.md": b"# Intro\n\nFirst.",
-        "aaa.md": b"# Body\n\nSecond.",
-    })
-    result = ZipRepoImporter().load(data, "repo.zip")
-    # Алфавит дал бы aaa, zzz — SUMMARY.md обязан победить (ТЗ §4.3).
-    assert [c.title for c in result.document.chapters] == ["Intro", "Body"]
-    assert any(i.code == "order_source" and "SUMMARY.md" in i.message for i in result.issues)
-
-
-def test_numeric_prefixes_order_chapters_naturally():
-    data = make_zip({
-        "02-second.md": b"# Second\n\nB.",
-        "10-tenth.md": b"# Tenth\n\nJ.",
-        "01-first.md": b"# First\n\nA.",
-    })
-    result = ZipRepoImporter().load(data, "repo.zip")
-    # Лексикографически "10" < "02"; нужен числовой порядок.
-    assert [c.title for c in result.document.chapters] == ["First", "Second", "Tenth"]
-
-
-def test_zip_slip_member_rejected():
-    data = make_zip({"../../etc/passwd": b"root", "ok.md": b"# Ok\n\nx."})
-    with pytest.raises(UnsafePath):
-        ZipRepoImporter().load(data, "repo.zip")
-
-
-def test_too_many_entries_rejected():
-    data = make_zip({f"f{i}.md": b"# H\n\nx." for i in range(5)})
-    with pytest.raises(ValueError, match="entries"):
-        ZipRepoImporter(max_entries=3).load(data, "repo.zip")
-
-
-def test_compression_bomb_rejected():
-    buf = io.BytesIO()
-    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-        zf.writestr("bomb.md", b"\0" * (2 * 1024 * 1024))  # жмётся в тысячи раз
-    with pytest.raises(ValueError, match="ratio|size"):
-        ZipRepoImporter(max_ratio=100, max_total_bytes=1024 * 1024).load(buf.getvalue(), "r.zip")
-
-
-def test_missing_referenced_chapter_recorded_as_issue():
-    data = make_zip({
-        "SUMMARY.md": b"- [Here](present.md)\n- [Gone](absent.md)\n",
-        "present.md": b"# Here\n\nx.",
-    })
-    result = ZipRepoImporter().load(data, "repo.zip")
-    # ТЗ §4.3: отсутствующие главы должны выявляться, а не молча пропадать.
-    assert any(i.code == "missing_chapter" and "absent.md" in i.message for i in result.issues)
-
-
-def test_images_are_preserved_as_image_blocks():
-    data = make_zip({
-        "ch.md": b"# Ch\n\n![diagram](img/d.png)\n",
-        "img/d.png": b"\x89PNG\r\n\x1a\n",
-    })
-    result = ZipRepoImporter().load(data, "repo.zip")
-    from linguastack.cdm.model import BlockType
-    assert any(b.type is BlockType.image for b in result.document.iter_blocks())
-```
-
-- [ ] **Step 2: Запустить — FAIL**
-- [ ] **Step 3: Реализовать.** Каждый `.md`-файл разбирается `MarkdownImporter` (переиспользование, не копия); главы собираются в порядке `discover_order`. Проверки выполняются **до** распаковки: `ZipInfo.file_size` суммируется для `max_total_bytes`, отношение `file_size / compress_size` — для `max_ratio`, имена — через `FileStore.safe_extract_member`.
-- [ ] **Step 4: Запустить — PASS (7 passed)**
-- [ ] **Step 5: Коммит** — `feat: импорт ZIP-репозиториев с определением порядка глав и защитой от зип-бомб`
+- [ ] **Step 1: Тесты** (архивы строятся в тесте через `archive/zip`):
+  - `TestSummaryDeterminesOrder` → `SUMMARY.md` ставит `zzz.md` раньше `aaa.md`; есть Issue `order_source` с упоминанием `SUMMARY.md`.
+  - `TestNumericPrefixesNaturalOrder` → `01-…`, `02-…`, `10-…` (лексикографически `10` < `02`).
+  - `TestZipSlipRejected` → запись `../../etc/passwd` → `errors.Is(err, storage.ErrUnsafePath)`.
+  - `TestTooManyEntriesRejected`, `TestCompressionBombRejected` (2 МБ нулей, ratio > 100), `TestTotalSizeLimit`.
+  - `TestMissingReferencedChapterIsIssue` → `Issue{Code: "missing_chapter"}` с именем файла.
+  - `TestImagesPreservedAsImageBlocks`.
+  - `TestNonMarkdownFilesIgnoredWithoutError` → `.png`, `.gitignore` в архиве не ломают импорт.
+- [ ] **Step 2:** FAIL. **Step 3:** Реализовать; все проверки до чтения содержимого: число записей, сумма `UncompressedSize64`, отношение `UncompressedSize64/CompressedSize64`, имя через `storage.SafeExtractMember`. Чтение записи — через `io.LimitReader` на объявленный размер (заголовок ZIP может лгать). **Step 4:** PASS + lint. **Step 5:** Коммит — `feat: импорт ZIP-репозиториев с порядком глав и защитой от зип-бомб`.
 
 ---
 
-### Task 12: EpubImporter
+### Task 12: EPUB
 
-**Files:**
-- Create: `.../importers/epub.py`
-- Create: `backend/tests/test_import_epub.py`, `backend/tests/fixtures/books/make_epub.py`
+**Files:** Create `internal/importers/epub.go`; Test `epub_test.go`, `testdata_epub_test.go` (сборщик EPUB для тестов)
 
 **Interfaces:**
-- Produces: `EpubImporter` (`format_id = "epub"`). Главы — по `toc.ncx`/nav; при его отсутствии — по порядку spine (с `ImportIssue("warning", "toc_missing", ...)`). HTML каждой главы разбирается `BeautifulSoup(..., "lxml")` в блоки CDM.
-- Фикстура: `make_epub.py` строит EPUB программно через `ebooklib` — бинарных файлов в репозитории не держим.
+- Produces: `importers.NewEPUB() Importer` (`FormatID() == "epub"`). Stdlib: `archive/zip` → `META-INF/container.xml` → OPF (`encoding/xml`: metadata, manifest, spine) → оглавление из NCX (EPUB 2) или `nav` (EPUB 3), иначе spine с Issue `toc_missing`. HTML глав — `x/net/html`: `h1–h6` → `Heading` с уровнем, `p` → `Paragraph`, `li` → `ListItem`, `pre` → `CodeBlock`, `img` → `Image` (`Meta{src, alt}`), `blockquote`, `td/th`.
+- Тот же лимит ZIP, что в задаче 11 (EPUB — тоже архив).
 
-- [ ] **Step 1: Написать падающий тест**
-
-```python
-# backend/tests/test_import_epub.py
-from linguastack.cdm.model import BlockType
-from linguastack.importers.epub import EpubImporter
-from tests.fixtures.books.make_epub import build_epub
-
-
-def test_chapters_and_metadata_extracted():
-    data = build_epub(title="Книга", author="Автор", chapters=[
-        ("Глава 1", "<h1>Глава 1</h1><p>Первый абзац.</p>"),
-        ("Глава 2", "<h1>Глава 2</h1><p>Второй абзац.</p>"),
-    ])
-    result = EpubImporter().load(data, "b.epub")
-    assert result.document.meta.title == "Книга"
-    assert result.document.meta.author == "Автор"
-    assert [c.title for c in result.document.chapters] == ["Глава 1", "Глава 2"]
-
-
-def test_paragraphs_become_translatable_blocks():
-    data = build_epub(title="T", author=None, chapters=[
-        ("C", "<h1>C</h1><p>Абзац один.</p><p>Абзац два.</p>")])
-    blocks = [b.text for b in EpubImporter().load(data, "b.epub").document.translatable_blocks()]
-    assert "Абзац один." in blocks and "Абзац два." in blocks
-
-
-def test_pre_code_is_code_block_not_translatable():
-    data = build_epub(title="T", author=None, chapters=[
-        ("C", "<h1>C</h1><pre><code>print(1)</code></pre>")])
-    doc = EpubImporter().load(data, "b.epub").document
-    code = [b for b in doc.iter_blocks() if b.type is BlockType.code_block]
-    assert len(code) == 1 and "print(1)" in code[0].text
-
-
-def test_images_recorded_with_source_reference():
-    data = build_epub(title="T", author=None, chapters=[
-        ("C", '<h1>C</h1><p><img src="images/x.png" alt="Схема"/></p>')])
-    doc = EpubImporter().load(data, "b.epub").document
-    images = [b for b in doc.iter_blocks() if b.type is BlockType.image]
-    assert images and images[0].meta.get("src", "").endswith("x.png")
-    # alt-текст переводим — это видимый пользователю текст.
-    assert images[0].meta.get("alt") == "Схема"
-
-
-def test_epub_without_toc_falls_back_to_spine_with_warning():
-    data = build_epub(title="T", author=None, chapters=[("C", "<p>x</p>")], include_toc=False)
-    result = EpubImporter().load(data, "b.epub")
-    assert result.document.chapters
-    assert any(i.code == "toc_missing" for i in result.issues)
-
-
-def test_corrupt_epub_reports_error_issue_not_traceback():
-    """ТЗ §3.1: о повреждённых файлах нужно сообщать до начала перевода."""
-    result = EpubImporter().load(b"not an epub at all", "b.epub")
-    assert any(i.severity == "error" and i.code == "corrupt_file" for i in result.issues)
-```
-
-- [ ] **Step 2: Запустить — FAIL**
-- [ ] **Step 3: Реализовать `make_epub.py` и `epub.py`.** `ebooklib.epub.read_epub` требует путь — писать во временный файл. Теги → блоки: `h1`–`h6` → `heading` с `level`; `p` → `paragraph`; `li` → `list_item`; `pre`/`code` → `code_block`; `img` → `image` (`meta = {"src", "alt"}`); `blockquote` → `blockquote`; `td`/`th` → `table_cell`.
-- [ ] **Step 4: Запустить — PASS (6 passed)**
-- [ ] **Step 5: Коммит** — `feat: импорт EPUB с оглавлением, кодом и изображениями`
+- [ ] **Step 1: Тесты** (EPUB собирается в тесте функцией `buildEPUB(t, opts)`, бинарных фикстур в репозитории нет):
+  - `TestEPUBChaptersAndMetadata` → title, author, порядок глав.
+  - `TestEPUBParagraphsTranslatable`, `TestEPUBPreIsCodeBlock`.
+  - `TestEPUBImagesRecordSourceAndAlt` → `Meta["src"]` заканчивается на `x.png`, `Meta["alt"] == "Схема"`.
+  - `TestEPUBWithoutTOCFallsBackToSpine` → главы есть, Issue `toc_missing`.
+  - `TestCorruptEPUBIsIssueNotPanic` → мусор вместо EPUB → `err == nil`, Issue `{Error, "corrupt_file"}`.
+  - `TestEPUBRejectsZipSlip` → запись с `..` → `storage.ErrUnsafePath`.
+  - `TestEPUBDecodesHTMLEntities` → `&laquo;Текст&raquo;` → `«Текст»`.
+- [ ] **Step 2:** FAIL. **Step 3:** Реализовать. **Step 4:** PASS + lint. **Step 5:** Коммит — `feat: импорт EPUB на стандартной библиотеке`.
 
 ---
 
-### Task 13: API книг — загрузка, библиотека, оглавление, удаление
+### Task 13: API книг
 
-**Files:**
-- Create: `.../db/models/book.py`, `.../api/books.py`
-- Modify: `.../main.py`, миграция
-- Create: `backend/tests/test_books_api.py`
+**Files:** Create `migrations/00003_books.sql`, `internal/db/models/book.go`, `internal/httpapi/books.go`; Test `books_test.go`
 
 **Interfaces:**
-- Produces: `POST /api/books` (multipart), `GET /api/books`, `GET /api/books/{id}`, `GET /api/books/{id}/toc`, `PUT /api/books/{id}/toc` (ручное переупорядочивание, ТЗ §4.3), `DELETE /api/books/{id}` (ТЗ §12).
-- Модель `Book(id, owner_id, title, author, source_format, original_filename, original_size, language, status, cdm: dict, issues: dict, created_at)`. `cdm` — JSONB с сериализованным `CanonicalDocument`; оригинал лежит в `FileStore` и больше не меняется (ТЗ §4.1).
+- Produces: `models.Book{Base; OwnerID uuid.UUID; Title, Author, SourceFormat, OriginalFilename, OriginalSuffix, Language, Status string; OriginalSize int64; CDM datatypes.JSONType[cdm.Document]; Issues datatypes.JSONSlice[importers.Issue]}`.
+- Эндпоинты ТЗ §12: `POST /api/books` (multipart, поле `file`), `GET /api/books`, `GET /api/books/{id}`, `GET /api/books/{id}/toc`, `PUT /api/books/{id}/toc` (ручной порядок глав, ТЗ §4.3: тело `{"order": [индексы]}`), `DELETE /api/books/{id}`.
+- `Deps` пополняется `Store *storage.FileStore` и `Importers *importers.Registry`.
 
-- [ ] **Step 1: Написать падающий тест**
-
-```python
-# backend/tests/test_books_api.py
-async def test_upload_markdown_creates_book_with_toc(user_client):
-    r = await user_client.post("/api/books", files={"file": ("b.md", b"# Ch\n\nText.", "text/markdown")})
-    assert r.status_code == 201
-    book_id = r.json()["id"]
-
-    toc = await user_client.get(f"/api/books/{book_id}/toc")
-    assert toc.status_code == 200
-    assert [c["title"] for c in toc.json()["chapters"]] == ["Ch"]
-
-
-async def test_library_lists_only_own_books(user_client, other_client):
-    await user_client.post("/api/books", files={"file": ("a.md", b"# A\n\nx.", "text/markdown")})
-    await other_client.post("/api/books", files={"file": ("b.md", b"# B\n\ny.", "text/markdown")})
-    mine = (await user_client.get("/api/books")).json()
-    assert [b["title"] for b in mine] == ["A"], "ТЗ §2.2: видно только свои книги"
-
-
-async def test_foreign_book_returns_404(user_client, other_client):
-    book_id = (await other_client.post("/api/books",
-        files={"file": ("b.md", b"# B\n\ny.", "text/markdown")})).json()["id"]
-    assert (await user_client.get(f"/api/books/{book_id}")).status_code == 404
-    assert (await user_client.get(f"/api/books/{book_id}/toc")).status_code == 404
-    assert (await user_client.delete(f"/api/books/{book_id}")).status_code == 404
-
-
-async def test_import_issues_surfaced_before_translation(user_client):
-    """ТЗ §3.1: о проблемах структуры сообщается до начала перевода."""
-    r = await user_client.post("/api/books", files={"file": ("e.txt", b"", "text/plain")})
-    assert r.status_code == 201
-    assert any(i["code"] == "empty_document" for i in r.json()["issues"])
-
-
-async def test_oversized_upload_rejected_with_413(user_client, monkeypatch):
-    from linguastack.config import get_settings
-    get_settings.cache_clear()
-    monkeypatch.setenv("LINGUASTACK_MAX_UPLOAD_BYTES", "10")
-    r = await user_client.post("/api/books", files={"file": ("b.md", b"x" * 100, "text/markdown")})
-    assert r.status_code == 413
-
-
-async def test_delete_book_removes_files_and_row(user_client, tmp_storage):
-    book_id = (await user_client.post("/api/books",
-        files={"file": ("b.md", b"# B\n\nx.", "text/markdown")})).json()["id"]
-    assert (await user_client.delete(f"/api/books/{book_id}")).status_code == 204
-    assert (await user_client.get(f"/api/books/{book_id}")).status_code == 404
-    # ТЗ §13: при удалении книги удаляются и связанные файлы.
-    assert not any(tmp_storage.rglob(f"*{book_id}*"))
-
-
-async def test_same_file_uploaded_twice_yields_two_independent_books(user_client):
-    """Review Focus №4: повторный импорт не должен конфликтовать в хранилище."""
-    payload = {"file": ("b.md", b"# B\n\nx.", "text/markdown")}
-    first = (await user_client.post("/api/books", files=payload)).json()["id"]
-    second = (await user_client.post("/api/books", files=payload)).json()["id"]
-    assert first != second
-    assert (await user_client.get(f"/api/books/{first}")).status_code == 200
-    assert (await user_client.get(f"/api/books/{second}")).status_code == 200
-
-
-async def test_manual_toc_reorder_persists(user_client):
-    """ТЗ §4.3: пользователь может вручную исправить порядок глав."""
-    book_id = (await user_client.post("/api/books",
-        files={"file": ("b.md", b"# A\n\nx.\n\n# B\n\ny.", "text/markdown")})).json()["id"]
-    assert (await user_client.put(f"/api/books/{book_id}/toc",
-        json={"order": [1, 0]})).status_code == 200
-    toc = (await user_client.get(f"/api/books/{book_id}/toc")).json()
-    assert [c["title"] for c in toc["chapters"]] == ["B", "A"]
-```
-
-- [ ] **Step 2: Запустить — FAIL**
-- [ ] **Step 3: Реализовать.** Загрузка: читать потоком с проверкой `max_upload_bytes` (413 при превышении), выбрать импортёр через `registry.pick`, сохранить оригинал в `FileStore`, сериализовать CDM в JSONB, вернуть `issues`. Удаление — `FileStore.delete_book` плюс удаление строки в одной транзакции. Все хендлеры читают ресурс через `owned()`.
-- [ ] **Step 4: Запустить — PASS (8 passed)**
-- [ ] **Step 5: Коммит** — `feat: API книг — загрузка, библиотека, оглавление с переупорядочиванием, удаление`
+- [ ] **Step 1: Тесты:**
+  - `TestUploadMarkdownCreatesBookWithTOC` → 201, затем оглавление `["Ch"]`.
+  - `TestLibraryListsOnlyOwnBooks` (ТЗ §2.2).
+  - `TestForeignBookIs404` → GET, TOC, PUT TOC, DELETE чужой книги → 404.
+  - `TestImportIssuesReturnedOnUpload` → пустой TXT → 201 и Issue `empty_document` в ответе (ТЗ §3.1).
+  - `TestOversizedUploadIs413`, `TestUnsupportedFormatIs415`, `TestZipSlipUploadIs400` (и ничего не сохранено).
+  - `TestDeleteRemovesFilesAndRow` (ТЗ §13).
+  - **Review Focus №4:** `TestSameFileTwiceYieldsIndependentBooks` → два разных ID, оба читаются.
+  - `TestManualTOCReorderPersists` → `[1, 0]` → оглавление `["B", "A"]`; `TestTOCReorderRejectsInvalidPermutation` → дубли или выход за диапазон → 422.
+  - `TestOriginalFileUnchangedOnDisk` → байты `original.*` совпадают с загруженными (ТЗ §4.1).
+- [ ] **Step 2:** FAIL. **Step 3:** Реализовать; тело ограничено `http.MaxBytesReader(MaxUploadBytes)`; книга и файл создаются согласованно (файл пишется до коммита транзакции, при ошибке — `DeleteBook`). **Step 4:** PASS + lint. **Step 5:** Коммит — `feat: API книг — загрузка, библиотека, оглавление, удаление`.
 
 ---
 
 ## Этап 3 — Перевод
 
-### Task 14: Интерфейс LLMProvider, возможности модели, таксономия ошибок, FakeProvider
+### Task 14: Интерфейс провайдера, ошибки, Fake
 
-**Files:**
-- Create: `.../providers/__init__.py`, `.../providers/base.py`, `.../providers/errors.py`, `.../providers/fake.py`
-- Create: `backend/tests/test_provider_contract.py`
+**Files:** Create `internal/providers/provider.go`, `errors.go`, `fake.go`; Test `errors_test.go`, `fake_test.go`
 
 **Interfaces:**
 - Produces:
 
-```python
-# .../providers/base.py — обоснование формы интерфейса: ADD §6
-Determinism = Literal["strict", "balanced", "creative"]
+```go
+type Determinism string // Strict, Balanced, Creative — ADD §6
 
+type CompletionRequest struct {
+	System          string
+	User            string
+	Determinism     Determinism
+	MaxOutputTokens int // 0 = значение адаптера по умолчанию
+}
 
-@dataclass(frozen=True)
-class ModelCapabilities:
-    model_id: str
-    context_tokens: int | None
-    max_output_tokens: int | None
-    supports_temperature: bool
-    supports_system_prompt: bool
-    supported_languages: frozenset[str] | None
-    input_cost_per_mtok: float | None
-    output_cost_per_mtok: float | None
+type CompletionResult struct {
+	Text              string
+	InputTokens       *int
+	OutputTokens      *int
+	CachedInputTokens *int
+	ModelID           string
+	CostUSD           *float64
+}
 
+type Health struct {
+	Available bool
+	Detail    string
+}
 
-@dataclass(frozen=True)
-class CompletionRequest:
-    system: str
-    user: str
-    determinism: Determinism = "strict"
-    max_output_tokens: int | None = None
-
-
-@dataclass(frozen=True)
-class CompletionResult:
-    text: str
-    input_tokens: int | None
-    output_tokens: int | None
-    cached_input_tokens: int | None
-    model_id: str
-    cost_usd: float | None
-
-
-class LLMProvider(abc.ABC):
-    provider_id: ClassVar[str]
-
-    @abc.abstractmethod
-    async def list_models(self) -> list[ModelCapabilities]: ...
-    @abc.abstractmethod
-    async def health(self) -> ProviderHealth: ...
-    @abc.abstractmethod
-    async def capabilities(self, model_id: str) -> ModelCapabilities: ...
-    @abc.abstractmethod
-    async def complete(self, model_id: str, request: CompletionRequest) -> CompletionResult: ...
+type Provider interface {
+	ID() string
+	SendsDataExternally() bool // ТЗ §6.3: интерфейс обязан предупреждать
+	ListModels(ctx context.Context) ([]ModelCapabilities, error)
+	Health(ctx context.Context) Health
+	Capabilities(ctx context.Context, modelID string) (ModelCapabilities, error)
+	Complete(ctx context.Context, modelID string, req CompletionRequest) (CompletionResult, error)
+}
 ```
 
-- Исключения (`errors.py`, ADD §6.1): `ProviderError` (база) → `ProviderUnavailable`, `ProviderRateLimited(retry_after: float | None)`, `ProviderAuthError`, `ModelNotAvailable`, `ProviderRefused(category: str | None)`, `ProviderBadRequest`. Свойство `ProviderError.retryable: bool`.
-- `FakeProvider(scenario: str, ...)` — сценарии из ADD §14: `echo`, `prefix`, `protocol_violation`, `drops_placeholder`, `rate_limited`, `timeout`, `refusal`, `empty`. Также `calls: list[CompletionRequest]` для проверок и `fail_times: int` (падать N раз, затем успех) для тестов повторов.
+  - Ошибки — таблица ADD §6.1; `providers.Retryable(err error) bool`; `RetryAfter(err error) (time.Duration, bool)`.
+  - `providers.Fake{Scenario string; Prefix string; FailTimes int; ViolateTimes int; Calls []CompletionRequest}` — сценарии ADD §14: `echo`, `prefix`, `protocol_violation`, `drops_placeholder`, `rate_limited`, `timeout`, `refusal`, `empty`. Fake понимает конверт `<<<SEG n>>>` (задача 20) и отвечает в нём, чтобы сервис перевода тестировался целиком. Потокобезопасен (mutex) — его зовёт worker.
 
-- [ ] **Step 1: Написать падающий тест** — контракт, общий для всех адаптеров:
-
-```python
-# backend/tests/test_provider_contract.py
-import pytest
-
-from linguastack.providers.base import CompletionRequest
-from linguastack.providers.errors import (
-    ProviderAuthError, ProviderRateLimited, ProviderRefused, ProviderUnavailable,
-)
-from linguastack.providers.fake import FakeProvider
-
-
-async def test_fake_echo_returns_input():
-    provider = FakeProvider(scenario="echo")
-    result = await provider.complete("fake-1", CompletionRequest(system="s", user="hello"))
-    assert result.text == "hello"
-    assert provider.calls[0].user == "hello"
-
-
-async def test_retryable_flags_match_spec():
-    # ADD §6.1: очередь решает про повтор, не зная провайдера.
-    assert ProviderUnavailable("down").retryable is True
-    assert ProviderRateLimited(retry_after=1.0).retryable is True
-    assert ProviderAuthError("bad key").retryable is False
-    assert ProviderRefused(category="cyber").retryable is False
-
-
-async def test_rate_limited_scenario_carries_retry_after():
-    with pytest.raises(ProviderRateLimited) as exc:
-        await FakeProvider(scenario="rate_limited").complete(
-            "fake-1", CompletionRequest(system="s", user="x"))
-    assert exc.value.retry_after == 1.0
-
-
-async def test_fail_times_then_succeeds():
-    provider = FakeProvider(scenario="echo", fail_times=2)
-    for _ in range(2):
-        with pytest.raises(ProviderUnavailable):
-            await provider.complete("fake-1", CompletionRequest(system="s", user="x"))
-    assert (await provider.complete("fake-1", CompletionRequest(system="s", user="x"))).text == "x"
-
-
-async def test_capabilities_declare_language_support_openness():
-    caps = await FakeProvider(scenario="echo").capabilities("fake-1")
-    # ТЗ §5.2: нельзя считать, что все модели поддерживают один набор языков.
-    assert caps.supported_languages is None or isinstance(caps.supported_languages, frozenset)
-```
-
-- [ ] **Step 2: Запустить — FAIL**
-- [ ] **Step 3: Реализовать `errors.py`, `base.py`, `fake.py`.**
-- [ ] **Step 4: Запустить — PASS (5 passed)**
-- [ ] **Step 5: Коммит** — `feat: интерфейс LLMProvider, возможности модели и таксономия ошибок`
+- [ ] **Step 1: Тесты:** `TestRetryableMatchesSpec` (табличный по ADD §6.1, включая обёрнутые через `%w`); `TestRetryAfterExtracted`; `TestFakeEcho`; `TestFakeFailTimesThenSucceeds`; `TestFakeRateLimitedCarriesRetryAfter`; `TestFakeRefusalIsNotRetryable`; `TestFakeRecordsCalls`.
+- [ ] **Step 2–4:** FAIL → реализовать → PASS + lint. **Step 5:** Коммит — `feat: интерфейс провайдера, таксономия ошибок и тестовый провайдер`.
 
 ---
 
-### Task 15: OllamaProvider
+### Task 15: Ollama
 
-**Files:**
-- Create: `.../providers/ollama.py`
-- Create: `backend/tests/test_provider_ollama.py`
+**Files:** Create `internal/providers/ollama.go`; Test `ollama_test.go`
 
 **Interfaces:**
-- Produces: `OllamaProvider(base_url: str, client: httpx.AsyncClient | None = None, timeout: float = 300.0)`; `provider_id = "ollama"`.
-- `list_models()` → `GET /api/tags`; `health()` → `GET /api/version`; `complete()` → `POST /api/chat` (`stream=False`).
-- Отображение намерения (ADD §6): `strict` → `options={"temperature": 0.0}`, `balanced` → `0.3`, `creative` → `0.8`. `supports_temperature = True`, стоимость `None` (локальная модель бесплатна — именно поэтому поля `Optional`).
+- Produces: `providers.NewOllama(baseURL string, client *http.Client) *Ollama`; `ID() == "ollama"`, `SendsDataExternally() == false`. `GET /api/tags`, `GET /api/version`, `POST /api/chat` (`stream: false`). Намерение → `options.temperature`: 0.0 / 0.3 / 0.8. Стоимость `nil`.
 
-- [ ] **Step 1: Написать падающий тест** — на `httpx.MockTransport`, без сети:
-
-```python
-# backend/tests/test_provider_ollama.py
-import httpx
-import pytest
-
-from linguastack.providers.base import CompletionRequest
-from linguastack.providers.errors import ModelNotAvailable, ProviderUnavailable
-from linguastack.providers.ollama import OllamaProvider
-
-
-def provider_with(handler) -> OllamaProvider:
-    return OllamaProvider("http://ollama.test",
-                          client=httpx.AsyncClient(transport=httpx.MockTransport(handler)))
-
-
-async def test_list_models_parses_tags():
-    def handler(request):
-        assert request.url.path == "/api/tags"
-        return httpx.Response(200, json={"models": [
-            {"name": "qwen3:8b", "details": {"parameter_size": "8.2B"}}]})
-
-    models = await provider_with(handler).list_models()
-    assert [m.model_id for m in models] == ["qwen3:8b"]
-    assert models[0].input_cost_per_mtok is None, "локальная модель не имеет цены"
-
-
-async def test_complete_sends_temperature_zero_for_strict():
-    captured = {}
-
-    def handler(request):
-        import json
-        captured.update(json.loads(request.content))
-        return httpx.Response(200, json={
-            "message": {"content": "переведено"},
-            "prompt_eval_count": 10, "eval_count": 3})
-
-    result = await provider_with(handler).complete(
-        "qwen3:8b", CompletionRequest(system="s", user="u", determinism="strict"))
-    assert result.text == "переведено"
-    assert captured["options"]["temperature"] == 0.0
-    assert captured["stream"] is False
-    assert result.input_tokens == 10 and result.output_tokens == 3
-
-
-async def test_connection_error_becomes_provider_unavailable():
-    def handler(request):
-        raise httpx.ConnectError("refused")
-
-    with pytest.raises(ProviderUnavailable):
-        await provider_with(handler).complete("qwen3:8b", CompletionRequest(system="s", user="u"))
-
-
-async def test_missing_model_becomes_model_not_available():
-    def handler(request):
-        return httpx.Response(404, json={"error": "model 'nope' not found"})
-
-    with pytest.raises(ModelNotAvailable):
-        await provider_with(handler).complete("nope", CompletionRequest(system="s", user="u"))
-
-
-async def test_server_error_becomes_provider_unavailable():
-    def handler(request):
-        return httpx.Response(503, text="overloaded")
-
-    with pytest.raises(ProviderUnavailable):
-        await provider_with(handler).complete("qwen3:8b", CompletionRequest(system="s", user="u"))
-
-
-async def test_timeout_becomes_provider_unavailable():
-    def handler(request):
-        raise httpx.ReadTimeout("too slow")
-
-    with pytest.raises(ProviderUnavailable):
-        await provider_with(handler).complete("qwen3:8b", CompletionRequest(system="s", user="u"))
-
-
-@pytest.mark.live
-async def test_live_ollama_translates_a_sentence():
-    """Запускается только при LINGUASTACK_LIVE_OLLAMA=1; модель qwen3:8b установлена."""
-    import os
-    if os.environ.get("LINGUASTACK_LIVE_OLLAMA") != "1":
-        pytest.skip("живой Ollama не включён")
-    provider = OllamaProvider("http://localhost:11434")
-    assert (await provider.health()).available
-    result = await provider.complete("qwen3:8b", CompletionRequest(
-        system="Translate English to Russian. Reply with the translation only.",
-        user="The book is on the table."))
-    assert result.text.strip()
-```
-
-- [ ] **Step 2: Запустить — FAIL**
-- [ ] **Step 3: Реализовать.** Все исключения `httpx` ловятся и приводятся к таксономии. 404 с текстом про модель → `ModelNotAvailable`; 429 → `ProviderRateLimited`; ≥500 и сетевые → `ProviderUnavailable`; 400 → `ProviderBadRequest`.
-- [ ] **Step 4: Запустить — PASS (6 passed, 1 skipped)**
-- [ ] **Step 5: Проверить против живой Ollama**
-
-Run: `cd backend && LINGUASTACK_LIVE_OLLAMA=1 .venv/bin/python -m pytest tests/test_provider_ollama.py -v -m live`
-Expected: PASS — подтверждает, что адаптер работает против реального сервера, а не только против мока.
-
-- [ ] **Step 6: Коммит** — `feat: адаптер Ollama с приведением ошибок к общей таксономии`
+- [ ] **Step 1: Тесты** (`httptest.Server` вместо реального Ollama): `TestOllamaListModels` (цена nil), `TestOllamaStrictSendsTemperatureZero` (и `stream == false`, токены из `prompt_eval_count`/`eval_count`), `TestOllamaConnectionRefusedIsUnavailable`, `TestOllamaMissingModelIsModelNotAvailable` (404), `TestOllama5xxIsUnavailable`, `TestOllamaTimeoutIsUnavailable` (контекст с дедлайном), `TestOllamaContextCancellationStopsRequest`, `TestLiveOllamaTranslatesSentence` (`qwen3:8b`, пропуск без `LINGUASTACK_LIVE_OLLAMA=1`).
+- [ ] **Step 2–4:** FAIL → реализовать → PASS + lint.
+- [ ] **Step 5:** `LINGUASTACK_LIVE_OLLAMA=1 go test -run Live ./internal/providers/` → PASS против реального сервера.
+- [ ] **Step 6:** Коммит — `feat: адаптер Ollama`.
 
 ---
 
-### Task 16: OpenAICompatibleProvider
+### Task 16: OpenAI-compatible
 
-**Files:**
-- Create: `.../providers/openai_compat.py`
-- Create: `backend/tests/test_provider_openai_compat.py`
+**Files:** Create `internal/providers/openai_compat.go`; Test `openai_compat_test.go`
 
 **Interfaces:**
-- Produces: `OpenAICompatibleProvider(base_url: str, api_key: str, client=None, known_models: dict[str, ModelCapabilities] | None = None)`; `provider_id = "openai_compatible"`.
-- `POST {base_url}/chat/completions`, `Authorization: Bearer`. Один адаптер покрывает OpenAI, OpenRouter, Groq, DeepSeek, vLLM, LM Studio — `base_url` задаётся конфигом (решение владельца проекта).
-- Отображение намерения: как у Ollama, через `temperature`.
+- Produces: `providers.NewOpenAICompatible(baseURL, apiKey string, client *http.Client) *OpenAICompatible`; `ID() == "openai_compatible"`, `SendsDataExternally() == true`. `POST {base}/chat/completions`, `Authorization: Bearer`; `GET {base}/models`. Один адаптер на OpenAI, OpenRouter, Groq, DeepSeek, vLLM, LM Studio.
 
-- [ ] **Step 1: Написать падающий тест** — ключевые случаи:
-
-```python
-# backend/tests/test_provider_openai_compat.py
-import httpx
-import pytest
-
-from linguastack.providers.base import CompletionRequest
-from linguastack.providers.errors import (
-    ProviderAuthError, ProviderRateLimited, ProviderUnavailable,
-)
-from linguastack.providers.openai_compat import OpenAICompatibleProvider
-
-
-def provider_with(handler, api_key="sk-test-key"):
-    return OpenAICompatibleProvider("https://api.test/v1", api_key,
-        client=httpx.AsyncClient(transport=httpx.MockTransport(handler)))
-
-
-async def test_sends_bearer_token_and_parses_choice():
-    def handler(request):
-        assert request.headers["authorization"] == "Bearer sk-test-key"
-        return httpx.Response(200, json={
-            "model": "gpt-x", "choices": [{"message": {"content": "перевод"}}],
-            "usage": {"prompt_tokens": 7, "completion_tokens": 2}})
-
-    result = await provider_with(handler).complete("gpt-x", CompletionRequest(system="s", user="u"))
-    assert result.text == "перевод"
-    assert result.input_tokens == 7 and result.output_tokens == 2
-
-
-async def test_401_becomes_auth_error_and_is_not_retryable():
-    def handler(request):
-        return httpx.Response(401, json={"error": {"message": "bad key"}})
-
-    with pytest.raises(ProviderAuthError) as exc:
-        await provider_with(handler).complete("gpt-x", CompletionRequest(system="s", user="u"))
-    assert exc.value.retryable is False
-
-
-async def test_429_carries_retry_after_header():
-    def handler(request):
-        return httpx.Response(429, headers={"retry-after": "7"}, json={"error": {}})
-
-    with pytest.raises(ProviderRateLimited) as exc:
-        await provider_with(handler).complete("gpt-x", CompletionRequest(system="s", user="u"))
-    assert exc.value.retry_after == 7.0
-
-
-async def test_api_key_absent_from_exception_text():
-    """ТЗ §13: секреты не раскрываются. Текст исключения часто попадает в логи."""
-    def handler(request):
-        return httpx.Response(500, text="internal error")
-
-    with pytest.raises(ProviderUnavailable) as exc:
-        await provider_with(handler, api_key="sk-super-secret").complete(
-            "gpt-x", CompletionRequest(system="s", user="u"))
-    assert "sk-super-secret" not in str(exc.value)
-
-
-async def test_empty_choices_becomes_provider_bad_request():
-    from linguastack.providers.errors import ProviderBadRequest
-
-    def handler(request):
-        return httpx.Response(200, json={"choices": [], "usage": {}})
-
-    with pytest.raises(ProviderBadRequest):
-        await provider_with(handler).complete("gpt-x", CompletionRequest(system="s", user="u"))
-```
-
-- [ ] **Step 2: Запустить — FAIL**
-- [ ] **Step 3: Реализовать.** Важно: ключ не подставляется в текст исключений и не логируется.
-- [ ] **Step 4: Запустить — PASS (5 passed)**
-- [ ] **Step 5: Коммит** — `feat: универсальный адаптер OpenAI-совместимых API`
+- [ ] **Step 1: Тесты:** `TestOpenAISendsBearerAndParsesChoice`, `TestOpenAI401IsAuthAndNotRetryable`, `TestOpenAI429CarriesRetryAfter`, `TestOpenAIKeyAbsentFromErrorText` (текст ошибки 500 не содержит ключа — он попадает в логи и `last_error`), `TestOpenAIEmptyChoicesIsBadRequest`, `TestOpenAIRetryAfterHTTPDateParsed` (заголовок бывает и секундами, и датой).
+- [ ] **Step 2–4:** FAIL → реализовать → PASS + lint. **Step 5:** Коммит — `feat: адаптер OpenAI-совместимых API`.
 
 ---
 
-### Task 17: AnthropicProvider
+### Task 17: Anthropic
 
-**Files:**
-- Create: `.../providers/anthropic_provider.py`
-- Create: `backend/tests/test_provider_anthropic.py`
+**Files:** Create `internal/providers/anthropic.go`; Test `anthropic_test.go`
+
+**Перед реализацией:** прочитать `go/claude-api/README.md` навыка `claude-api` (создание клиента, `Messages.New`, типы параметров, `cache_control`, `stop_reason`, типы ошибок). Сигнатуры SDK не угадывать.
 
 **Interfaces:**
-- Produces: `AnthropicProvider(api_key: str, client: AsyncAnthropic | None = None)`; `provider_id = "anthropic"`.
-- Каталог моделей — ADD §6.2 (`claude-opus-5-5` по умолчанию, `claude-sonnet-5-5`, `claude-haiku-5-5`), с ценами для учёта стоимости (ТЗ §6.3).
+- Produces: `providers.NewAnthropic(apiKey string, opts ...option.RequestOption) *Anthropic`; `ID() == "anthropic"`, `SendsDataExternally() == true`. Каталог ADD §6.2 с ценами.
+- Три особенности (ADD §6): нет `temperature`/`top_p`/`top_k`, намерение → `output_config.effort` (`low`/`medium`/`high`); `stop_reason == "refusal"` → `*RefusedError` **до** чтения `content`; системный промпт с `cache_control: ephemeral`, кэшированные токены из `usage.cache_read_input_tokens`.
+- Тесты гоняют SDK против `httptest.Server` через `option.WithBaseURL` — проверяется **реальное тело запроса**, которое уходит в API, а не вызовы заглушки.
 
-**Три особенности, которые ломают наивную реализацию** (ADD §6, §6.1):
-
-1. **`temperature`, `top_p`, `top_k` не передаются никогда** — Opus/Sonnet 5.5 отвечают 400. Намерение отображается в `output_config={"effort": ...}`: `strict` → `low`, `balanced` → `medium`, `creative` → `high`. Поэтому `supports_temperature = False`.
-2. **`stop_reason` проверяется до чтения `content`.** `"refusal"` приходит с HTTP 200 — принять его за перевод нельзя. → `ProviderRefused(category=response.stop_details.category)`.
-3. **Системный промпт помечается `cache_control={"type": "ephemeral"}"`** — он одинаков для всех батчей книги, это основная экономия (ТЗ §6.3 «учёт стоимости»). Факт кэширования читается из `usage.cache_read_input_tokens`.
-
-- [ ] **Step 1: Написать падающий тест**
-
-```python
-# backend/tests/test_provider_anthropic.py
-import pytest
-
-from linguastack.providers.anthropic_provider import AnthropicProvider
-from linguastack.providers.base import CompletionRequest
-from linguastack.providers.errors import ProviderRefused
-
-
-class StubMessages:
-    def __init__(self, response, recorder):
-        self._response = response
-        self._recorder = recorder
-
-    async def create(self, **kwargs):
-        self._recorder.update(kwargs)
-        return self._response
-
-
-class StubClient:
-    def __init__(self, response, recorder):
-        self.messages = StubMessages(response, recorder)
-
-
-class StubUsage:
-    def __init__(self, i=10, o=5, cr=0, cc=0):
-        self.input_tokens, self.output_tokens = i, o
-        self.cache_read_input_tokens, self.cache_creation_input_tokens = cr, cc
-
-
-class StubBlock:
-    def __init__(self, text):
-        self.type, self.text = "text", text
-
-
-class StubResponse:
-    def __init__(self, text="перевод", stop_reason="end_turn", stop_details=None, usage=None):
-        self.content = [StubBlock(text)]
-        self.stop_reason, self.stop_details = stop_reason, stop_details
-        self.usage = usage or StubUsage()
-        self.model = "claude-opus-5-5"
-
-
-async def test_never_sends_temperature():
-    """Opus/Sonnet 5.5 отвечают 400 на temperature — ADD §6."""
-    recorded = {}
-    provider = AnthropicProvider("sk-ant-x", client=StubClient(StubResponse(), recorded))
-    await provider.complete("claude-opus-5-5",
-        CompletionRequest(system="s", user="u", determinism="strict"))
-    assert "temperature" not in recorded
-    assert "top_p" not in recorded and "top_k" not in recorded
-
-
-async def test_determinism_maps_to_effort():
-    for determinism, effort in [("strict", "low"), ("balanced", "medium"), ("creative", "high")]:
-        recorded = {}
-        provider = AnthropicProvider("sk-ant-x", client=StubClient(StubResponse(), recorded))
-        await provider.complete("claude-opus-5-5",
-            CompletionRequest(system="s", user="u", determinism=determinism))
-        assert recorded["output_config"]["effort"] == effort
-
-
-async def test_system_prompt_is_cache_controlled():
-    recorded = {}
-    provider = AnthropicProvider("sk-ant-x", client=StubClient(StubResponse(), recorded))
-    await provider.complete("claude-opus-5-5", CompletionRequest(system="инструкция", user="u"))
-    assert recorded["system"][0]["cache_control"] == {"type": "ephemeral"}
-    assert recorded["system"][0]["text"] == "инструкция"
-
-
-async def test_refusal_raises_before_reading_content():
-    """stop_reason == refusal приходит с HTTP 200 — принять за перевод нельзя."""
-    class Details:
-        category, explanation = "cyber", "declined"
-
-    response = StubResponse(text="я не могу помочь", stop_reason="refusal", stop_details=Details())
-    provider = AnthropicProvider("sk-ant-x", client=StubClient(response, {}))
-    with pytest.raises(ProviderRefused) as exc:
-        await provider.complete("claude-opus-5-5", CompletionRequest(system="s", user="u"))
-    assert exc.value.category == "cyber"
-    assert exc.value.retryable is False
-
-
-async def test_cost_computed_from_catalog_prices():
-    usage = StubUsage(i=1_000_000, o=1_000_000)
-    provider = AnthropicProvider("sk-ant-x", client=StubClient(StubResponse(usage=usage), {}))
-    result = await provider.complete("claude-opus-5-5", CompletionRequest(system="s", user="u"))
-    # ADD §6.2: 4.00 за 1M входных + 20.00 за 1M выходных.
-    assert result.cost_usd == pytest.approx(24.0)
-
-
-async def test_cache_reads_reported():
-    usage = StubUsage(i=100, o=5, cr=900)
-    provider = AnthropicProvider("sk-ant-x", client=StubClient(StubResponse(usage=usage), {}))
-    result = await provider.complete("claude-opus-5-5", CompletionRequest(system="s", user="u"))
-    assert result.cached_input_tokens == 900
-
-
-async def test_model_ids_have_no_date_suffix():
-    models = await AnthropicProvider("sk-ant-x", client=StubClient(StubResponse(), {})).list_models()
-    ids = {m.model_id for m in models}
-    assert ids == {"claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5"}
-    assert not any(any(ch.isdigit() for ch in i.split("-")[-1]) and len(i.split("-")[-1]) == 8
-                   for i in ids), "суффиксы даты запрещены"
-
-
-async def test_max_tokens_is_always_sent():
-    recorded = {}
-    provider = AnthropicProvider("sk-ant-x", client=StubClient(StubResponse(), recorded))
-    await provider.complete("claude-opus-5-5", CompletionRequest(system="s", user="u"))
-    assert recorded["max_tokens"] >= 4096
-```
-
-- [ ] **Step 2: Запустить — FAIL**
-- [ ] **Step 3: Реализовать.** Цепочка ошибок от конкретных к общим: `anthropic.AuthenticationError`/`PermissionDeniedError` → `ProviderAuthError`; `NotFoundError` → `ModelNotAvailable`; `RateLimitError` → `ProviderRateLimited(retry_after из заголовка)`; `BadRequestError` → `ProviderBadRequest`; `APIStatusError` ≥500 и `APIConnectionError`/`APITimeoutError` → `ProviderUnavailable`. Ключ не попадает в текст исключений.
-- [ ] **Step 4: Запустить — PASS (8 passed)**
-- [ ] **Step 5: Коммит** — `feat: адаптер Anthropic (effort вместо temperature, учёт отказов и кэша)`
+- [ ] **Step 1: Тесты:** `TestAnthropicNeverSendsSamplingParams` (в JSON-теле нет `temperature`, `top_p`, `top_k`), `TestAnthropicDeterminismMapsToEffort` (табличный), `TestAnthropicSystemPromptCacheControlled`, `TestAnthropicRefusalRaisedBeforeContent` (категория из `stop_details`, не повторяется), `TestAnthropicCostFromCatalog` (1M вход + 1M выход на `claude-opus-5-5` = $24.00), `TestAnthropicCacheReadsReported`, `TestAnthropicModelIDsHaveNoDateSuffix`, `TestAnthropicErrorMapping` (табличный: 401 → `ErrAuth`, 404 → `ErrModelNotAvailable`, 429 → `RateLimitedError`, 400 → `ErrBadRequest`, 529/500 → `ErrUnavailable`), `TestAnthropicKeyAbsentFromErrorText`, `TestAnthropicMaxTokensAlwaysSent`.
+- [ ] **Step 2–4:** FAIL → реализовать (повторы SDK отключить: `option.WithMaxRetries(0)` — повторами управляет очередь, иначе бюджет повторов умножается) → PASS + lint. **Step 5:** Коммит — `feat: адаптер Anthropic (effort вместо temperature, отказы, кэш)`.
 
 ---
 
-### Task 18: Конфигурации провайдеров — шифрование ключей и защита от утечки
+### Task 18: Конфигурации провайдеров
 
-**Files:**
-- Create: `.../db/models/provider_config.py`, `.../providers/registry.py`, `.../api/providers.py`
-- Modify: `.../main.py`, миграция
-- Create: `backend/tests/test_provider_configs_api.py`
+**Files:** Create `migrations/00004_provider_configs.sql`, `internal/db/models/provider_config.go`, `internal/providers/registry.go`, `internal/httpapi/providers.go`, `internal/logging/redact.go`; Test `providers_api_test.go`, `redact_test.go`
 
 **Interfaces:**
-- Produces: `GET /api/providers`, `GET /api/providers/{id}/models`, `POST /api/provider-configs`, `GET /api/provider-configs`, `DELETE /api/provider-configs/{id}` (ТЗ §12).
-- Модель `ProviderConfig(id, owner_id, provider_id, base_url, secret_ciphertext, key_fingerprint, key_last4, allow_external: bool, created_at)`.
-- `registry.build_provider(config, settings) -> LLMProvider` — расшифровывает ключ только в момент создания адаптера.
-- `allow_external` — реализация ТЗ §6.4: пользователь может **запретить** передачу текста внешним сервисам; при `False` создание проекта на внешнем провайдере отклоняется.
+- Produces: `models.ProviderConfig{Base; OwnerID; ProviderID, BaseURL, SecretCiphertext, KeyFingerprint, KeyLast4 string; AllowExternal bool}` — JSON-тег `-` у `SecretCiphertext`.
+- `providers.Build(cfg models.ProviderConfig, box *security.SecretBox, settings config.Settings) (Provider, error)` — ключ расшифровывается только здесь.
+- Эндпоинты ТЗ §12: `GET /api/providers` (каталог с `sends_data_externally`), `GET /api/providers/{id}/models`, `POST /api/provider-configs`, `GET /api/provider-configs`, `GET /api/provider-configs/{id}`, `DELETE /api/provider-configs/{id}`.
+- `logging.NewRedactingHandler(inner slog.Handler) slog.Handler` — вырезает подстроки вида `sk-[A-Za-z0-9_-]{8,}` и значения атрибутов с ключами `api_key`, `password`, `token`.
 
-- [ ] **Step 1: Написать падающий тест**
-
-```python
-# backend/tests/test_provider_configs_api.py
-import logging
-
-
-async def test_api_key_never_returned_in_any_response(user_client):
-    """ТЗ §15.14 и §6.3: ключ не раскрывается клиенту после сохранения."""
-    secret = "sk-ant-super-secret-value-9876"
-    created = await user_client.post("/api/provider-configs", json={
-        "provider_id": "anthropic", "api_key": secret})
-    assert created.status_code == 201
-    assert secret not in created.text
-    assert created.json()["key_last4"] == "9876"
-    assert len(created.json()["key_fingerprint"]) == 8
-
-    listed = await user_client.get("/api/provider-configs")
-    assert secret not in listed.text
-    detail = await user_client.get(f"/api/provider-configs/{created.json()['id']}")
-    assert secret not in detail.text
-
-
-async def test_api_key_absent_from_logs(user_client, caplog):
-    secret = "sk-ant-leak-check-1234"
-    with caplog.at_level(logging.DEBUG):
-        await user_client.post("/api/provider-configs", json={
-            "provider_id": "anthropic", "api_key": secret})
-    assert secret not in caplog.text, "ТЗ §13: запрет на раскрытие секретов в логах"
-
-
-async def test_ciphertext_in_db_is_not_plaintext(user_client, session):
-    from sqlalchemy import select
-
-    from linguastack.db.models.provider_config import ProviderConfig
-
-    secret = "sk-ant-db-check-5555"
-    await user_client.post("/api/provider-configs", json={
-        "provider_id": "anthropic", "api_key": secret})
-    row = (await session.execute(select(ProviderConfig))).scalars().first()
-    assert secret not in row.secret_ciphertext
-
-
-async def test_foreign_provider_config_returns_404(user_client, other_client):
-    other = await other_client.post("/api/provider-configs", json={
-        "provider_id": "anthropic", "api_key": "sk-ant-other-1111"})
-    config_id = other.json()["id"]
-    assert (await user_client.get(f"/api/provider-configs/{config_id}")).status_code == 404
-    assert (await user_client.delete(f"/api/provider-configs/{config_id}")).status_code == 404
-
-
-async def test_ollama_needs_no_api_key(user_client):
-    r = await user_client.post("/api/provider-configs", json={
-        "provider_id": "ollama", "base_url": "http://localhost:11434"})
-    assert r.status_code == 201
-    assert r.json()["key_last4"] is None
-
-
-async def test_providers_list_declares_external_data_egress(user_client):
-    """ТЗ §6.3: интерфейс обязан явно сообщать, что текст покинет локальный сервер."""
-    providers = (await user_client.get("/api/providers")).json()
-    by_id = {p["provider_id"]: p for p in providers}
-    assert by_id["ollama"]["sends_data_externally"] is False
-    assert by_id["anthropic"]["sends_data_externally"] is True
-    assert by_id["openai_compatible"]["sends_data_externally"] is True
-```
-
-- [ ] **Step 2: Запустить — FAIL**
-- [ ] **Step 3: Реализовать.** Схема ответа `ProviderConfigOut` **не содержит** поля с ключом — защита на уровне типа, а не на внимательности. Добавить `logging.Filter`, вырезающий подстроки, похожие на ключи (`sk-[A-Za-z0-9-]{8,}`), и подключить его в `create_app()`.
-- [ ] **Step 4: Запустить — PASS (6 passed)**
-- [ ] **Step 5: Коммит** — `feat: конфигурации провайдеров с шифрованием ключей и запретом утечки`
+- [ ] **Step 1: Тесты:** `TestAPIKeyNeverReturned` (ни в создании, ни в списке, ни в деталях; есть `key_last4` и 8-символьный `key_fingerprint`), `TestAPIKeyAbsentFromLogs` (буферный `slog`-обработчик за весь запрос), `TestCiphertextInDBIsNotPlaintext`, `TestForeignProviderConfigIs404`, `TestOllamaNeedsNoKey`, `TestProvidersDeclareExternalEgress` (ТЗ §6.3), `TestRedactingHandlerMasksKeys`, `TestCreateConfigWithoutSecretKeyConfiguredIs503` (сервер без `LINGUASTACK_SECRET_KEY` не принимает ключи, но сообщает об этом понятно).
+- [ ] **Step 2–4:** FAIL → реализовать → PASS + lint. **Step 5:** Коммит — `feat: конфигурации провайдеров с шифрованием ключей`.
 
 ---
 
 ### Task 19: Сегментатор и батчер
 
-**Files:**
-- Create: `.../translation/__init__.py`, `.../translation/segmenter.py`
-- Create: `backend/tests/test_segmenter.py`
+**Files:** Create `internal/translation/segmenter.go`; Test `segmenter_test.go`
 
 **Interfaces:**
-- Produces: `SegmentRef(node_id: str, chapter_index: int, type: BlockType, text: str, source_hash: str, level: int | None)`; `Batch(segments: list[SegmentRef], context_before: str | None, context_after: str | None)`; `segment_document(doc: CanonicalDocument) -> list[SegmentRef]`; `build_batches(segments, max_segments, max_chars, context_lookup) -> list[Batch]`; исключение `SegmentTooLarge(node_id, chars, limit)`.
-- Правила — ADD §2: сегмент = один переводимый блок; батч не пересекает границу главы.
+- Produces: `translation.SegmentRef{NodeID string; ChapterIndex, Ordinal int; Type cdm.BlockType; Text, SourceHash string; Level int}`; `translation.Batch{Segments []SegmentRef; ContextBefore, ContextAfter string}`; `translation.Segment(doc cdm.Document) []SegmentRef`; `translation.BuildBatches(segs []SegmentRef, maxSegments, maxChars int) ([]Batch, error)`; `*SegmentTooLargeError{NodeID string; Chars, Limit int}`.
+- Длина — в рунах (`utf8.RuneCountInString`), не в байтах: кириллица занимает 2 байта на символ, и лимит в байтах вдвое урезал бы русские батчи.
 
-- [ ] **Step 1: Написать падающий тест** (включая **Review Focus №1 и №3**)
-
-```python
-# backend/tests/test_segmenter.py
-import pytest
-
-from linguastack.cdm.ids import content_hash, make_node_id
-from linguastack.cdm.model import Block, BlockType, BookMeta, CanonicalDocument, Chapter
-from linguastack.translation.segmenter import (
-    SegmentTooLarge, build_batches, segment_document,
-)
-
-
-def doc_with(*chapters: Chapter) -> CanonicalDocument:
-    return CanonicalDocument(
-        meta=BookMeta(title="T", author=None, language="en", source_format="md"),
-        chapters=list(chapters))
-
-
-def para(chapter: int, ordinal: int, text: str) -> Block:
-    return Block(node_id=make_node_id(chapter, ordinal), type=BlockType.paragraph,
-                 text=text, source_hash=content_hash(text))
-
-
-def code(chapter: int, ordinal: int, text: str) -> Block:
-    return Block(node_id=make_node_id(chapter, ordinal), type=BlockType.code_block,
-                 text=text, source_hash=content_hash(text))
-
-
-def test_one_segment_per_translatable_block():
-    document = doc_with(Chapter(index=0, title="C", blocks=[
-        para(0, 0, "Первый."), code(0, 1, "print(1)"), para(0, 2, "Второй.")]))
-    segments = segment_document(document)
-    assert [s.text for s in segments] == ["Первый.", "Второй."]
-
-
-def test_batches_respect_segment_count_limit():
-    document = doc_with(Chapter(index=0, title="C",
-        blocks=[para(0, i, f"Абзац {i}.") for i in range(25)]))
-    batches = build_batches(segment_document(document), max_segments=10, max_chars=10_000)
-    assert [len(b.segments) for b in batches] == [10, 10, 5]
-
-
-def test_batches_respect_char_limit():
-    document = doc_with(Chapter(index=0, title="C",
-        blocks=[para(0, i, "x" * 400) for i in range(10)]))
-    batches = build_batches(segment_document(document), max_segments=100, max_chars=1000)
-    assert all(sum(len(s.text) for s in b.segments) <= 1000 for b in batches)
-    assert len(batches) > 1
-
-
-def test_batch_never_spans_two_chapters():
-    document = doc_with(
-        Chapter(index=0, title="A", blocks=[para(0, 0, "A1."), para(0, 1, "A2.")]),
-        Chapter(index=1, title="B", blocks=[para(1, 0, "B1.")]))
-    batches = build_batches(segment_document(document), max_segments=100, max_chars=10_000)
-    for batch in batches:
-        assert len({s.chapter_index for s in batch.segments}) == 1
-
-
-def test_context_carries_neighbouring_text():
-    document = doc_with(Chapter(index=0, title="C",
-        blocks=[para(0, 0, "Нулевой."), para(0, 1, "Первый."), para(0, 2, "Второй.")]))
-    batches = build_batches(segment_document(document), max_segments=1, max_chars=10_000)
-    assert batches[1].context_before == "Нулевой."
-    assert batches[1].context_after == "Второй."
-    assert batches[0].context_before is None
-
-
-def test_chapter_with_only_code_yields_no_segments():
-    """Review Focus №1: глава целиком из кода не должна ломать прогресс."""
-    document = doc_with(Chapter(index=0, title="C",
-        blocks=[code(0, 0, "print(1)"), code(0, 1, "print(2)")]))
-    assert segment_document(document) == []
-    assert build_batches([], max_segments=10, max_chars=1000) == []
-
-
-def test_oversized_single_block_raises_named_error():
-    """Review Focus №3: блок больше лимита — явная ошибка, не молчаливое обрезание."""
-    document = doc_with(Chapter(index=0, title="C", blocks=[para(0, 0, "x" * 50_000)]))
-    with pytest.raises(SegmentTooLarge) as exc:
-        build_batches(segment_document(document), max_segments=10, max_chars=6000)
-    assert exc.value.node_id == "ch0000/b0000"
-    assert exc.value.chars == 50_000 and exc.value.limit == 6000
-
-
-def test_blank_blocks_are_not_segmented():
-    document = doc_with(Chapter(index=0, title="C",
-        blocks=[para(0, 0, "   "), para(0, 1, "Текст.")]))
-    assert [s.text for s in segment_document(document)] == ["Текст."]
-```
-
-- [ ] **Step 2: Запустить — FAIL**
-- [ ] **Step 3: Реализовать.** `build_batches` группирует последовательные сегменты одной главы; `SegmentTooLarge` поднимается, когда *одиночный* сегмент не влезает в `max_chars` (иначе он никогда не был бы переведён).
-- [ ] **Step 4: Запустить — PASS (8 passed)**
-- [ ] **Step 5: Коммит** — `feat: сегментатор CDM и батчер с контекстом соседних блоков`
+- [ ] **Step 1: Тесты:** `TestOneSegmentPerTranslatableBlock`, `TestBatchesRespectSegmentLimit` (25 → 10/10/5), `TestBatchesRespectCharLimit`, `TestBatchNeverSpansChapters`, `TestContextCarriesNeighbours`, **Review Focus №1** `TestCodeOnlyChapterYieldsNoSegments`, **Review Focus №3** `TestOversizedBlockIsNamedError` (`NodeID == "ch0000/b0000"`, `Chars == 50000`, `Limit == 6000`), `TestBlankBlocksSkipped`, `TestCharLimitCountsRunesNotBytes`.
+- [ ] **Step 2–4:** FAIL → реализовать → PASS + lint. **Step 5:** Коммит — `feat: сегментатор CDM и батчер с контекстом соседей`.
 
 ---
 
-### Task 20: Протокол конверта и его парсер
+### Task 20: Конверт и его парсер
 
-**Files:**
-- Create: `.../translation/prompt.py`
-- Create: `backend/tests/test_prompt_protocol.py`
+**Files:** Create `internal/translation/prompt.go`; Test `prompt_test.go`
 
 **Interfaces:**
-- Produces: `build_system_prompt(source_lang, target_lang, style, glossary: dict[str, str]) -> str`; `build_user_prompt(batch: Batch) -> str`; `parse_envelope(text: str, expected: int) -> dict[int, str]`; исключение `ProtocolError(reason, raw)`.
-- Формат — ADD §3. Системный промпт **детерминирован** (глоссарий сортируется) — иначе рушится кэш префикса (ADD §6.2).
+- Produces: `translation.BuildSystemPrompt(src, tgt, style string, glossary map[string]string) string` — **детерминирован** (ключи глоссария сортируются, никаких дат и идентификаторов — иначе рушится кэш префикса, ADD §6.2); `translation.BuildUserPrompt(b Batch) string`; `translation.ParseEnvelope(text string, expected int) (map[int]string, error)`; `*ProtocolError{Reason, Raw string}`.
 
-- [ ] **Step 1: Написать падающий тест**
-
-```python
-# backend/tests/test_prompt_protocol.py
-import pytest
-
-from linguastack.translation.prompt import (
-    ProtocolError, build_system_prompt, build_user_prompt, parse_envelope,
-)
-
-
-def test_parses_well_formed_envelope():
-    text = "<<<SEG 1>>>\nПервый\n<<<SEG 2>>>\nВторой\n<<<END>>>"
-    assert parse_envelope(text, expected=2) == {1: "Первый", 2: "Второй"}
-
-
-def test_tolerates_preamble_and_trailing_chatter():
-    """Модель часто добавляет вежливость. Парсер обязан это переживать."""
-    text = ("Вот перевод:\n\n<<<SEG 1>>>\nПервый\n<<<SEG 2>>>\nВторой\n<<<END>>>\n"
-            "Надеюсь, это помогло!")
-    assert parse_envelope(text, expected=2) == {1: "Первый", 2: "Второй"}
-
-
-def test_missing_segment_raises_protocol_error():
-    with pytest.raises(ProtocolError) as exc:
-        parse_envelope("<<<SEG 1>>>\nТолько один\n<<<END>>>", expected=2)
-    assert "2" in str(exc.value)
-
-
-def test_extra_segment_raises_protocol_error():
-    with pytest.raises(ProtocolError):
-        parse_envelope("<<<SEG 1>>>\nA\n<<<SEG 2>>>\nB\n<<<SEG 3>>>\nC\n<<<END>>>", expected=2)
-
-
-def test_duplicate_index_raises_protocol_error():
-    with pytest.raises(ProtocolError):
-        parse_envelope("<<<SEG 1>>>\nA\n<<<SEG 1>>>\nB\n<<<END>>>", expected=2)
-
-
-def test_missing_end_marker_still_parses_last_segment():
-    # Обрыв по max_tokens не должен терять уже полученное; решение проверяет валидация.
-    assert parse_envelope("<<<SEG 1>>>\nA\n<<<SEG 2>>>\nB", expected=2) == {1: "A", 2: "B"}
-
-
-def test_no_envelope_at_all_raises_protocol_error():
-    with pytest.raises(ProtocolError):
-        parse_envelope("Я не понял задачу.", expected=1)
-
-
-def test_multiline_segment_preserved():
-    text = "<<<SEG 1>>>\nСтрока один\nСтрока два\n<<<END>>>"
-    assert parse_envelope(text, expected=1) == {1: "Строка один\nСтрока два"}
-
-
-def test_system_prompt_is_deterministic_for_cache_stability():
-    """ADD §6.2: любой дрейф префикса убивает кэш и удорожает книгу."""
-    a = build_system_prompt("en", "ru", "neutral", {"б": "b", "а": "a"})
-    b = build_system_prompt("en", "ru", "neutral", {"а": "a", "б": "b"})
-    assert a == b, "порядок глоссария не должен влиять на промпт"
-    assert "{" not in a.replace("{{", ""), "никаких незаполненных шаблонов"
-
-
-def test_system_prompt_mentions_languages_and_glossary_terms():
-    prompt = build_system_prompt("en", "ru", "neutral", {"queue": "очередь"})
-    assert "en" in prompt and "ru" in prompt
-    assert "queue" in prompt and "очередь" in prompt
-
-
-def test_user_prompt_numbers_segments_and_marks_context():
-    from linguastack.translation.segmenter import Batch, SegmentRef
-    from linguastack.cdm.model import BlockType
-
-    batch = Batch(
-        segments=[SegmentRef("ch0000/b0001", 0, BlockType.paragraph, "Текст.", "h", None)],
-        context_before="До.", context_after="После.")
-    prompt = build_user_prompt(batch)
-    assert "<<<SEG 1>>>" in prompt and "<<<END>>>" in prompt
-    assert "Текст." in prompt
-    # Контекст должен быть явно отделён, иначе модель переведёт и его.
-    assert "До." in prompt and prompt.index("До.") < prompt.index("<<<SEG 1>>>")
-```
-
-- [ ] **Step 2: Запустить — FAIL**
-- [ ] **Step 3: Реализовать.** `parse_envelope` сканирует построчно по `^<<<SEG (\d+)>>>\s*$`; текст до первого маркера и после `<<<END>>>` отбрасывается; множество индексов сверяется с `set(range(1, expected + 1))`.
-- [ ] **Step 4: Запустить — PASS (11 passed)**
-- [ ] **Step 5: Коммит** — `feat: протокол нумерованного конверта и устойчивый парсер ответа модели`
+- [ ] **Step 1: Тесты:** `TestParseWellFormed`, `TestParseToleratesPreambleAndTrailer`, `TestParseMissingSegment`, `TestParseExtraSegment`, `TestParseDuplicateIndex`, `TestParseMissingEndMarkerKeepsReceived`, `TestParseNoEnvelope`, `TestParseMultilineSegment`, `TestParseTrimsOnlyEnvelopeWhitespace` (внутренние переводы строк сохраняются), `TestSystemPromptDeterministic` (порядок глоссария не влияет), `TestSystemPromptMentionsLanguagesAndGlossary`, `TestUserPromptMarksContextSeparately` (контекст стоит до `<<<SEG 1>>>` и помечен как не подлежащий переводу).
+- [ ] **Step 2–4:** FAIL → реализовать → PASS + lint. **Step 5:** Коммит — `feat: протокол нумерованного конверта и устойчивый парсер`.
 
 ---
 
-### Task 21: Валидация результата перевода
+### Task 21: Валидация
 
-**Files:**
-- Create: `.../translation/validation.py`
-- Create: `backend/tests/test_validation.py`
+**Files:** Create `internal/translation/validation.go`; Test `validation_test.go`
 
 **Interfaces:**
-- Produces: `Severity` (str-Enum: `ok`, `warning`, `error`); `Finding(code: str, severity: Severity, message: str)`; `validate_segment(source: str, translation: str, masked_source: str, source_lang: str, target_lang: str, block_type: BlockType, level: int | None) -> list[Finding]`; `worst(findings) -> Severity`.
-- Таблица проверок и severity — **ровно** ADD §5.
+- Produces: `translation.Severity` (`OK`, `Warning`, `Error`, упорядочены); `translation.Finding{Code string; Severity Severity; Message string}`; `translation.ValidateSegment(in ValidationInput) []Finding`; `ValidationInput{Source, Translation, MaskedSource, MaskedTranslation, SourceLang, TargetLang string; Type cdm.BlockType; Level int}`; `translation.Worst([]Finding) Severity`.
+- Таблица проверок и severity — **ровно** ADD §5. Маркеры сверяются на замаскированных текстах (до восстановления), ссылки и разметка — на восстановленных.
 
-- [ ] **Step 1: Написать падающий тест**
-
-```python
-# backend/tests/test_validation.py
-from linguastack.cdm.model import BlockType
-from linguastack.translation.validation import Severity, validate_segment, worst
-
-
-def check(source, translation, masked=None, src="en", tgt="ru", block=BlockType.paragraph):
-    return validate_segment(source, translation, masked or source, src, tgt, block, None)
-
-
-def codes(findings):
-    return {f.code for f in findings}
-
-
-def test_clean_translation_has_no_findings():
-    assert check("The book is here.", "Книга здесь.") == []
-
-
-def test_empty_translation_is_error():
-    findings = check("Непустой исходник.", "")
-    assert "empty_translation" in codes(findings)
-    assert worst(findings) is Severity.error
-
-
-def test_placeholder_dropped_is_error():
-    findings = check("Code ⟦1⟧ here.", "Код здесь.", masked="Code ⟦1⟧ here.")
-    assert "placeholder_mismatch" in codes(findings)
-    assert worst(findings) is Severity.error
-
-
-def test_placeholder_reordered_is_fine():
-    assert check("A ⟦1⟧ B ⟦2⟧", "⟦2⟧ Б ⟦1⟧ А", masked="A ⟦1⟧ B ⟦2⟧") == []
-
-
-def test_link_count_change_is_error():
-    findings = check("See [docs](x) and [api](y).", "См. [документацию](x).")
-    assert "link_count_mismatch" in codes(findings)
-    assert worst(findings) is Severity.error
-
-
-def test_untranslated_copy_is_warning_not_error():
-    source = "This is a reasonably long English sentence that should change."
-    findings = check(source, source)
-    assert "untranslated" in codes(findings)
-    assert worst(findings) is Severity.warning
-
-
-def test_short_identical_text_is_not_flagged():
-    # "SQL" или "2026" законно совпадают — порог длины 40 символов, ADD §5.
-    assert check("SQL", "SQL") == []
-
-
-def test_length_ratio_outside_bounds_is_warning():
-    findings = check("A short sentence here.", "Очень " * 100)
-    assert "length_ratio" in codes(findings)
-    assert worst(findings) is Severity.warning
-
-
-def test_inline_markup_count_change_is_warning():
-    findings = check("Это **важно** и **нужно**.", "Это **важно** и нужно.")
-    assert "markup_mismatch" in codes(findings)
-    assert worst(findings) is Severity.warning
-
-
-def test_heading_level_change_is_warning():
-    from linguastack.translation.validation import validate_segment
-
-    findings = validate_segment("# Title", "## Заголовок", "# Title", "en", "ru",
-                                BlockType.heading, level=1)
-    assert "heading_level_changed" in codes(findings)
-
-
-def test_worst_picks_error_over_warning():
-    findings = check("Code ⟦1⟧ x", "", masked="Code ⟦1⟧ x")
-    assert worst(findings) is Severity.error
-
-
-def test_same_language_pair_skips_untranslated_check():
-    # Перевод en→en (например, упрощение) законно может совпадать.
-    source = "This is a reasonably long English sentence that should change."
-    assert "untranslated" not in codes(check(source, source, src="en", tgt="en"))
-```
-
-- [ ] **Step 2: Запустить — FAIL**
-- [ ] **Step 3: Реализовать** строго по таблице ADD §5.
-- [ ] **Step 4: Запустить — PASS (12 passed)**
-- [ ] **Step 5: Коммит** — `feat: валидация перевода с разделением ошибок и предупреждений`
+- [ ] **Step 1: Тесты** (табличный `TestValidateSegment`): чистый перевод → нет находок; пустой → Error `empty_translation`; потерянный маркер → Error `placeholder_mismatch`; переставленные маркеры → ok; изменилось число ссылок → Error `link_count_mismatch`; дословная копия длиной > 40 → Warning `untranslated`; короткое совпадение (`"SQL"`) → ok; соотношение длин вне [0.3, 3.0] → Warning `length_ratio`; изменилось число `**` → Warning `markup_mismatch`; уровень заголовка изменился → Warning `heading_level_changed`; одинаковая пара языков → без `untranslated`; `Worst` выбирает Error.
+- [ ] **Step 2–4:** FAIL → реализовать → PASS + lint. **Step 5:** Коммит — `feat: валидация перевода`.
 
 ---
 
-### Task 22: Модели проекта перевода, сегментов, ревизий и задач
+### Task 22: Модели перевода
 
-**Files:**
-- Create: `.../db/models/translation.py`, миграция
-- Create: `backend/tests/test_translation_models.py`
+**Files:** Create `migrations/00005_translation.sql`, `internal/db/models/translation.go`; Test `translation_models_test.go`
 
 **Interfaces:**
-- Produces ORM-модели (сущности ТЗ §11):
-  - `TranslationProject(id, owner_id, book_id, source_lang, target_lang, provider_config_id, model_id, style, determinism, status, segments_total, segments_done, segments_failed, warnings_count, created_at, updated_at)`. Статусы: `draft`, `queued`, `running`, `paused`, `completed`, `completed_with_warnings`, `failed`, `cancelled`.
-  - `TranslationSegment(id, project_id, node_id, chapter_index, ordinal, source_text, source_hash, translated_text, status, severity, findings: dict, attempts, last_error, updated_at)`. Статусы: `pending`, `running`, `completed`, `failed`, `stale`. **Уникальность `(project_id, node_id)`.**
-  - `TranslationSegmentRevision(id, segment_id, translated_text, origin, created_at)` — `origin` ∈ `machine`, `manual`, `retry`; реализует ТЗ §5.1 «повторный перевод не уничтожает предыдущую версию».
-  - `TranslationTask(id, project_id, owner_id, kind, status, priority, attempts, max_attempts, locked_by, locked_until, last_error, created_at, started_at, finished_at)`. Статусы — **ровно** из ТЗ §7: `pending`, `running`, `completed`, `failed`, `cancelled`.
-- Индексы: `translation_tasks(status, priority DESC, created_at)`, `translation_tasks(owner_id, status)`, `translation_segments(project_id, status)`.
+- Produces (ТЗ §11):
+  - `models.TranslationProject{Base; OwnerID, BookID, ProviderConfigID uuid.UUID; SourceLang, TargetLang, ModelID, Style, Determinism, Status string; SegmentsTotal, SegmentsDone, SegmentsFailed, WarningsCount int; CostUSD float64; UpdatedAt time.Time}`; статусы `draft, queued, running, paused, completed, completed_with_warnings, failed, cancelled`; `(p *TranslationProject) IsTerminal() bool`; `ProgressPercent() float64` — **0 сегментов = 100%** (Review Focus №1).
+  - `models.TranslationSegment{Base; ProjectID uuid.UUID; NodeID string; ChapterIndex, Ordinal int; Type, SourceText, SourceHash string; TranslatedText *string; Status, Severity string; Findings datatypes.JSONSlice[translation.Finding]; Attempts int; LastError string; UpdatedAt time.Time}`; уникальность `(project_id, node_id)`; статусы `pending, running, completed, failed, stale`.
+  - `models.TranslationSegmentRevision{Base; SegmentID uuid.UUID; TranslatedText, Origin string}` — `machine`, `manual`, `retry` (ТЗ §5.1).
+  - `models.TranslationTask{Base; ProjectID, OwnerID uuid.UUID; Kind, Status string; Priority, Attempts, MaxAttempts int; LockedBy *string; LockedUntil, AvailableAt, StartedAt, FinishedAt *time.Time; LastError string}`; статусы **ровно** ТЗ §7.
+  - Индексы: `translation_tasks(status, priority desc, created_at)`, `translation_tasks(owner_id, status)`, `translation_segments(project_id, status)`.
+  - Внешние ключи с `ON DELETE CASCADE` от книги к проектам, сегментам, ревизиям, задачам — удаление книги не оставляет висящих строк (ТЗ §13).
 
-- [ ] **Step 1: Написать падающий тест**
-
-```python
-# backend/tests/test_translation_models.py
-import pytest
-from sqlalchemy.exc import IntegrityError
-
-
-async def test_segment_node_id_unique_per_project(session, make_user, make_book, make_project):
-    from linguastack.db.models.translation import TranslationSegment
-
-    user = await make_user("m@example.com")
-    project = await make_project(user, await make_book(user))
-    session.add(TranslationSegment(project_id=project.id, node_id="ch0000/b0000",
-        chapter_index=0, ordinal=0, source_text="x", source_hash="h", status="pending"))
-    await session.flush()
-    session.add(TranslationSegment(project_id=project.id, node_id="ch0000/b0000",
-        chapter_index=0, ordinal=0, source_text="y", source_hash="h2", status="pending"))
-    with pytest.raises(IntegrityError):
-        await session.flush()
-
-
-async def test_two_projects_on_one_book_are_independent(session, make_user, make_book, make_project):
-    """ТЗ §5.1 и Review Focus №4: en→ru и en→de на одной книге не мешают друг другу."""
-    from linguastack.db.models.translation import TranslationSegment
-
-    user = await make_user("two@example.com")
-    book = await make_book(user)
-    ru = await make_project(user, book, target_lang="ru")
-    de = await make_project(user, book, target_lang="de")
-    assert ru.id != de.id
-
-    for project, text in ((ru, "Книга"), (de, "Buch")):
-        session.add(TranslationSegment(project_id=project.id, node_id="ch0000/b0000",
-            chapter_index=0, ordinal=0, source_text="Book", source_hash="h",
-            translated_text=text, status="completed"))
-    await session.flush()  # один и тот же node_id в двух проектах — законно
-
-
-async def test_revision_history_preserved_on_retranslate(session, make_user, make_book, make_project):
-    """ТЗ §5.1: повторный перевод не должен уничтожать предыдущую версию."""
-    from sqlalchemy import select
-
-    from linguastack.db.models.translation import (
-        TranslationSegment, TranslationSegmentRevision,
-    )
-
-    user = await make_user("rev@example.com")
-    project = await make_project(user, await make_book(user))
-    segment = TranslationSegment(project_id=project.id, node_id="ch0000/b0000",
-        chapter_index=0, ordinal=0, source_text="Book", source_hash="h",
-        translated_text="Первый вариант", status="completed")
-    session.add(segment)
-    await session.flush()
-
-    session.add(TranslationSegmentRevision(segment_id=segment.id,
-        translated_text="Первый вариант", origin="machine"))
-    segment.translated_text = "Второй вариант"
-    session.add(TranslationSegmentRevision(segment_id=segment.id,
-        translated_text="Второй вариант", origin="retry"))
-    await session.flush()
-
-    revisions = (await session.execute(select(TranslationSegmentRevision)
-        .where(TranslationSegmentRevision.segment_id == segment.id)
-        .order_by(TranslationSegmentRevision.created_at))).scalars().all()
-    assert [r.translated_text for r in revisions] == ["Первый вариант", "Второй вариант"]
-
-
-async def test_task_statuses_match_spec(session, make_user, make_book, make_project):
-    from linguastack.db.models.translation import TranslationTask
-
-    assert set(TranslationTask.STATUSES) == {
-        "pending", "running", "completed", "failed", "cancelled"}
-```
-
-- [ ] **Step 2: Запустить — FAIL**
-- [ ] **Step 3: Реализовать модели, миграцию и фабрику `make_project`.**
-- [ ] **Step 4: Запустить — PASS (4 passed)**
-- [ ] **Step 5: Коммит** — `feat: модели проектов перевода, сегментов, ревизий и задач очереди`
+- [ ] **Step 1: Тесты:** `TestSegmentNodeIDUniquePerProject`, **Review Focus №4** `TestTwoProjectsOnOneBookIndependent`, `TestRevisionHistoryPreserved`, `TestTaskStatusesMatchSpec`, `TestProgressPercentZeroSegmentsIs100`, `TestDeletingBookCascades`.
+- [ ] **Step 2–4:** FAIL → реализовать → PASS + lint. **Step 5:** Коммит — `feat: модели проектов перевода, сегментов, ревизий и задач`.
 
 ---
 
-### Task 23: Сервис перевода батча с деградацией протокола
+### Task 23: Сервис перевода батча
 
-**Files:**
-- Create: `.../translation/service.py`
-- Create: `backend/tests/test_translation_service.py`
+**Files:** Create `internal/translation/service.go`; Test `service_test.go`
 
 **Interfaces:**
-- Produces: `TranslationService(provider: LLMProvider, model_id: str, settings)`; `async def translate_batch(batch: Batch, system_prompt: str, determinism) -> BatchOutcome`; `BatchOutcome(results: dict[str, SegmentOutcome], provider_calls: int, cost_usd: float | None)`; `SegmentOutcome(node_id, translated_text, severity, findings, error)`.
-- Конвейер на батч: маскирование (задача 7) → конверт (задача 20) → провайдер (14–17) → парсер → проверка маркеров → размаскирование → валидация (21).
-- **Деградация ADD §3:** повтор батча (до 2 раз) → по одному сегменту → `failed` с сохранением последнего ответа.
+- Produces: `translation.NewService(p providers.Provider, modelID string, opts ServiceOptions) *Service`; `(*Service).TranslateBatch(ctx, b Batch, system string, det providers.Determinism, src, tgt string) (BatchOutcome, error)`; `BatchOutcome{Results map[string]SegmentOutcome; ProviderCalls int; CostUSD float64}`; `SegmentOutcome{NodeID string; Translated *string; Severity Severity; Findings []Finding; Err string}`.
+- Конвейер: `cdm.Mask` → `BuildUserPrompt` → `Complete` → `ParseEnvelope` → `VerifyPlaceholders` → `cdm.Unmask` → `ValidateSegment`.
+- Деградация ADD §3: повтор батча (до 2 раз) → по одному сегменту → `Error` с сохранением последнего ответа в `Err`.
+- **Разделение ответственности:** ошибки протокола и качества сервис обрабатывает сам; инфраструктурные (`Retryable(err) == true` и не `ProtocolError`) **возвращает наружу** — повторами с backoff и арендой управляет очередь. `RefusedError` превращается в `Error` у сегментов (переводить нечего, повтор бессмыслен).
 
-- [ ] **Step 1: Написать падающий тест**
-
-```python
-# backend/tests/test_translation_service.py
-import pytest
-
-from linguastack.cdm.model import BlockType
-from linguastack.providers.fake import FakeProvider
-from linguastack.translation.segmenter import Batch, SegmentRef
-from linguastack.translation.service import TranslationService
-from linguastack.translation.validation import Severity
-
-
-def seg(ordinal: int, text: str) -> SegmentRef:
-    return SegmentRef(f"ch0000/b{ordinal:04d}", 0, BlockType.paragraph, text, "h", None)
-
-
-def batch_of(*texts: str) -> Batch:
-    return Batch(segments=[seg(i, t) for i, t in enumerate(texts)],
-                 context_before=None, context_after=None)
-
-
-def service(provider) -> TranslationService:
-    from linguastack.config import get_settings
-    return TranslationService(provider, "fake-1", get_settings())
-
-
-async def test_happy_path_translates_every_segment():
-    provider = FakeProvider(scenario="prefix", prefix="RU:")
-    outcome = await service(provider).translate_batch(batch_of("One.", "Two."), "sys", "strict")
-    assert outcome.results["ch0000/b0000"].translated_text == "RU:One."
-    assert outcome.results["ch0000/b0001"].translated_text == "RU:Two."
-    assert outcome.provider_calls == 1
-
-
-async def test_protocol_violation_retries_then_falls_back_to_singletons():
-    """ADD §3: трёхступенчатая деградация вместо падения на всей книге."""
-    provider = FakeProvider(scenario="protocol_violation", violate_times=2, prefix="RU:")
-    outcome = await service(provider).translate_batch(batch_of("One.", "Two."), "sys", "strict")
-    assert all(r.severity is not Severity.error for r in outcome.results.values())
-    assert outcome.provider_calls > 1, "должен был быть хотя бы один повтор"
-
-
-async def test_persistent_protocol_violation_marks_segments_failed_with_raw_kept():
-    provider = FakeProvider(scenario="protocol_violation", violate_times=99)
-    outcome = await service(provider).translate_batch(batch_of("One."), "sys", "strict")
-    result = outcome.results["ch0000/b0000"]
-    assert result.severity is Severity.error
-    assert result.error, "последний ответ модели должен сохраниться для разбора"
-
-
-async def test_dropped_placeholder_is_detected_not_silently_accepted():
-    provider = FakeProvider(scenario="drops_placeholder")
-    outcome = await service(provider).translate_batch(batch_of("Call `run()` now."), "sys", "strict")
-    assert outcome.results["ch0000/b0000"].severity is Severity.error
-
-
-async def test_protected_code_restored_verbatim():
-    provider = FakeProvider(scenario="prefix", prefix="RU:")
-    outcome = await service(provider).translate_batch(
-        batch_of("Call `get_user()` now."), "sys", "strict")
-    # Код обязан вернуться дословно — ТЗ §5.3.
-    assert "`get_user()`" in outcome.results["ch0000/b0000"].translated_text
-
-
-async def test_model_never_sees_raw_code():
-    provider = FakeProvider(scenario="prefix", prefix="RU:")
-    await service(provider).translate_batch(batch_of("Call `secret_fn()`."), "sys", "strict")
-    assert "secret_fn()" not in provider.calls[0].user, "код маскируется до отправки"
-
-
-async def test_refusal_propagates_as_error_not_as_translation():
-    provider = FakeProvider(scenario="refusal")
-    outcome = await service(provider).translate_batch(batch_of("Text."), "sys", "strict")
-    assert outcome.results["ch0000/b0000"].severity is Severity.error
-    assert outcome.results["ch0000/b0000"].translated_text is None
-
-
-async def test_rate_limit_is_raised_for_queue_to_handle():
-    from linguastack.providers.errors import ProviderRateLimited
-
-    with pytest.raises(ProviderRateLimited):
-        await service(FakeProvider(scenario="rate_limited")).translate_batch(
-            batch_of("Text."), "sys", "strict")
-
-
-async def test_empty_translation_is_error():
-    outcome = await service(FakeProvider(scenario="empty")).translate_batch(
-        batch_of("Text."), "sys", "strict")
-    assert outcome.results["ch0000/b0000"].severity is Severity.error
-```
-
-- [ ] **Step 2: Запустить — FAIL**
-- [ ] **Step 3: Реализовать.** Важное разделение ответственности: ошибки *протокола и качества* сервис обрабатывает сам (повторы, деградация); ошибки *инфраструктуры* (`ProviderRateLimited`, `ProviderUnavailable`) он **поднимает наружу** — решение о повторе принимает очередь, у которой есть backoff и аренда.
-- [ ] **Step 4: Запустить — PASS (9 passed)**
-- [ ] **Step 5: Коммит** — `feat: сервис перевода батча с маскированием, валидацией и деградацией протокола`
+- [ ] **Step 1: Тесты:** `TestHappyPathOneCall`, `TestProtocolViolationRetriesThenRecovers`, `TestPersistentViolationFailsSegmentsKeepingRaw`, `TestDroppedPlaceholderIsError`, `TestProtectedCodeRestoredVerbatim`, `TestModelNeverSeesRawCode`, `TestRefusalBecomesSegmentError`, `TestRateLimitPropagatesToCaller`, `TestEmptyTranslationIsError`, `TestSingletonFallbackSalvagesGoodSegments` (в батче из трёх один «ломающий» сегмент — два других переводятся).
+- [ ] **Step 2–4:** FAIL → реализовать → PASS + lint. **Step 5:** Коммит — `feat: сервис перевода батча с маскированием, валидацией и деградацией`.
 
 ---
 
-### Task 24: Репозиторий очереди на арендах
+### Task 24: Очередь на арендах
 
-**Files:**
-- Create: `.../queue/__init__.py`, `.../queue/repository.py`
-- Create: `backend/tests/test_queue_repository.py`
+**Files:** Create `internal/queue/repository.go`; Test `repository_test.go`
 
 **Interfaces:**
-- Produces: `enqueue(session, project, kind="translate", priority=0) -> TranslationTask`; `claim_next(session, worker_id, lease_seconds, max_per_user) -> TranslationTask | None`; `heartbeat(session, task, lease_seconds) -> bool`; `complete(session, task)`; `fail(session, task, error, retry_in: float | None)`; `cancel_for_project(session, project_id)`; `reclaim_expired(session) -> int`.
-- SQL захвата — **ровно** из ADD §7 (`FOR UPDATE SKIP LOCKED` + подзапрос честности).
+- Produces: `queue.Enqueue(ctx, db, project *models.TranslationProject, priority int) (*models.TranslationTask, error)`; `queue.ClaimNext(ctx, db, workerID string, lease time.Duration, maxPerUser int) (*models.TranslationTask, error)` — `nil, nil` если задач нет; `queue.Heartbeat(ctx, db, taskID uuid.UUID, workerID string, lease time.Duration) (bool, error)`; `queue.Complete(...)`; `queue.Fail(ctx, db, taskID, workerID, errText string, retryIn time.Duration) error` — при исчерпании `MaxAttempts` статус `failed`, иначе `pending` с `available_at = now() + retryIn`; `queue.CancelForProject(ctx, db, projectID) error`.
+- SQL захвата — **ровно** ADD §7 через `db.Raw(...).Scan(&task)`, дополненный условием `available_at <= now()`. Ключи `Heartbeat`/`Complete`/`Fail` проверяют `locked_by = workerID` — чужая аренда не продлевается и не завершается.
+- **Тестовая изоляция:** `SKIP LOCKED` проверяется только на **разных соединениях**, поэтому тесты пакета используют `testdb.NewCommitting(t)` — реальные коммиты и удаление своих строк в `t.Cleanup`; тесты пакета не запускаются `t.Parallel()`.
 
-- [ ] **Step 1: Написать падающий тест**
-
-```python
-# backend/tests/test_queue_repository.py
-from datetime import datetime, timedelta, timezone
-
-from linguastack.queue import repository as queue
-
-
-async def test_claim_returns_pending_task_and_marks_running(session, make_user, make_book, make_project):
-    user = await make_user("q1@example.com")
-    project = await make_project(user, await make_book(user))
-    await queue.enqueue(session, project)
-
-    task = await queue.claim_next(session, "worker-a", lease_seconds=60, max_per_user=3)
-    assert task is not None
-    assert task.status == "running"
-    assert task.locked_by == "worker-a"
-    assert task.locked_until > datetime.now(timezone.utc)
-    assert task.attempts == 1
-
-
-async def test_claimed_task_not_handed_to_second_worker(session, make_user, make_book, make_project):
-    user = await make_user("q2@example.com")
-    await queue.enqueue(session, await make_project(user, await make_book(user)))
-    assert await queue.claim_next(session, "worker-a", 60, 3) is not None
-    assert await queue.claim_next(session, "worker-b", 60, 3) is None
-
-
-async def test_expired_lease_makes_task_claimable_again(session, make_user, make_book, make_project):
-    """ТЗ §7: восстановление после перезапуска. Упавший worker ничего не держит."""
-    user = await make_user("q3@example.com")
-    await queue.enqueue(session, await make_project(user, await make_book(user)))
-    task = await queue.claim_next(session, "dead-worker", 60, 3)
-    task.locked_until = datetime.now(timezone.utc) - timedelta(seconds=1)
-    await session.flush()
-
-    reclaimed = await queue.claim_next(session, "live-worker", 60, 3)
-    assert reclaimed is not None and reclaimed.id == task.id
-    assert reclaimed.locked_by == "live-worker"
-    assert reclaimed.attempts == 2
-
-
-async def test_per_user_concurrency_limit_enforced(session, make_user, make_book, make_project):
-    """ТЗ §7: один пользователь не должен занять все ресурсы."""
-    user = await make_user("q4@example.com")
-    book = await make_book(user)
-    for _ in range(5):
-        await queue.enqueue(session, await make_project(user, book))
-
-    claimed = [await queue.claim_next(session, f"w{i}", 60, max_per_user=2) for i in range(5)]
-    assert sum(1 for t in claimed if t is not None) == 2
-
-
-async def test_other_users_not_blocked_by_a_busy_user(session, make_user, make_book, make_project):
-    hog = await make_user("hog@example.com")
-    hog_book = await make_book(hog)
-    for _ in range(3):
-        await queue.enqueue(session, await make_project(hog, hog_book))
-    for i in range(3):
-        assert await queue.claim_next(session, f"w{i}", 60, max_per_user=2) is not None or True
-
-    polite = await make_user("polite@example.com")
-    await queue.enqueue(session, await make_project(polite, await make_book(polite)))
-    task = await queue.claim_next(session, "w-polite", 60, max_per_user=2)
-    assert task is not None and task.owner_id == polite.id
-
-
-async def test_priority_respected_before_fifo(session, make_user, make_book, make_project):
-    user = await make_user("q5@example.com")
-    book = await make_book(user)
-    low = await queue.enqueue(session, await make_project(user, book), priority=0)
-    high = await queue.enqueue(session, await make_project(user, book), priority=10)
-    assert (await queue.claim_next(session, "w", 60, 3)).id == high.id
-
-
-async def test_heartbeat_extends_lease_only_for_holder(session, make_user, make_book, make_project):
-    user = await make_user("q6@example.com")
-    await queue.enqueue(session, await make_project(user, await make_book(user)))
-    task = await queue.claim_next(session, "owner-worker", 60, 3)
-    before = task.locked_until
-    assert await queue.heartbeat(session, task, lease_seconds=300) is True
-    assert task.locked_until > before
-
-    task.locked_by = "someone-else"
-    await session.flush()
-    assert await queue.heartbeat(session, task, lease_seconds=300) is False
-
-
-async def test_completed_task_is_never_reclaimed(session, make_user, make_book, make_project):
-    """ТЗ §7: защита от повторного выполнения завершённых задач."""
-    user = await make_user("q7@example.com")
-    await queue.enqueue(session, await make_project(user, await make_book(user)))
-    task = await queue.claim_next(session, "w", 60, 3)
-    await queue.complete(session, task)
-    task.locked_until = datetime.now(timezone.utc) - timedelta(seconds=1)
-    await session.flush()
-    assert await queue.claim_next(session, "w2", 60, 3) is None
-
-
-async def test_fail_with_retry_returns_task_to_pending(session, make_user, make_book, make_project):
-    user = await make_user("q8@example.com")
-    await queue.enqueue(session, await make_project(user, await make_book(user)))
-    task = await queue.claim_next(session, "w", 60, 3)
-    await queue.fail(session, task, "провайдер недоступен", retry_in=0.0)
-    assert task.status == "pending"
-    assert await queue.claim_next(session, "w2", 60, 3) is not None
-
-
-async def test_fail_beyond_max_attempts_is_terminal(session, make_user, make_book, make_project):
-    user = await make_user("q9@example.com")
-    await queue.enqueue(session, await make_project(user, await make_book(user)))
-    for _ in range(3):
-        task = await queue.claim_next(session, "w", 60, 3)
-        if task is None:
-            break
-        await queue.fail(session, task, "boom", retry_in=0.0)
-    assert await queue.claim_next(session, "w", 60, 3) is None
-```
-
-- [ ] **Step 2: Запустить — FAIL**
-- [ ] **Step 3: Реализовать** через `sqlalchemy.text()` с SQL из ADD §7 (ORM не выражает `FOR UPDATE SKIP LOCKED` внутри `UPDATE ... WHERE id = (SELECT ...)` чисто).
-- [ ] **Step 4: Запустить — PASS (10 passed)**
-- [ ] **Step 5: Коммит** — `feat: очередь на арендах с честностью между пользователями и восстановлением после перезапуска`
+- [ ] **Step 1: Тесты:** `TestClaimMarksRunning`, `TestClaimedTaskNotGivenToSecondWorker`, `TestConcurrentClaimsNeverDuplicate` (20 горутин на 10 задач — каждая задача выдана ровно одному), `TestExpiredLeaseReclaimable` (ТЗ §7, восстановление после перезапуска), `TestPerUserLimit` (ТЗ §7), `TestBusyUserDoesNotBlockOthers`, `TestPriorityBeforeFIFO`, `TestHeartbeatOnlyForHolder`, `TestCompletedNeverReclaimed`, `TestFailWithRetryDelaysAvailability`, `TestFailBeyondMaxAttemptsIsTerminal`.
+- [ ] **Step 2–4:** FAIL → реализовать → PASS + lint. **Step 5:** Коммит — `feat: очередь на арендах с честностью и восстановлением после перезапуска`.
 
 ---
 
-### Task 25: Worker — идемпотентность, пауза, отмена, восстановление
+### Task 25: Worker
 
-**Files:**
-- Create: `.../queue/worker.py`, `backend/src/linguastack/cli.py`
-- Create: `backend/tests/test_worker.py`
+**Files:** Create `internal/queue/worker.go`, `cmd/worker/main.go`; Test `worker_test.go`
 
 **Interfaces:**
-- Produces: `Worker(worker_id, session_factory, provider_resolver, settings)` с `async def run_once() -> bool` (обработать одну задачу, вернуть «была ли задача») и `async def run_forever(stop_event)`; `python -m linguastack.cli worker` как точка входа.
-- Поведение на задачу: материализовать сегменты из CDM (идемпотентно), собрать батчи, переводить, записывать результат **после каждого батча** (ТЗ §7 «сохранение результатов после каждого успешно обработанного блока»), обновлять счётчики проекта, heartbeat, проверять пауза/отмена между батчами.
+- Produces: `queue.NewWorker(id string, db *gorm.DB, resolve ProviderResolver, cfg config.Settings) *Worker`; `type ProviderResolver func(ctx context.Context, project *models.TranslationProject) (providers.Provider, error)`; `(*Worker).RunOnce(ctx) (bool, error)`; `(*Worker).Run(ctx) error` (до отмены контекста; heartbeat в отдельной горутине).
+- На задачу: материализовать сегменты из CDM идемпотентно (`ON CONFLICT (project_id, node_id) DO NOTHING`) → батчи из `pending`/`failed`-с-оставшимися-попытками → `TranslateBatch` → **запись после каждого батча** (ТЗ §7) с условием `status <> 'completed'` → пересчёт счётчиков проекта → проверка паузы/отмены между батчами.
+- Статус проекта обновляется **только если он не терминальный**: `UPDATE … WHERE status NOT IN ('cancelled','failed')` — иначе запись после отмены «воскресит» проект (Review Focus №5).
 
-- [ ] **Step 1: Написать падающий тест**
-
-```python
-# backend/tests/test_worker.py
-import pytest
-
-
-async def test_worker_translates_whole_book_and_completes_project(worker_env):
-    project = await worker_env.make_project_from_markdown("# Ch\n\nOne.\n\nTwo.")
-    await worker_env.run_until_idle()
-
-    refreshed = await worker_env.reload(project)
-    assert refreshed.status in {"completed", "completed_with_warnings"}
-    assert refreshed.segments_done == 2
-    assert refreshed.segments_failed == 0
-    assert [s.translated_text for s in await worker_env.segments(project)] == ["RU:One.", "RU:Two."]
-
-
-async def test_rerunning_task_does_not_retranslate_completed_segments(worker_env):
-    """ТЗ §7 и §17: идемпотентность. Повторный прогон пропускает готовое."""
-    project = await worker_env.make_project_from_markdown("# Ch\n\nOne.\n\nTwo.")
-    await worker_env.run_until_idle()
-    calls_after_first = worker_env.provider.call_count
-
-    await worker_env.enqueue(project)
-    await worker_env.run_until_idle()
-    assert worker_env.provider.call_count == calls_after_first, "модель не должна вызываться снова"
-
-
-async def test_progress_survives_worker_crash_midway(worker_env):
-    """ТЗ §15.8: перевод продолжается после перезапуска сервера."""
-    project = await worker_env.make_project_from_markdown(
-        "# Ch\n\n" + "\n\n".join(f"Para {i}." for i in range(6)))
-    worker_env.provider.fail_after_calls = 1  # упасть посреди книги
-    with pytest.raises(Exception):
-        await worker_env.run_until_idle(reraise=True)
-
-    partial = await worker_env.reload(project)
-    assert 0 < partial.segments_done < 6, "часть работы обязана быть сохранена"
-
-    worker_env.provider.fail_after_calls = None
-    await worker_env.recover_and_run()   # новый worker, истёкшая аренда
-    assert (await worker_env.reload(project)).segments_done == 6
-
-
-async def test_paused_project_stops_between_batches_and_keeps_progress(worker_env):
-    project = await worker_env.make_project_from_markdown(
-        "# Ch\n\n" + "\n\n".join(f"Para {i}." for i in range(10)))
-    worker_env.pause_after_batches(1)
-    await worker_env.run_until_idle()
-
-    paused = await worker_env.reload(project)
-    assert paused.status == "paused"
-    assert paused.segments_done > 0, "сделанное не теряется"
-    assert paused.segments_done < 10
-
-
-async def test_resume_continues_from_where_it_stopped(worker_env):
-    project = await worker_env.make_project_from_markdown(
-        "# Ch\n\n" + "\n\n".join(f"Para {i}." for i in range(10)))
-    worker_env.pause_after_batches(1)
-    await worker_env.run_until_idle()
-    done_at_pause = (await worker_env.reload(project)).segments_done
-
-    await worker_env.resume(project)
-    await worker_env.run_until_idle()
-    final = await worker_env.reload(project)
-    assert final.segments_done == 10
-    assert worker_env.provider.translated_count == 10, (
-        "уже переведённые сегменты не переводятся повторно")
-    assert done_at_pause > 0
-
-
-async def test_cancel_mid_batch_keeps_paid_for_result(worker_env):
-    """Review Focus №5: ответ модели уже оплачен — терять его нельзя."""
-    project = await worker_env.make_project_from_markdown(
-        "# Ch\n\n" + "\n\n".join(f"Para {i}." for i in range(8)))
-    worker_env.cancel_after_batches(1)
-    await worker_env.run_until_idle()
-
-    cancelled = await worker_env.reload(project)
-    assert cancelled.status == "cancelled"
-    assert cancelled.segments_done > 0
-
-
-async def test_writes_after_cancel_do_not_revive_project(worker_env):
-    """Review Focus №5: отменённый проект не должен стать completed."""
-    project = await worker_env.make_project_from_markdown("# Ch\n\nOne.\n\nTwo.")
-    await worker_env.cancel(project)
-    await worker_env.run_until_idle()
-    assert (await worker_env.reload(project)).status == "cancelled"
-
-
-async def test_book_without_translatable_blocks_completes_immediately(worker_env):
-    """Review Focus №1: глава целиком из кода. 0/0 не должно делить на ноль или зависать."""
-    project = await worker_env.make_project_from_markdown(
-        "# Ch\n\n```python\nprint(1)\n```\n")
-    await worker_env.run_until_idle()
-    done = await worker_env.reload(project)
-    assert done.status == "completed"
-    assert done.segments_total == 0 and done.segments_done == 0
-    assert worker_env.progress_percent(done) == 100.0
-
-
-async def test_unavailable_provider_retries_then_fails_task(worker_env):
-    project = await worker_env.make_project_from_markdown("# Ch\n\nOne.")
-    worker_env.provider.always_unavailable = True
-    await worker_env.run_until_idle()
-    assert (await worker_env.reload(project)).status == "failed"
-    assert await worker_env.task_status(project) == "failed"
-
-
-async def test_segment_failing_all_attempts_does_not_stop_the_book(worker_env):
-    project = await worker_env.make_project_from_markdown("# Ch\n\nBad.\n\nGood.")
-    worker_env.provider.fail_for_texts = {"Bad."}
-    await worker_env.run_until_idle()
-    final = await worker_env.reload(project)
-    assert final.status == "failed"
-    assert final.segments_done == 1, "остальные сегменты обязаны быть переведены"
-    assert final.segments_failed == 1
-```
-
-- [ ] **Step 2: Запустить — FAIL**
-- [ ] **Step 3: Реализовать `worker_env`** — фикстуру, собирающую worker с `FakeProvider`, и `worker.py`. Запись сегмента всегда с условием `WHERE status <> 'completed'` (ADD §7, идемпотентность). Обновление статуса проекта — **только** если текущий статус не терминальный (`cancelled`/`failed`), иначе отменённый проект «воскреснет».
-- [ ] **Step 4: Запустить — PASS (10 passed)**
-- [ ] **Step 5: Коммит** — `feat: worker очереди с идемпотентностью, паузой, отменой и восстановлением`
+- [ ] **Step 1: Тесты** (`workerEnv`: committing-БД, `Fake`, проекты из Markdown-строки):
+  - `TestWorkerTranslatesWholeBook`.
+  - `TestRerunDoesNotRetranslateCompleted` (ТЗ §7, §17).
+  - `TestProgressSurvivesCrash` (ТЗ §15.8): Fake падает после первого вызова → часть сохранена → новый worker после истечения аренды доводит до конца.
+  - `TestPauseStopsBetweenBatchesKeepingProgress`, `TestResumeContinuesWithoutRetranslating`.
+  - **Review Focus №5:** `TestCancelMidBatchKeepsPaidResult`, `TestWritesAfterCancelDoNotRevive`.
+  - **Review Focus №1:** `TestBookWithoutTranslatableBlocksCompletes` (`0/0`, статус `completed`, прогресс 100%).
+  - `TestUnavailableProviderFailsTaskAfterAttempts`.
+  - `TestOneBadSegmentDoesNotStopBook`.
+  - `TestWorkerStopsOnContextCancel` (корректное завершение: текущий батч дописан, аренда отпущена).
+- [ ] **Step 2–4:** FAIL → реализовать → PASS + lint. **Step 5:** Коммит — `feat: worker очереди с идемпотентностью, паузой, отменой и восстановлением`.
 
 ---
 
 ### Task 26: API переводов, сегментов и поток прогресса
 
-**Files:**
-- Create: `.../api/translations.py`, `.../api/segments.py`, `.../api/events.py`
-- Modify: `.../main.py`, `.../api/deps.py`
-- Create: `backend/tests/test_translations_api.py`, `backend/tests/test_isolation_matrix.py`
+**Files:** Create `internal/httpapi/translations.go`, `segments.go`, `events.go`; Test `translations_test.go`, `isolation_matrix_test.go`
 
 **Interfaces:**
-- Produces (ТЗ §12): `POST /api/books/{id}/translations`, `GET /api/translations`, `GET /api/translations/{id}`, `POST /api/translations/{id}/pause`, `POST /api/translations/{id}/resume`, `POST /api/translations/{id}/cancel`, `GET /api/translations/{id}/segments`, `POST /api/segments/{id}/retry`, `PATCH /api/segments/{id}`, `GET /api/translations/{id}/events` (SSE, ADD §13).
+- Produces (ТЗ §12): `POST /api/books/{id}/translations`, `GET /api/translations`, `GET /api/translations/{id}`, `POST /api/translations/{id}/pause|resume|cancel`, `GET /api/translations/{id}/segments`, `GET /api/segments/{id}/revisions`, `POST /api/segments/{id}/retry`, `PATCH /api/segments/{id}`, `GET /api/translations/{id}/events` (SSE, ADD §13: `http.Flusher`, кадр раз в секунду, закрытие на терминальном статусе и при отключении клиента).
+- Переходы статусов — явная таблица; `resume` из `cancelled`/`completed` → 409.
 
-- [ ] **Step 1: Написать падающий тест** — существенные проверки:
-
-```python
-# backend/tests/test_translations_api.py
-async def test_create_translation_enqueues_task(user_client, book_id, fake_config_id):
-    r = await user_client.post(f"/api/books/{book_id}/translations", json={
-        "source_lang": "en", "target_lang": "ru",
-        "provider_config_id": fake_config_id, "model_id": "fake-1"})
-    assert r.status_code == 201
-    assert r.json()["status"] == "queued"
-
-
-async def test_external_provider_rejected_when_user_forbade_egress(user_client, book_id):
-    """ТЗ §6.4: пользователь должен иметь возможность запретить передачу текста наружу."""
-    config = await user_client.post("/api/provider-configs", json={
-        "provider_id": "anthropic", "api_key": "sk-ant-x-1234", "allow_external": False})
-    r = await user_client.post(f"/api/books/{book_id}/translations", json={
-        "source_lang": "en", "target_lang": "ru",
-        "provider_config_id": config.json()["id"], "model_id": "claude-opus-5-5"})
-    assert r.status_code == 400
-    assert "external" in r.text.lower() or "внешн" in r.text.lower()
-
-
-async def test_too_many_active_projects_rejected(user_client, book_id, fake_config_id, monkeypatch):
-    """ТЗ §13: ограничение количества активных задач."""
-    monkeypatch.setattr("linguastack.config.Settings.max_projects_per_user", 2)
-    payload = {"source_lang": "en", "target_lang": "ru",
-               "provider_config_id": fake_config_id, "model_id": "fake-1"}
-    codes = [(await user_client.post(f"/api/books/{book_id}/translations",
-              json={**payload, "target_lang": lang})).status_code
-             for lang in ("ru", "de", "fr")]
-    assert codes[-1] == 429
-
-
-async def test_pause_resume_cancel_transitions(user_client, project_id):
-    assert (await user_client.post(f"/api/translations/{project_id}/pause")).status_code == 200
-    assert (await user_client.get(f"/api/translations/{project_id}")).json()["status"] == "paused"
-    assert (await user_client.post(f"/api/translations/{project_id}/resume")).status_code == 200
-    assert (await user_client.post(f"/api/translations/{project_id}/cancel")).status_code == 200
-    assert (await user_client.get(f"/api/translations/{project_id}")).json()["status"] == "cancelled"
-
-
-async def test_cancelled_project_cannot_be_resumed(user_client, project_id):
-    await user_client.post(f"/api/translations/{project_id}/cancel")
-    assert (await user_client.post(f"/api/translations/{project_id}/resume")).status_code == 409
-
-
-async def test_patch_segment_records_manual_revision(user_client, completed_segment_id):
-    """ТЗ §8.3: ручное редактирование перевода; §5.1: версии сохраняются."""
-    r = await user_client.patch(f"/api/segments/{completed_segment_id}",
-        json={"translated_text": "Мой вариант"})
-    assert r.status_code == 200
-    assert r.json()["translated_text"] == "Мой вариант"
-    revisions = (await user_client.get(
-        f"/api/segments/{completed_segment_id}/revisions")).json()
-    assert revisions[-1]["origin"] == "manual"
-    assert len(revisions) >= 2, "предыдущая версия обязана сохраниться"
-
-
-async def test_retry_segment_requeues_only_that_segment(user_client, failed_segment_id):
-    r = await user_client.post(f"/api/segments/{failed_segment_id}/retry")
-    assert r.status_code == 202
-    assert r.json()["status"] == "pending"
-
-
-async def test_sse_stream_emits_progress_and_closes_on_terminal_status(user_client, project_id):
-    """ADD §13 и ТЗ §8.4: прогресс без перезагрузки страницы."""
-    async with user_client.stream("GET", f"/api/translations/{project_id}/events") as response:
-        assert response.status_code == 200
-        assert response.headers["content-type"].startswith("text/event-stream")
-        payloads = []
-        async for line in response.aiter_lines():
-            if line.startswith("data:"):
-                payloads.append(line)
-                if len(payloads) >= 2:
-                    break
-    assert payloads
-```
-
-```python
-# backend/tests/test_isolation_matrix.py
-import pytest
-
-# ТЗ §2.2 и §12: каждая операция обязана проверять права. Один параметризованный
-# тест на все ресурсные эндпоинты — чтобы новый эндпоинт нельзя было забыть закрыть.
-ENDPOINTS = [
-    ("GET", "/api/books/{book_id}"),
-    ("GET", "/api/books/{book_id}/toc"),
-    ("PUT", "/api/books/{book_id}/toc"),
-    ("DELETE", "/api/books/{book_id}"),
-    ("POST", "/api/books/{book_id}/translations"),
-    ("GET", "/api/translations/{project_id}"),
-    ("POST", "/api/translations/{project_id}/pause"),
-    ("POST", "/api/translations/{project_id}/resume"),
-    ("POST", "/api/translations/{project_id}/cancel"),
-    ("GET", "/api/translations/{project_id}/segments"),
-    ("GET", "/api/translations/{project_id}/events"),
-    ("PATCH", "/api/segments/{segment_id}"),
-    ("POST", "/api/segments/{segment_id}/retry"),
-    ("GET", "/api/provider-configs/{config_id}"),
-    ("DELETE", "/api/provider-configs/{config_id}"),
-]
-
-
-@pytest.mark.parametrize("method,template", ENDPOINTS)
-async def test_every_resource_endpoint_returns_404_for_foreign_user(
-    method, template, user_client, foreign_resources
-):
-    url = template.format(**foreign_resources)
-    response = await user_client.request(method, url, json={})
-    assert response.status_code == 404, f"{method} {template} пропускает чужой ресурс"
-
-
-@pytest.mark.parametrize("method,template", ENDPOINTS)
-async def test_every_resource_endpoint_requires_authentication(method, template, client, foreign_resources):
-    url = template.format(**foreign_resources)
-    assert (await client.request(method, url, json={})).status_code == 401
-```
-
-- [ ] **Step 2: Запустить — FAIL**
-- [ ] **Step 3: Реализовать роутеры.** SSE через `sse_starlette.EventSourceResponse`; опрос раз в секунду; закрытие при терминальном статусе. Переходы статусов проверяются явно: `resume` из `cancelled`/`completed` → 409.
-- [ ] **Step 4: Запустить — PASS (8 + 30 passed)**
-- [ ] **Step 5: Коммит** — `feat: API переводов, правка сегментов и поток прогресса (SSE)`
+- [ ] **Step 1: Тесты:** `TestCreateTranslationEnqueues`, `TestExternalProviderRejectedWhenEgressForbidden` (ТЗ §6.4), `TestTooManyActiveProjectsIs429`, `TestUnknownLanguageIs422`, `TestPauseResumeCancel`, `TestCancelledCannotResume`, `TestPatchSegmentRecordsManualRevision`, `TestRetrySegmentRequeuesOnlyIt`, `TestSSEEmitsProgressAndCloses`, `TestSSEStopsWhenClientDisconnects`.
+  - `isolation_matrix_test.go` — табличный `TestEveryResourceEndpointIs404ForForeignUser` и `TestEveryResourceEndpointRequires401` по полному списку ресурсных маршрутов. **Список маршрутов берётся из зарегистрированного мультиплексора**, а не дублируется вручную: новый эндпоинт без записи в матрице роняет тест.
+- [ ] **Step 2–4:** FAIL → реализовать → PASS + lint. **Step 5:** Коммит — `feat: API переводов, правка сегментов и поток прогресса`.
 
 ---
 
-### Task 27: Сквозной сценарий, документация развёртывания, CI
+### Task 27: Сквозной сценарий, развёртывание, CI
 
-**Files:**
-- Create: `backend/tests/test_end_to_end.py`
-- Create: `README.md` (раздел развёртывания), `CLAUDE.md`
-- Create: `.github/workflows/ci.yml`
+**Files:** Create `internal/e2e/e2e_test.go`, `.github/workflows/ci.yml`, `backend/Dockerfile`, `CLAUDE.md`; Modify `README.md`, `docker-compose.yml` (сервисы `api` и `worker`)
 
-**Interfaces:**
-- Consumes: всё предыдущее. Produces: проверенный сквозной путь **импорт → структурирование → перевод → проверка → чтение** (ТЗ §17) и инструкцию развёртывания (ТЗ §15.15).
-
-- [ ] **Step 1: Написать падающий тест**
-
-```python
-# backend/tests/test_end_to_end.py
-import os
-
-import pytest
-
-BOOK = """\
-# Введение
-
-This chapter explains the queue.
-
-```python
-print("not translated")
-```
-
-# Детали
-
-The worker claims a task. See [docs](https://example.com).
-"""
-
-
-async def test_full_cycle_import_translate_validate_read(user_client, worker_env, fake_config_id):
-    """ТЗ §17: надёжный цикл импорт → структурирование → перевод → проверка → чтение."""
-    book_id = (await user_client.post("/api/books",
-        files={"file": ("b.md", BOOK.encode(), "text/markdown")})).json()["id"]
-
-    toc = (await user_client.get(f"/api/books/{book_id}/toc")).json()
-    assert [c["title"] for c in toc["chapters"]] == ["Введение", "Детали"]
-
-    project_id = (await user_client.post(f"/api/books/{book_id}/translations", json={
-        "source_lang": "en", "target_lang": "ru",
-        "provider_config_id": fake_config_id, "model_id": "fake-1"})).json()["id"]
-
-    await worker_env.run_until_idle()
-
-    project = (await user_client.get(f"/api/translations/{project_id}")).json()
-    assert project["status"] in {"completed", "completed_with_warnings"}
-    assert project["segments_done"] == project["segments_total"] > 0
-
-    segments = (await user_client.get(f"/api/translations/{project_id}/segments")).json()
-    translated = {s["node_id"]: s["translated_text"] for s in segments}
-    assert all(translated.values())
-    # Код не переводился и остался нетронутым.
-    assert not any('print("not translated")' in (t or "") for t in translated.values())
-    # Ссылка сохранена.
-    assert any("https://example.com" in (t or "") for t in translated.values())
-
-
-async def test_original_file_unchanged_after_translation(user_client, worker_env, fake_config_id, tmp_storage):
-    """ТЗ §15.9: оригинал сохраняется без изменений."""
-    payload = BOOK.encode()
-    book_id = (await user_client.post("/api/books",
-        files={"file": ("b.md", payload, "text/markdown")})).json()["id"]
-    await user_client.post(f"/api/books/{book_id}/translations", json={
-        "source_lang": "en", "target_lang": "ru",
-        "provider_config_id": fake_config_id, "model_id": "fake-1"})
-    await worker_env.run_until_idle()
-
-    original = next(tmp_storage.rglob("original.md"))
-    assert original.read_bytes() == payload
-
-
-@pytest.mark.live
-async def test_live_ollama_end_to_end(user_client, worker_env_live):
-    if os.environ.get("LINGUASTACK_LIVE_OLLAMA") != "1":
-        pytest.skip("живой Ollama не включён")
-    book_id = (await user_client.post("/api/books", files={
-        "file": ("b.md", b"# Chapter\n\nThe book is on the table.", "text/markdown")})).json()["id"]
-    config_id = (await user_client.post("/api/provider-configs", json={
-        "provider_id": "ollama", "base_url": "http://localhost:11434"})).json()["id"]
-    project_id = (await user_client.post(f"/api/books/{book_id}/translations", json={
-        "source_lang": "en", "target_lang": "ru",
-        "provider_config_id": config_id, "model_id": "qwen3:8b"})).json()["id"]
-
-    await worker_env_live.run_until_idle()
-    project = (await user_client.get(f"/api/translations/{project_id}")).json()
-    assert project["segments_done"] == 1
-    segments = (await user_client.get(f"/api/translations/{project_id}/segments")).json()
-    assert segments[0]["translated_text"].strip()
-```
-
-- [ ] **Step 2: Запустить — FAIL**
-- [ ] **Step 3: Довести реализацию до прохождения теста.**
-- [ ] **Step 4: Запустить всю сюиту**
-
-Run: `cd backend && .venv/bin/python -m pytest -v && .venv/bin/ruff check src tests`
-Expected: всё зелёное, ruff без замечаний.
-
-- [ ] **Step 5: Проверить живой путь через Ollama**
-
-Run: `cd backend && LINGUASTACK_LIVE_OLLAMA=1 .venv/bin/python -m pytest -m live -v`
-Expected: PASS — книга реально переводится локальной моделью.
-
-- [ ] **Step 6: Написать `README.md`** — инструкция развёртывания (ТЗ §15.15): требования, `docker compose up -d db`, установка зависимостей, `alembic upgrade head`, генерация `LINGUASTACK_SECRET_KEY`, запуск `uvicorn` и `python -m linguastack.cli worker`, запуск тестов, резервное копирование (`pg_dump` + каталог `storage/`).
-- [ ] **Step 7: Написать `.github/workflows/ci.yml`** — Postgres как service-контейнер, `ruff check`, `pytest` без маркера `live`.
-- [ ] **Step 8: Коммит** — `feat: сквозной тест цикла, инструкция развёртывания и CI`
+- [ ] **Step 1: Тесты:** `TestFullCycleImportTranslateValidateRead` (ТЗ §17: книга с кодом и ссылкой → перевод через Fake → код не тронут, ссылка сохранена, все сегменты переведены); `TestOriginalUnchangedAfterTranslation` (ТЗ §15.9); `TestLiveOllamaEndToEnd` (`qwen3:8b`).
+- [ ] **Step 2:** `make test && make lint` — всё зелёное.
+- [ ] **Step 3:** `make test-live` — книга реально переводится локальной моделью.
+- [ ] **Step 4:** Dockerfile (многоэтапный, `golang:1.27` → `distroless/static`), сервисы `api` и `worker` в compose с `restart: unless-stopped` (ТЗ §13); README — развёртывание, резервное копирование (`pg_dump` + `storage/`).
+- [ ] **Step 5:** CI: Postgres как service-контейнер, `actions/setup-go` с `go-version-file: backend/go.mod`, `golangci-lint` v2.14.0, `go test ./...`.
+- [ ] **Step 6:** Коммит — `feat: сквозной тест, развёртывание в Docker и CI`.
 
 ---
 
-## Что остаётся за рамками этого плана
-
-Осознанные решения по объёму, а не упущения (ТЗ §16, этапы 4–7):
+## За рамками этого плана
 
 | Этап | Содержание |
 |---|---|
 | 4 | Vue 3 + TypeScript: библиотека, импортёр, монитор задач, читалка (ТЗ §8) |
-| 5 | PDF, DOCX, HTML; экспортёры EPUB/MD/DOCX/HTML/TXT (ТЗ §3.2) |
-| 6 | Telegram-бот: привязка, уведомления, команды (ТЗ §9) |
-| 7 | Резервное копирование, метрики, нагрузочные лимиты, расширенный CI/CD (ТЗ §13) |
+| 5 | PDF, DOCX, HTML; экспорт EPUB/MD/DOCX/HTML/TXT (ТЗ §3.2) |
+| 6 | Telegram-бот (ТЗ §9) |
+| 7 | Резервное копирование, метрики, лимиты нагрузки, доверенные прокси для IP, расширенный CI/CD (ТЗ §13) |
 
-Критерии приёмки MVP §15.11 (читалка), §15.12 (экспорт) и §15.13 (Telegram)
-закрываются этими этапами. Остальные двенадцать закрываются этим планом —
-трассировка в ADD, раздел «Трассируемость критериев приёмки».
+Критерии §15.11 (читалка), §15.12 (экспорт), §15.13 (Telegram) закрываются этими этапами; остальные двенадцать — этим планом (трассировка в ADD).
