@@ -33,9 +33,10 @@ type Settings struct {
 	OllamaBaseURL string `env:"LINGUASTACK_OLLAMA_BASE_URL" envDefault:"http://localhost:11434"`
 	HTTPAddr      string `env:"LINGUASTACK_HTTP_ADDR" envDefault:":8000"`
 
-	// В продакшене обязательно true (cookie только по HTTPS). По умолчанию
-	// false, иначе разработка по http вообще не получает сессию.
-	SessionCookieSecure bool          `env:"LINGUASTACK_SESSION_COOKIE_SECURE" envDefault:"false"`
+	// Cookie сессии только по HTTPS. По умолчанию true: продакшен, где
+	// забыли переменную, не должен отдавать сессию по открытому каналу.
+	// false выставляется явно — для локальной разработки по http и тестов.
+	SessionCookieSecure bool          `env:"LINGUASTACK_SESSION_COOKIE_SECURE" envDefault:"true"`
 	SessionTTL          time.Duration `env:"LINGUASTACK_SESSION_TTL" envDefault:"720h"`
 
 	// --- лимиты, дополнение §10 ---

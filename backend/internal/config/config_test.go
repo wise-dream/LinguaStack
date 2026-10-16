@@ -47,6 +47,18 @@ func TestSecretKeyHasNoBakedInDefault(t *testing.T) {
 	}
 }
 
+func TestSessionCookieSecureByDefault(t *testing.T) {
+	// Опасное значение по умолчанию — ровно та ошибка, которая доезжает
+	// до продакшена: переменную окружения там забывают.
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf("Load() вернул ошибку: %v", err)
+	}
+	if !cfg.SessionCookieSecure {
+		t.Error("SessionCookieSecure по умолчанию должен быть true")
+	}
+}
+
 func TestRequireSecretKeyReportsHowToFixIt(t *testing.T) {
 	cfg := config.Settings{SecretKey: ""}
 	_, err := cfg.RequireSecretKey()
