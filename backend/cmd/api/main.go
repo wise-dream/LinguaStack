@@ -15,6 +15,8 @@ import (
 	"github.com/vnovels/linguastack/internal/config"
 	"github.com/vnovels/linguastack/internal/db"
 	"github.com/vnovels/linguastack/internal/httpapi"
+	"github.com/vnovels/linguastack/internal/importers"
+	"github.com/vnovels/linguastack/internal/storage"
 )
 
 const shutdownTimeout = 15 * time.Second
@@ -53,9 +55,16 @@ func run() error {
 		return nil
 	}
 
+	fileStore, err := storage.New(cfg.StorageRoot, cfg.MaxUploadBytes)
+	if err != nil {
+		return err
+	}
+
 	server := &http.Server{
-		Addr:              cfg.HTTPAddr,
-		Handler:           httpapi.NewServer(httpapi.Deps{Cfg: cfg, DB: gdb}),
+		Addr: cfg.HTTPAddr,
+		Handler: httpapi.NewServer(httpapi.Deps{
+			Cfg: cfg, DB: gdb, Store: fileStore, Importers: importers.Default(cfg),
+		}),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 

@@ -7,12 +7,16 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/vnovels/linguastack/internal/config"
+	"github.com/vnovels/linguastack/internal/importers"
+	"github.com/vnovels/linguastack/internal/storage"
 )
 
 // Deps — всё, что нужно обработчикам. Собирается в main и в тестах.
 type Deps struct {
-	Cfg config.Settings
-	DB  *gorm.DB
+	Cfg       config.Settings
+	DB        *gorm.DB
+	Store     *storage.FileStore
+	Importers *importers.Registry
 }
 
 type server struct {
@@ -34,6 +38,13 @@ func NewServer(d Deps) http.Handler {
 	mux.HandleFunc("POST /api/auth/login", s.login)
 	mux.HandleFunc("POST /api/auth/logout", s.logout)
 	mux.HandleFunc("GET /api/me", s.requireUser(s.me))
+
+	mux.HandleFunc("POST /api/books", s.requireUser(s.uploadBook))
+	mux.HandleFunc("GET /api/books", s.requireUser(s.listBooks))
+	mux.HandleFunc("GET /api/books/{id}", s.requireUser(s.getBook))
+	mux.HandleFunc("DELETE /api/books/{id}", s.requireUser(s.deleteBook))
+	mux.HandleFunc("GET /api/books/{id}/toc", s.requireUser(s.getTOC))
+	mux.HandleFunc("PUT /api/books/{id}/toc", s.requireUser(s.putTOC))
 
 	return mux
 }

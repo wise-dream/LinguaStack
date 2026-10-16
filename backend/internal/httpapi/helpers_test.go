@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"net/http/cookiejar"
 	"net/http/httptest"
@@ -15,6 +16,8 @@ import (
 
 	"github.com/vnovels/linguastack/internal/config"
 	"github.com/vnovels/linguastack/internal/httpapi"
+	"github.com/vnovels/linguastack/internal/importers"
+	"github.com/vnovels/linguastack/internal/storage"
 	"github.com/vnovels/linguastack/internal/testdb"
 )
 
@@ -23,9 +26,10 @@ const testPassword = "correct-horse-battery"
 // testEnv — настоящий HTTP-сервер поверх транзакции теста: обработчики и
 // проверки теста видят одни данные, а откат убирает всё после теста.
 type testEnv struct {
-	srv *httptest.Server
-	db  *gorm.DB
-	cfg config.Settings
+	srv     *httptest.Server
+	db      *gorm.DB
+	cfg     config.Settings
+	storage string // корень файлового хранилища теста
 }
 
 func newTestEnv(t *testing.T) *testEnv {
@@ -35,11 +39,29 @@ func newTestEnv(t *testing.T) *testEnv {
 	// Тестовый сервер работает по http: cookie с Secure клиент не вернёт.
 	cfg.SessionCookieSecure = false
 	tx := testdb.New(t)
-	srv := httptest.NewServer(httpapi.NewServer(httpapi.Deps{Cfg: cfg, DB: tx}))
+	root := t.TempDir()
+	store, err := storage.New(root, cfg.MaxUploadBytes)
+	require.NoError(t, err)
+	srv := httptest.NewServer(httpapi.NewServer(httpapi.Deps{
+		Cfg: cfg, DB: tx, Store: store, Importers: importers.Default(cfg),
+	}))
 	// Cleanup выполняется в обратном порядке: сервер закроется раньше,
 	// чем откатится транзакция, которой он пользуется.
 	t.Cleanup(srv.Close)
-	return &testEnv{srv: srv, db: tx, cfg: cfg}
+	return &testEnv{srv: srv, db: tx, cfg: cfg, storage: root}
+}
+
+// upload отправляет файл как multipart-форму с полем file.
+func (c *apiClient) upload(filename string, content []byte) *response {
+	c.t.Helper()
+	var body bytes.Buffer
+	mw := multipart.NewWriter(&body)
+	part, err := mw.CreateFormFile("file", filename)
+	require.NoError(c.t, err)
+	_, err = part.Write(content)
+	require.NoError(c.t, err)
+	require.NoError(c.t, mw.Close())
+	return c.do(http.MethodPost, "/api/books", body.Bytes(), [2]string{"Content-Type", mw.FormDataContentType()})
 }
 
 // apiClient — клиент со своей cookie jar, то есть отдельный «браузер».
@@ -82,7 +104,9 @@ func (c *apiClient) do(method, path string, body any, headers ...[2]string) *res
 	req, err := http.NewRequestWithContext(c.t.Context(), method, c.base+path, reader)
 	require.NoError(c.t, err)
 	if reader != nil {
-		req.Header.Set("Content-Type", "application/json")
+		if _, raw := body.([]byte); !raw {
+			req.Header.Set("Content-Type", "application/json")
+		}
 	}
 	for _, h := range headers {
 		req.Header.Set(h[0], h[1])
