@@ -84,8 +84,13 @@ func (c httpCall) transportError(parent, ctx context.Context, err error) error {
 	return fmt.Errorf("%w: %s", ErrUnavailable, c.scrub(err.Error()))
 }
 
+// minSecretLength — короче этого строка секретом не считается: её замена
+// только портила бы текст ошибки (ключ «k» превращал «max_tokens» в
+// «max_to***ens» и ломал распознавание отвергнутых параметров).
+const minSecretLength = 8
+
 func (c httpCall) scrub(s string) string {
-	if c.secret == "" {
+	if len(c.secret) < minSecretLength {
 		return s
 	}
 	return strings.ReplaceAll(s, c.secret, "***")
