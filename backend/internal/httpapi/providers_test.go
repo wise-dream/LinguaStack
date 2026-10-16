@@ -10,11 +10,13 @@ import (
 	"time"
 
 	"github.com/anthropics/anthropic-sdk-go/option"
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
 	"github.com/vnovels/linguastack/internal/db/models"
 	"github.com/vnovels/linguastack/internal/httpapi"
 	"github.com/vnovels/linguastack/internal/providers"
+	"github.com/vnovels/linguastack/internal/testdb"
 )
 
 const secretKey = "sk-ant-super-secret-value-9876"
@@ -246,4 +248,18 @@ func TestKindModels(t *testing.T) {
 	// Список моделей OpenAI-совместимого сервиса зависит от адреса и ключа.
 	require.Equal(t, http.StatusUnprocessableEntity, c.do(http.MethodGet, "/api/providers/openai_compatible/models", nil).Status)
 	require.Equal(t, http.StatusNotFound, c.do(http.MethodGet, "/api/providers/mystery/models", nil).Status)
+}
+
+func TestDeleteConfigInUseIs409(t *testing.T) {
+	env := newTestEnv(t)
+	c := env.signedIn(t, "u@example.com")
+	_, created := createConfig(t, c, map[string]any{"provider_id": "ollama"})
+	var owner models.User
+	require.NoError(t, env.db.Where("email = ?", "u@example.com").First(&owner).Error)
+	cfgID := uuid.MustParse(created.ID)
+	testdb.MakeProject(t, env.db, &testdb.ProjectOptions{Owner: &owner.ID, ProviderConfig: &cfgID})
+
+	r := c.do(http.MethodDelete, "/api/provider-configs/"+created.ID, nil)
+	require.Equal(t, http.StatusConflict, r.Status, "тело: %s", r.Body)
+	require.Equal(t, http.StatusOK, c.do(http.MethodGet, "/api/provider-configs/"+created.ID, nil).Status)
 }

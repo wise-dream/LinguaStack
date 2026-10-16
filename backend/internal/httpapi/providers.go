@@ -7,6 +7,8 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"gorm.io/gorm"
+
 	"github.com/vnovels/linguastack/internal/db/models"
 	"github.com/vnovels/linguastack/internal/providers"
 	"github.com/vnovels/linguastack/internal/security"
@@ -226,7 +228,15 @@ func (s *server) deleteProviderConfig(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if err := s.DB.WithContext(r.Context()).Delete(&models.ProviderConfig{}, "id = ?", cfg.ID).Error; err != nil {
+	// Вложенная транзакция: нарушение внешнего ключа откатывает только её.
+	err := s.DB.WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
+		return tx.Delete(&models.ProviderConfig{}, "id = ?", cfg.ID).Error
+	})
+	if errors.Is(err, gorm.ErrForeignKeyViolated) {
+		writeError(w, http.StatusConflict, "Конфигурацией пользуются проекты перевода — сначала удалите их или смените провайдера")
+		return
+	}
+	if err != nil {
 		internalError(w, r, err)
 		return
 	}
