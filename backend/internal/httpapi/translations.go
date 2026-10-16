@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -326,6 +327,13 @@ func segmentResponse(seg *models.TranslationSegment) segmentOut {
 	}
 }
 
+var (
+	segmentStatuses = []string{
+		models.SegmentPending, models.SegmentRunning, models.SegmentCompleted, models.SegmentFailed,
+	}
+	segmentSeverities = []string{string(translation.OK), string(translation.Warning), string(translation.Error)}
+)
+
 func queryInt(r *http.Request, name string, def int) (int, bool) {
 	raw := r.URL.Query().Get(name)
 	if raw == "" {
@@ -346,9 +354,25 @@ func (s *server) listSegments(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnprocessableEntity, fmt.Sprintf("offset ≥ 0, limit от 1 до %d", maxSegmentPage))
 		return
 	}
+	q := s.DB.WithContext(r.Context()).Where("project_id = ?", p.ID)
+	// Фильтры — чтобы найти не прошедшие проверку сегменты среди сотен
+	// (ТЗ §5.3) без перебора всех страниц.
+	if status := r.URL.Query().Get("status"); status != "" {
+		if !slices.Contains(segmentStatuses, status) {
+			writeError(w, http.StatusUnprocessableEntity, "status: "+strings.Join(segmentStatuses, ", "))
+			return
+		}
+		q = q.Where("status = ?", status)
+	}
+	if severity := r.URL.Query().Get("severity"); severity != "" {
+		if !slices.Contains(segmentSeverities, severity) {
+			writeError(w, http.StatusUnprocessableEntity, "severity: "+strings.Join(segmentSeverities, ", "))
+			return
+		}
+		q = q.Where("severity = ?", severity)
+	}
 	var segs []models.TranslationSegment
-	if err := s.DB.WithContext(r.Context()).Where("project_id = ?", p.ID).
-		Order("chapter_index, ordinal").Offset(offset).Limit(limit).Find(&segs).Error; err != nil {
+	if err := q.Order("chapter_index, ordinal").Offset(offset).Limit(limit).Find(&segs).Error; err != nil {
 		internalError(w, r, err)
 		return
 	}

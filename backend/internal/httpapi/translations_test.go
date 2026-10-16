@@ -304,6 +304,37 @@ func TestSegmentsListIsPaged(t *testing.T) {
 		e.c.do(http.MethodGet, "/api/translations/"+p.ID+"/segments?limit=99999", nil).Status)
 }
 
+func TestSegmentsFilterByStatusAndSeverity(t *testing.T) {
+	// ТЗ §5.3: не прошедший проверку результат должен находиться и
+	// обрабатываться повторно — среди сотен сегментов книги, а не перебором.
+	e := newTranslationEnv(t, nil)
+	p := e.project(t, e.book(t, "# Ch\n\nGood.\n\nBad."))
+	e.fake.FailForTexts = map[string]bool{"Bad.": true}
+	e.runWorker(t)
+
+	list := func(query string) []string {
+		var page []segmentBody
+		r := e.c.do(http.MethodGet, "/api/translations/"+p.ID+"/segments?"+query, nil)
+		require.Equal(t, http.StatusOK, r.Status, "тело: %s", r.Body)
+		r.JSON(t, &page)
+		texts := []string{}
+		for _, s := range page {
+			texts = append(texts, s.SourceText)
+		}
+		return texts
+	}
+	require.Equal(t, []string{"Bad."}, list("status=failed"))
+	require.Equal(t, []string{"Bad."}, list("severity=error"))
+	require.Equal(t, []string{"Ch", "Good."}, list("status=completed"))
+	require.Empty(t, list("status=completed&severity=error"))
+	require.Equal(t, []string{"Good."}, list("status=completed&offset=1"), "пагинация — по отфильтрованному")
+
+	for _, bad := range []string{"status=done", "severity=fatal"} {
+		require.Equal(t, http.StatusUnprocessableEntity,
+			e.c.do(http.MethodGet, "/api/translations/"+p.ID+"/segments?"+bad, nil).Status, bad)
+	}
+}
+
 func TestPatchSegmentRecordsManualRevision(t *testing.T) {
 	// ТЗ §8.3: ручная правка перевода; ТЗ §5.1: прежняя версия сохраняется.
 	e := newTranslationEnv(t, nil)
