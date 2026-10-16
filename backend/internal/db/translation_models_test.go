@@ -125,7 +125,7 @@ func TestDeletingBookCascades(t *testing.T) {
 	// Подсчёт — только по своим строкам: тесты очереди в соседних пакетах
 	// коммитят данные, и счёт по всей таблице стал бы случайным.
 	counts := map[string]*gorm.DB{
-		"проекты": tx.Model(&models.TranslationProject{}).Where("id = ?", project.ID),
+		"проекты":  tx.Model(&models.TranslationProject{}).Where("id = ?", project.ID),
 		"сегменты": tx.Model(&models.TranslationSegment{}).Where("project_id = ?", project.ID),
 		"ревизии":  tx.Model(&models.TranslationSegmentRevision{}).Where("segment_id = ?", s.ID),
 		"задачи":   tx.Model(&models.TranslationTask{}).Where("project_id = ?", project.ID),
