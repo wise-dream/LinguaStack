@@ -2,12 +2,14 @@ package providers
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"regexp"
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 )
 
 // Ollama — локальные модели (ТЗ §6.2). Текст книги не покидает сервер.
@@ -76,44 +78,76 @@ type ollamaMessage struct {
 // content (новые возвращают их отдельным полем).
 var thinkRe = regexp.MustCompile(`(?s)^\s*<think>.*?</think>\s*`)
 
-func (o *Ollama) Complete(ctx context.Context, modelID string, req CompletionRequest) (CompletionResult, error) {
-	callCtx, cancel := context.WithTimeout(ctx, o.opts.Timeout)
-	defer cancel()
+// outputBudget — лимит выхода по умолчанию: 2 токена на символ запроса
+// с запасом, но не больше окна. Перевод не длиннее исходника в токенах
+// даже для пар вроде китайский → русский, а без лимита зациклившаяся
+// модель генерирует бесконечно: Ollama сдвигает окно и продолжает.
+func (o *Ollama) outputBudget(user string) int {
+	return min(o.opts.NumCtx, 2*utf8.RuneCountInString(user)+256)
+}
 
+// ollamaChunk — событие потока /api/chat; последнее несёт done и метрики.
+type ollamaChunk struct {
+	Message struct {
+		Content string `json:"content"`
+	} `json:"message"`
+	Done            bool   `json:"done"`
+	DoneReason      string `json:"done_reason"`
+	PromptEvalCount *int   `json:"prompt_eval_count"`
+	EvalCount       *int   `json:"eval_count"`
+	Error           string `json:"error"`
+}
+
+// Complete запрашивает перевод потоком: тайм-аут адаптера означает «модель
+// молчит дольше Timeout», а не «ответ занял дольше Timeout».
+func (o *Ollama) Complete(ctx context.Context, modelID string, req CompletionRequest) (CompletionResult, error) {
 	var messages []ollamaMessage
 	if req.System != "" {
 		messages = append(messages, ollamaMessage{Role: "system", Content: req.System})
 	}
 	messages = append(messages, ollamaMessage{Role: "user", Content: req.User})
-	options := map[string]any{"temperature": temperature(req.Determinism), "num_ctx": o.opts.NumCtx}
-	if req.MaxOutputTokens > 0 {
-		options["num_predict"] = req.MaxOutputTokens
+	numPredict := req.MaxOutputTokens
+	if numPredict <= 0 {
+		numPredict = o.outputBudget(req.User)
+	}
+	options := map[string]any{
+		"temperature": temperature(req.Determinism), "num_ctx": o.opts.NumCtx, "num_predict": numPredict,
 	}
 	body := map[string]any{
-		"model": modelID, "messages": messages, "stream": false, "options": options,
+		"model": modelID, "messages": messages, "stream": true, "options": options,
 		// Рассуждения «думающих» моделей (qwen3) увеличивают выход в десятки
 		// раз, а переводу не нужны. Модели без рассуждений поле принимают.
 		"think": false,
 	}
 
-	var resp struct {
-		Model   string `json:"model"`
-		Message struct {
-			Content string `json:"content"`
-		} `json:"message"`
-		DoneReason      string `json:"done_reason"`
-		PromptEvalCount *int   `json:"prompt_eval_count"`
-		EvalCount       *int   `json:"eval_count"`
-	}
-	if err := o.call(http.MethodPost, "/api/chat", body).do(ctx, callCtx, &resp); err != nil {
+	var text strings.Builder
+	var last ollamaChunk
+	err := o.call(http.MethodPost, "/api/chat", body).stream(ctx, o.opts.Timeout, func(line []byte) error {
+		var chunk ollamaChunk
+		if err := json.Unmarshal(line, &chunk); err != nil {
+			return fmt.Errorf("%w: некорректное событие потока: %s", ErrUnavailable, truncate(string(line)))
+		}
+		if chunk.Error != "" {
+			return fmt.Errorf("%w: %s", ErrUnavailable, truncate(chunk.Error))
+		}
+		text.WriteString(chunk.Message.Content)
+		if chunk.Done {
+			last = chunk
+		}
+		return nil
+	})
+	if err != nil {
 		return CompletionResult{}, err
 	}
+	if !last.Done {
+		return CompletionResult{}, fmt.Errorf("%w: поток ответа оборван до завершения", ErrUnavailable)
+	}
 	return CompletionResult{
-		Text:         thinkRe.ReplaceAllString(resp.Message.Content, ""),
+		Text:         thinkRe.ReplaceAllString(text.String(), ""),
 		ModelID:      modelID,
-		Truncated:    resp.DoneReason == "length",
-		InputTokens:  resp.PromptEvalCount,
-		OutputTokens: resp.EvalCount,
+		Truncated:    last.DoneReason == "length",
+		InputTokens:  last.PromptEvalCount,
+		OutputTokens: last.EvalCount,
 	}, nil
 }
 

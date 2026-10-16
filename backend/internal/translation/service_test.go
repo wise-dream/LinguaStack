@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -107,6 +108,38 @@ func TestTruncatedResponseDegrades(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "RU:One.", *result(t, out, 0).Translated)
 	require.Equal(t, "RU:Two.", *result(t, out, 1).Translated)
+}
+
+func TestTimedOutBatchDegradesToSingletons(t *testing.T) {
+	// Медленная модель не успевает весь батч за тайм-аут: поодиночке
+	// ответы короче и укладываются. Иначе батч падал бы по тайм-ауту
+	// бесконечно и книга стояла бы на месте.
+	fake := providers.NewFake("prefix")
+	fake.TimeoutOverSegments = 1
+	out, err := run(t, fake, "One.", "Two.", "Three.")
+	require.NoError(t, err)
+	require.Equal(t, "RU:Three.", *result(t, out, 2).Translated)
+	require.Equal(t, 4, out.ProviderCalls, "один батч по тайм-ауту без повтора, затем три одиночных")
+}
+
+func TestTimedOutSingleSegmentPropagates(t *testing.T) {
+	// Один сегмент делить некуда — повтор с паузой за очередью.
+	fake := providers.NewFake("prefix")
+	fake.TimeoutOverSegments = 0
+	fake.Scenario = "timeout"
+	_, err := run(t, fake, "One.")
+	require.True(t, providers.Retryable(err))
+}
+
+func TestCallerCancellationIsNotTreatedAsTimeout(t *testing.T) {
+	// Остановка сервиса — не повод дробить батч: ошибка уходит наверх.
+	fake := providers.NewFake("timeout")
+	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Millisecond)
+	defer cancel()
+	svc := translation.NewService(fake, "fake-1", translation.ServiceOptions{})
+	_, err := svc.TranslateBatch(ctx, batchOf("One.", "Two."), "sys", providers.Strict, "en", "ru")
+	require.Error(t, err)
+	require.Equal(t, 1, fake.CallCount())
 }
 
 func TestDroppedPlaceholderIsError(t *testing.T) {

@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -70,7 +71,8 @@ func TestOllamaRequestShape(t *testing.T) {
 	require.Equal(t, 3, *res.OutputTokens)
 	require.Nil(t, res.CostUSD)
 
-	require.Equal(t, false, got["stream"])
+	// Поток: тайм-аут считается по тишине, а не по всей генерации.
+	require.Equal(t, true, got["stream"])
 	// Рассуждения qwen3 увеличивают выход в десятки раз и переводу не нужны.
 	require.Equal(t, false, got["think"])
 	opts := got["options"].(map[string]any)
@@ -81,6 +83,103 @@ func TestOllamaRequestShape(t *testing.T) {
 	require.Equal(t, "system", messages[0].(map[string]any)["role"])
 	require.Equal(t, "инструкция", messages[0].(map[string]any)["content"])
 	require.Equal(t, "user", messages[1].(map[string]any)["role"])
+}
+
+func TestOllamaDefaultOutputBudget(t *testing.T) {
+	// Без явного лимита выход ограничен по длине запроса: иначе
+	// зациклившаяся локальная модель генерирует бесконечно (Ollama сдвигает
+	// окно и продолжает).
+	var got map[string]any
+	o := ollamaServer(t, func(w http.ResponseWriter, r *http.Request) {
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&got))
+		chatReply(w, "x", "stop")
+	})
+	_, err := o.Complete(t.Context(), "m", providers.CompletionRequest{System: "длинная инструкция", User: "двенадцать"})
+	require.NoError(t, err)
+	require.InDelta(t, 2*10+256, got["options"].(map[string]any)["num_predict"], 0, "2 токена на символ запроса + запас")
+
+	_, err = o.Complete(t.Context(), "m", providers.CompletionRequest{User: strings.Repeat("ы", 20000)})
+	require.NoError(t, err)
+	require.InDelta(t, 8192, got["options"].(map[string]any)["num_predict"], 0, "но не больше окна")
+}
+
+// streamChunks отдаёт ответ Ollama потоком, как настоящий сервер.
+func streamChunks(w http.ResponseWriter, pause time.Duration, chunks ...string) {
+	flusher := w.(http.Flusher)
+	for _, c := range chunks {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"model": "qwen3:8b", "message": map[string]string{"role": "assistant", "content": c}, "done": false,
+		})
+		flusher.Flush()
+		time.Sleep(pause)
+	}
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"model": "qwen3:8b", "message": map[string]string{"role": "assistant", "content": ""},
+		"done": true, "done_reason": "stop", "prompt_eval_count": 7, "eval_count": len(chunks),
+	})
+}
+
+func TestOllamaAssemblesStream(t *testing.T) {
+	o := ollamaServer(t, func(w http.ResponseWriter, _ *http.Request) {
+		streamChunks(w, 0, "Книга ", "на ", "столе.")
+	})
+	res, err := o.Complete(t.Context(), "qwen3:8b", providers.CompletionRequest{User: "x"})
+	require.NoError(t, err)
+	require.Equal(t, "Книга на столе.", res.Text)
+	require.Equal(t, 7, *res.InputTokens)
+	require.Equal(t, 3, *res.OutputTokens)
+	require.False(t, res.Truncated)
+}
+
+func TestOllamaSlowSteadyGenerationIsNotTimedOut(t *testing.T) {
+	// Локальная модель на CPU даёт ~4 токена/с: батч идёт дольше любого
+	// разумного тайм-аута на весь ответ. Обрывать надо тишину, а не
+	// идущую генерацию.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		streamChunks(w, 40*time.Millisecond, "a", "b", "c", "d", "e", "f", "g", "h")
+	}))
+	t.Cleanup(srv.Close)
+	o := providers.NewOllama(srv.URL, srv.Client(), providers.OllamaOptions{NumCtx: 8192, Timeout: 150 * time.Millisecond})
+	start := time.Now()
+	res, err := o.Complete(t.Context(), "m", providers.CompletionRequest{User: "x"})
+	require.NoError(t, err)
+	require.Equal(t, "abcdefgh", res.Text)
+	require.Greater(t, time.Since(start), 300*time.Millisecond, "ответ шёл дольше тайм-аута")
+}
+
+func TestOllamaSilenceMidStreamIsRetryableTimeout(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"message": map[string]string{"content": "нача"}, "done": false})
+		w.(http.Flusher).Flush()
+		waitForDisconnect(r, 2*time.Second)
+	}))
+	t.Cleanup(srv.Close)
+	o := providers.NewOllama(srv.URL, srv.Client(), providers.OllamaOptions{NumCtx: 8192, Timeout: 50 * time.Millisecond})
+	start := time.Now()
+	_, err := o.Complete(t.Context(), "m", providers.CompletionRequest{User: "x"})
+	require.True(t, providers.Retryable(err), "получено: %v", err)
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	require.Less(t, time.Since(start), time.Second)
+}
+
+func TestOllamaErrorInsideStream(t *testing.T) {
+	// Ошибка после начала ответа приходит строкой потока, а не статусом.
+	o := ollamaServer(t, func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, `{"message":{"content":"Кни"},"done":false}`+"\n"+`{"error":"model runner has unexpectedly stopped"}`+"\n")
+	})
+	_, err := o.Complete(t.Context(), "m", providers.CompletionRequest{User: "x"})
+	require.ErrorIs(t, err, providers.ErrUnavailable)
+	require.Contains(t, err.Error(), "unexpectedly stopped")
+}
+
+func TestOllamaStreamCutBeforeDone(t *testing.T) {
+	// Соединение оборвалось до финального события: это не готовый ответ.
+	o := ollamaServer(t, func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, `{"message":{"content":"Книга на"},"done":false}`+"\n")
+	})
+	_, err := o.Complete(t.Context(), "m", providers.CompletionRequest{User: "x"})
+	require.ErrorIs(t, err, providers.ErrUnavailable)
+	require.True(t, providers.Retryable(err))
 }
 
 func TestOllamaDeterminismMapsToTemperature(t *testing.T) {

@@ -30,6 +30,9 @@ type Fake struct {
 	TruncateTimes  int             // первые N ответов на конверт помечены как оборванные
 	CostPerCall    float64         // стоимость каждого успешного вызова
 	Unavailable    bool            // всегда ErrUnavailable
+	// TimeoutOverSegments > 0 — конверт больше N сегментов «не успевает»:
+	// тайм-аут адаптера (медленная локальная модель).
+	TimeoutOverSegments int
 
 	mu         sync.Mutex
 	calls      []CompletionRequest
@@ -124,6 +127,10 @@ func (f *Fake) Complete(ctx context.Context, modelID string, req CompletionReque
 			text = f.Prefix + text
 		}
 		return CompletionResult{Text: text, ModelID: modelID}, nil
+	}
+
+	if f.TimeoutOverSegments > 0 && len(segs) > f.TimeoutOverSegments {
+		return CompletionResult{}, fmt.Errorf("%w: fake тайм-аут на %d сегментах: %w", ErrUnavailable, len(segs), context.DeadlineExceeded)
 	}
 
 	f.mu.Lock()
