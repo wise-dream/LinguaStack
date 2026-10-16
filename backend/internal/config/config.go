@@ -31,7 +31,13 @@ type Settings struct {
 
 	StorageRoot   string `env:"LINGUASTACK_STORAGE_ROOT" envDefault:"./storage"`
 	OllamaBaseURL string `env:"LINGUASTACK_OLLAMA_BASE_URL" envDefault:"http://localhost:11434"`
-	HTTPAddr      string `env:"LINGUASTACK_HTTP_ADDR" envDefault:":8000"`
+	// Контекстное окно Ollama (ТЗ §6.2). Задаётся явно: значение сервера по
+	// умолчанию меньше батча, и Ollama молча обрезает запрос.
+	OllamaNumCtx int `env:"LINGUASTACK_OLLAMA_NUM_CTX" envDefault:"8192"`
+	// Тайм-аут одного запроса к модели. Локальная генерация батча на CPU
+	// может идти минутами.
+	ProviderTimeout time.Duration `env:"LINGUASTACK_PROVIDER_TIMEOUT" envDefault:"10m"`
+	HTTPAddr        string        `env:"LINGUASTACK_HTTP_ADDR" envDefault:":8000"`
 
 	// Cookie сессии только по HTTPS. По умолчанию true: продакшен, где
 	// забыли переменную, не должен отдавать сессию по открытому каналу.

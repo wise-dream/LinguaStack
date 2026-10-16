@@ -52,8 +52,12 @@ type CompletionRequest struct {
 
 // CompletionResult — ответ модели и метрики (ТЗ §6.1).
 type CompletionResult struct {
-	Text              string
-	ModelID           string
+	Text    string
+	ModelID string
+	// Truncated — ответ оборван по лимиту токенов (Ollama done_reason
+	// "length", OpenAI finish_reason "length", Anthropic stop_reason
+	// "max_tokens"). Такой текст нельзя принимать за готовый перевод.
+	Truncated         bool
 	InputTokens       *int
 	OutputTokens      *int
 	CachedInputTokens *int
