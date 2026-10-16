@@ -17,7 +17,7 @@ func TestNodeIDDeterministicAndReadable(t *testing.T) {
 func TestContentHashIgnoresInsignificantWhitespace(t *testing.T) {
 	// Дополнение §1: переформатирование не должно помечать перевод устаревшим.
 	base := cdm.ContentHash("Hello world")
-	for _, variant := range []string{"Hello   world", "  Hello world\n", "Hello\tworld", "Hello world"} {
+	for _, variant := range []string{"Hello   world", "  Hello world\n", "Hello\tworld", "Hello\u00a0world"} {
 		require.Equal(t, base, cdm.ContentHash(variant), "вариант %q", variant)
 	}
 	require.NotEqual(t, base, cdm.ContentHash("Hello worlds"))
@@ -25,7 +25,7 @@ func TestContentHashIgnoresInsignificantWhitespace(t *testing.T) {
 
 func TestContentHashNormalizesUnicode(t *testing.T) {
 	// «é» одним символом и как e + комбинируемый акцент — один и тот же текст.
-	require.Equal(t, cdm.ContentHash("café"), cdm.ContentHash("café"))
+	require.Equal(t, cdm.ContentHash("caf\u00e9"), cdm.ContentHash("cafe\u0301"))
 }
 
 func TestContentHashIsCaseSensitive(t *testing.T) {
