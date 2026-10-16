@@ -37,6 +37,10 @@ where = ["src"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+# Один цикл событий на всю сессию: соединения asyncpg, созданные в
+# session-фикстуре, нельзя использовать из другого цикла.
+asyncio_default_fixture_loop_scope = "session"
+asyncio_default_test_loop_scope = "session"
 markers = [
     "live: обращается к реальному провайдеру; требует LINGUASTACK_LIVE_OLLAMA=1",
 ]
