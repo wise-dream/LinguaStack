@@ -19,10 +19,14 @@ import (
 
 // Worker выполняет задачи перевода.
 //
-// Два контекста. Сигнал остановки (SIGTERM) проверяется только между
-// батчами: начатый батч дописывается, иначе уже отправленный запрос к
-// платной модели пропал бы. Работу с моделью и БД обрывает только потеря
-// аренды — тогда задачу уже ведёт другой worker.
+// Три контекста. Сигнал остановки (SIGTERM) проверяется между батчами:
+// начатый батч дописывается, иначе уже отправленный запрос к платной
+// модели пропал бы. Но ждать его не дольше WorkerShutdownGrace: локальная
+// модель, ушедшая в бесконечную генерацию, иначе держала бы остановку до
+// тайм-аута провайдера, а оркестратор убил бы процесс раньше, и сделанное
+// пропало бы. По истечении grace обрываются только вызовы модели — запись
+// результатов и возврат задачи в очередь идут дальше. Всё сразу обрывает
+// потеря аренды: задачу уже ведёт другой worker.
 type Worker struct {
 	id      string
 	db      *gorm.DB
@@ -92,8 +96,22 @@ func (w *Worker) RunOnce(stop context.Context) (bool, error) {
 	defer cancelWork()
 	leaseLost := make(chan struct{})
 	go w.heartbeat(work, task.ID, cancelWork, leaseLost)
+	calls, cancelCalls := context.WithCancel(work)
+	defer cancelCalls()
+	go func() {
+		select {
+		case <-stop.Done():
+		case <-calls.Done():
+			return
+		}
+		select {
+		case <-time.After(w.cfg.WorkerShutdownGrace):
+			cancelCalls()
+		case <-calls.Done():
+		}
+	}()
 
-	status, perr := w.process(stop, work, task)
+	status, perr := w.process(stop, work, calls, task)
 	select {
 	case <-leaseLost:
 		slog.Warn("worker: аренда потеряна, задачу ведёт другой worker", "worker", w.id, "task", task.ID)
@@ -167,7 +185,7 @@ UPDATE translation_projects SET status = 'failed', last_error = ?, finished_at =
 // process переводит книгу проекта батч за батчем. Возвращает статус
 // задачи: completed — книга пройдена, cancelled — проект приостановлен
 // или отменён (сделанное сохранено).
-func (w *Worker) process(stop, work context.Context, task *models.TranslationTask) (string, error) {
+func (w *Worker) process(stop, work, calls context.Context, task *models.TranslationTask) (string, error) {
 	var project models.TranslationProject
 	if err := w.db.WithContext(work).First(&project, "id = ?", task.ProjectID).Error; err != nil {
 		return "", fmt.Errorf("проект задачи: %w", err)
@@ -213,7 +231,7 @@ func (w *Worker) process(stop, work context.Context, task *models.TranslationTas
 			return "", err
 		}
 		svc := translation.NewService(provider, project.ModelID, translation.ServiceOptions{})
-		outcome, terr := svc.TranslateBatch(work, batch, system, providers.Determinism(project.Determinism),
+		outcome, terr := svc.TranslateBatch(calls, batch, system, providers.Determinism(project.Determinism),
 			project.SourceLang, project.TargetLang)
 		// Результаты пишутся и при сбое: ответы модели уже оплачены
 		// (Review Focus №5).
@@ -222,6 +240,11 @@ func (w *Worker) process(stop, work context.Context, task *models.TranslationTas
 		}
 		if w.AfterBatch != nil {
 			w.AfterBatch(project.ID)
+		}
+		if terr != nil && calls.Err() != nil && work.Err() == nil {
+			// Вызов оборван по истечении grace — это остановка сервиса,
+			// а не сбой провайдера: попытка не тратится.
+			return "", errStopping
 		}
 		if terr != nil {
 			return "", terr

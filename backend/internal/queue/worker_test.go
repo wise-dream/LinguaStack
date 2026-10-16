@@ -385,6 +385,76 @@ func TestWorkerStopsGracefullyFinishingCurrentBatch(t *testing.T) {
 	require.Equal(t, models.ProjectCompleted, e.reload(project).Status)
 }
 
+func TestStopDuringCallWaitsForBatchWithinGrace(t *testing.T) {
+	// Сигнал пришёл, пока запрос «в полёте»: ответ укладывается в grace и
+	// сохраняется — он уже оплачен.
+	e := newWorkerEnv(t)
+	project := e.projectFromMarkdown(paragraphs(7))
+	ctx, stop := context.WithCancel(t.Context())
+	e.provider = &cancellingProvider{Fake: e.fake, onCall: func(n int) {
+		if n == 1 {
+			stop()
+		}
+	}}
+	require.NoError(t, e.worker("w").Run(ctx))
+	require.Equal(t, 2, e.reload(project).SegmentsDone)
+	require.Equal(t, 1, e.fake.CallCount(), "после остановки новых запросов нет")
+}
+
+// hangingProvider на вызове hangOn подаёт сигнал остановки и «зависает»
+// до отмены контекста — как локальная модель, ушедшая в бесконечную
+// генерацию.
+type hangingProvider struct {
+	*providers.Fake
+	hangOn int
+	onHang func()
+	n      int
+}
+
+func (h *hangingProvider) Complete(ctx context.Context, model string, req providers.CompletionRequest) (providers.CompletionResult, error) {
+	h.n++
+	if h.n == h.hangOn {
+		h.onHang()
+		<-ctx.Done()
+		return providers.CompletionResult{}, fmt.Errorf("запрос к провайдеру прерван: %w", ctx.Err())
+	}
+	return h.Fake.Complete(ctx, model, req)
+}
+
+func TestStopAbortsHungCallAfterGrace(t *testing.T) {
+	// Зависший вызов не держит остановку сервиса до тайм-аута провайдера
+	// (минуты): после grace он обрывается, сделанное сохранено, задача
+	// возвращается в очередь без траты попытки, а проект не помечается
+	// упавшим.
+	e := newWorkerEnv(t)
+	e.cfg.WorkerShutdownGrace = 50 * time.Millisecond
+	project := e.projectFromMarkdown(paragraphs(7))
+	ctx, stop := context.WithCancel(t.Context())
+	e.provider = &hangingProvider{Fake: e.fake, hangOn: 2, onHang: stop}
+
+	done := make(chan error, 1)
+	go func() { done <- e.worker("w").Run(ctx) }()
+	select {
+	case err := <-done:
+		require.NoError(t, err)
+	case <-time.After(10 * time.Second):
+		t.Fatal("worker не остановился после grace")
+	}
+
+	stopped := e.reload(project)
+	require.Equal(t, models.ProjectRunning, stopped.Status, "остановка сервиса — не сбой проекта")
+	require.Empty(t, stopped.LastError)
+	require.Equal(t, 2, stopped.SegmentsDone, "первый батч сохранён")
+	var task models.TranslationTask
+	require.NoError(t, e.db.First(&task, "project_id = ?", project.ID).Error)
+	require.Equal(t, models.TaskPending, task.Status)
+	require.Zero(t, task.Attempts)
+
+	e.provider = e.fake
+	e.runUntilIdle(e.worker("w2"))
+	require.Equal(t, models.ProjectCompleted, e.reload(project).Status)
+}
+
 func TestCancelDuringLastBatchDoesNotRevive(t *testing.T) {
 	// Review Focus №5: отмена пришла во время последнего батча — после него
 	// цикл кончается, и итоговый статус не должен затереть отмену.

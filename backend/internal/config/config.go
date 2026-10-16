@@ -66,6 +66,11 @@ type Settings struct {
 
 	// --- очередь, дополнение §7 ---
 	TaskLease time.Duration `env:"LINGUASTACK_TASK_LEASE" envDefault:"2m"`
+	// Сколько после сигнала остановки ждать начатый вызов модели. Дольше —
+	// вызов обрывается, задача возвращается в очередь без траты попытки.
+	// Должно быть меньше срока, который даёт оркестратор до SIGKILL
+	// (stop_grace_period в docker-compose.yml).
+	WorkerShutdownGrace time.Duration `env:"LINGUASTACK_WORKER_SHUTDOWN_GRACE" envDefault:"25s"`
 }
 
 // Load читает настройки из окружения, подставляя значения по умолчанию.
