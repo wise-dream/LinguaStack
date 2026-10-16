@@ -293,7 +293,9 @@ type ModelCapabilities struct {
 §7 требует ограниченный параллелизм, восстановление после перезапуска и защиту
 от повторного выполнения. Реализуется арендой (lease) в PostgreSQL без брокера.
 
-Захват задачи:
+Захват задачи (исправлено 2026-10-16: первая версия выбирала только
+`pending` и навсегда теряла задачу упавшего worker-а — она оставалась в
+`running` с истёкшей арендой):
 
 ```sql
 UPDATE translation_tasks
@@ -302,10 +304,11 @@ UPDATE translation_tasks
        started_at = COALESCE(started_at, now())
  WHERE id = (
    SELECT t.id FROM translation_tasks t
-    WHERE t.status = 'pending'
-      AND (t.locked_until IS NULL OR t.locked_until < now())
+    WHERE ((t.status = 'pending' AND t.available_at <= now())
+        OR (t.status = 'running' AND t.locked_until < now()))
       AND (SELECT count(*) FROM translation_tasks r
-            WHERE r.owner_id = t.owner_id AND r.status = 'running')
+            WHERE r.owner_id = t.owner_id AND r.status = 'running'
+              AND r.locked_until > now() AND r.id <> t.id)
           < :max_per_user
     ORDER BY t.priority DESC, t.created_at
     FOR UPDATE SKIP LOCKED
@@ -314,11 +317,17 @@ UPDATE translation_tasks
 RETURNING *;
 ```
 
+Повторный захват задачи с истёкшей арендой считается попыткой: задача,
+которая каждый раз роняет worker, не крутится бесконечно. Под гонкой
+одновременных захватов лимит на пользователя может быть превышен не
+больше чем на число worker-ов минус один; в MVP worker один (ТЗ §7).
+
 * `FOR UPDATE SKIP LOCKED` — несколько worker-ов не берут одну задачу.
 * Подзапрос со `count(*)` — честность между пользователями (§7: один
   пользователь не должен занять все ресурсы).
-* `locked_until` в прошлом = задача свободна. Это и есть восстановление после
-  перезапуска: упавший worker ничего не держит дольше срока аренды.
+* `locked_until` в прошлом = задача свободна, даже если её статус `running`.
+  Это и есть восстановление после перезапуска: упавший worker ничего не
+  держит дольше срока аренды.
 * Heartbeat продлевает `locked_until`, пока задача реально выполняется.
 
 **Идемпотентность** (§17): запись перевода сегмента выполняется с условием

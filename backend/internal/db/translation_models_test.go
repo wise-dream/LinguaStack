@@ -122,11 +122,29 @@ func TestDeletingBookCascades(t *testing.T) {
 	require.NoError(t, tx.Create(&models.TranslationTask{ProjectID: project.ID, OwnerID: project.OwnerID, Status: models.TaskPending, MaxAttempts: 3}).Error)
 
 	require.NoError(t, tx.Delete(&models.Book{}, "id = ?", project.BookID).Error)
-	for _, m := range []any{&models.TranslationProject{}, &models.TranslationSegment{}, &models.TranslationSegmentRevision{}, &models.TranslationTask{}} {
-		var n int64
-		require.NoError(t, tx.Model(m).Count(&n).Error)
-		require.Zero(t, n, "%T", m)
+	// Подсчёт — только по своим строкам: тесты очереди в соседних пакетах
+	// коммитят данные, и счёт по всей таблице стал бы случайным.
+	counts := map[string]*gorm.DB{
+		"проекты": tx.Model(&models.TranslationProject{}).Where("id = ?", project.ID),
+		"сегменты": tx.Model(&models.TranslationSegment{}).Where("project_id = ?", project.ID),
+		"ревизии":  tx.Model(&models.TranslationSegmentRevision{}).Where("segment_id = ?", s.ID),
+		"задачи":   tx.Model(&models.TranslationTask{}).Where("project_id = ?", project.ID),
 	}
+	for name, q := range counts {
+		var n int64
+		require.NoError(t, q.Count(&n).Error)
+		require.Zero(t, n, name)
+	}
+}
+
+func TestDeletingUserCascadesThroughConfigsAndProjects(t *testing.T) {
+	// Проверка внешнего ключа конфигурации не должна мешать каскаду.
+	tx := testdb.New(t)
+	project := testdb.MakeProject(t, tx, nil)
+	require.NoError(t, tx.Delete(&models.User{}, "id = ?", project.OwnerID).Error)
+	var n int64
+	require.NoError(t, tx.Model(&models.ProviderConfig{}).Where("id = ?", project.ProviderConfigID).Count(&n).Error)
+	require.Zero(t, n)
 }
 
 func TestProviderConfigInUseCannotBeDeleted(t *testing.T) {

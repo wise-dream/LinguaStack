@@ -3,9 +3,11 @@ CREATE TABLE translation_projects (
     id                 uuid             PRIMARY KEY,
     owner_id           uuid             NOT NULL REFERENCES users (id) ON DELETE CASCADE,
     book_id            uuid             NOT NULL REFERENCES books (id) ON DELETE CASCADE,
-    -- RESTRICT: удалить конфигурацию, которой пользуется проект, нельзя —
-    -- проект остался бы без модели посреди книги.
-    provider_config_id uuid             NOT NULL REFERENCES provider_configs (id) ON DELETE RESTRICT,
+    -- NO ACTION: удалить конфигурацию, которой пользуется проект, нельзя —
+    -- проект остался бы без модели посреди книги. Не RESTRICT: тот
+    -- срабатывает посреди каскада и не дал бы удалить пользователя вместе с
+    -- его проектами и конфигурациями; NO ACTION проверяет в конце оператора.
+    provider_config_id uuid             NOT NULL REFERENCES provider_configs (id),
     source_lang        varchar(16)      NOT NULL,
     target_lang        varchar(16)      NOT NULL,
     model_id           varchar(200)     NOT NULL,

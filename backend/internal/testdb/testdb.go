@@ -112,3 +112,64 @@ func ensureDatabase(ctx context.Context, dsn string) error {
 	}
 	return fmt.Errorf("создание тестовой БД: %w", err)
 }
+
+var (
+	committingMu sync.Mutex
+	committing   = map[string]*gorm.DB{}
+)
+
+// appTables — таблицы приложения для очистки (служебную goose_db_version
+// не трогаем).
+const appTables = "users, user_sessions, login_attempts, books, provider_configs, " +
+	"translation_projects, translation_segments, translation_segment_revisions, translation_tasks"
+
+// Committing — база, где тест коммитит по-настоящему: SKIP LOCKED и аренды
+// проверяются только на разных соединениях. У каждого пакета своя база
+// (linguastack_test_<name>), чтобы параллельно идущие пакеты не видели
+// чужих задач; перед каждым тестом она очищается. Тесты, использующие её,
+// не должны запускаться с t.Parallel().
+func Committing(t testing.TB, name string) *gorm.DB {
+	t.Helper()
+	committingMu.Lock()
+	gdb, ok := committing[name]
+	if !ok {
+		var err error
+		gdb, err = setupNamed(name)
+		if err != nil {
+			committingMu.Unlock()
+			t.Fatalf("подготовка тестовой БД %q: %v", name, err)
+		}
+		committing[name] = gdb
+	}
+	committingMu.Unlock()
+	if err := gdb.Exec("TRUNCATE " + appTables + " CASCADE").Error; err != nil {
+		t.Fatalf("очистка тестовой БД %q: %v", name, err)
+	}
+	return gdb
+}
+
+func setupNamed(name string) (*gorm.DB, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), setupTimeout)
+	defer cancel()
+	cfg, err := config.Load()
+	if err != nil {
+		return nil, err
+	}
+	parsed, err := url.Parse(cfg.TestDatabaseURL)
+	if err != nil {
+		return nil, fmt.Errorf("разбор URL тестовой БД: %w", err)
+	}
+	parsed.Path = parsed.Path + "_" + name
+	dsn := parsed.String()
+	if err := ensureDatabase(ctx, dsn); err != nil {
+		return nil, err
+	}
+	gdb, err := db.Open(ctx, dsn, io.Discard)
+	if err != nil {
+		return nil, err
+	}
+	if err := db.Migrate(ctx, gdb); err != nil {
+		return nil, err
+	}
+	return gdb, nil
+}
