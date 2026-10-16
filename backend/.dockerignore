@@ -1,0 +1,6 @@
+bin/
+storage/
+*.test
+*.out
+coverage.*
+.env

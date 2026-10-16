@@ -1,20 +1,80 @@
+# Разработка: `docker compose up -d db` — только PostgreSQL.
+# Развёртывание: `docker compose up -d --build` — db, api и worker.
+# Переменные берутся из .env рядом с этим файлом (см. .env.example).
 services:
   db:
     image: postgres:17-alpine
     environment:
       POSTGRES_USER: linguastack
-      POSTGRES_PASSWORD: linguastack
+      POSTGRES_PASSWORD: ${LINGUASTACK_DB_PASSWORD:-linguastack}
       POSTGRES_DB: linguastack
     ports:
       - "127.0.0.1:5434:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U linguastack"]
+      # Проверяется целевая БД, а не только сервер: pg_isready отвечает
+      # «готов» ещё во время initdb.
+      test: ["CMD-SHELL", "psql -U linguastack -d linguastack -c 'select 1' >/dev/null"]
       interval: 3s
       timeout: 3s
       retries: 20
     restart: unless-stopped
 
+  api:
+    build: ./backend
+    image: linguastack:local
+    # Все настройки из .env (ключ шифрования, лимиты, тайм-ауты — см.
+    # .env.example) передаются в контейнер; без .env действуют значения по
+    # умолчанию, cookie — только по HTTPS.
+    env_file: &app-env-file
+      - path: .env
+        required: false
+    # Адреса внутри контейнера задаются здесь и перекрывают .env: там они
+    # для процессов на хосте (localhost:5434, ./storage).
+    environment: &app-env
+      LINGUASTACK_DATABASE_URL: postgres://linguastack:${LINGUASTACK_DB_PASSWORD:-linguastack}@db:5432/linguastack?sslmode=disable
+      LINGUASTACK_STORAGE_ROOT: /data/storage
+      LINGUASTACK_HTTP_ADDR: ":8000"
+      # Ollama на хосте должен слушать адрес, доступный из контейнера
+      # (OLLAMA_HOST=0.0.0.0 за файрволом) — 127.0.0.1 хоста отсюда не виден.
+      LINGUASTACK_OLLAMA_BASE_URL: ${LINGUASTACK_DOCKER_OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "127.0.0.1:${LINGUASTACK_PUBLISH_PORT:-8000}:8000"
+    volumes:
+      - storage:/data/storage
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "/app/api", "-healthcheck"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
+  worker:
+    image: linguastack:local
+    entrypoint: ["/app/worker"]
+    env_file: *app-env-file
+    environment: *app-env
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      db:
+        condition: service_healthy
+      # Образ собирает сервис api; миграции накатывают оба процесса
+      # (advisory-lock goose), но ждать api проще, чем гонять сборку дважды.
+      api:
+        condition: service_started
+    # Больше LINGUASTACK_WORKER_SHUTDOWN_GRACE (25 с): начатый вызов модели
+    # успевает закончиться или корректно оборваться до SIGKILL.
+    stop_grace_period: 40s
+    restart: unless-stopped
+    # Worker-ов может быть несколько: docker compose up -d --scale worker=3
+
 volumes:
   pgdata:
+  storage:

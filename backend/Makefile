@@ -3,7 +3,12 @@
 GO ?= go
 LINT ?= golangci-lint
 
-.PHONY: test test-live lint build run-api migrate
+# Настройки разработки из ../.env (если файл есть) — в окружение команд.
+# Само приложение .env не читает: в контейнере переменные задаёт compose.
+-include ../.env
+export
+
+.PHONY: test test-live lint build run-api run-worker migrate
 
 test:
 	$(GO) test ./...
@@ -19,6 +24,9 @@ build:
 
 run-api:
 	$(GO) run ./cmd/api
+
+run-worker:
+	$(GO) run ./cmd/worker
 
 migrate:
 	$(GO) run ./cmd/api -migrate
