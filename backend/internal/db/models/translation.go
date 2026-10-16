@@ -55,11 +55,15 @@ func (p *TranslationProject) IsTerminal() bool {
 }
 
 // ProgressPercent — доля обработанных сегментов (переведённых и исчерпавших
-// попытки). Книга без переводимых блоков — это 100%, а не деление на ноль
+// попытки). Сегментов ещё нет, пока задача в очереди: тогда это 0%, а у
+// завершённой книги без переводимых блоков — 100%, а не деление на ноль
 // (Review Focus №1).
 func (p *TranslationProject) ProgressPercent() float64 {
 	if p.SegmentsTotal == 0 {
-		return 100
+		if p.IsTerminal() {
+			return 100
+		}
+		return 0
 	}
 	return float64(p.SegmentsDone+p.SegmentsFailed) * 100 / float64(p.SegmentsTotal)
 }

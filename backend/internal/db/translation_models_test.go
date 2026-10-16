@@ -97,7 +97,9 @@ func TestOnlyOneActiveTaskPerProject(t *testing.T) {
 
 func TestProgressPercent(t *testing.T) {
 	// Review Focus №1: 0 сегментов — это 100%, а не деление на ноль.
-	require.InDelta(t, 100.0, (&models.TranslationProject{}).ProgressPercent(), 0)
+	require.InDelta(t, 100.0, (&models.TranslationProject{Status: models.ProjectCompleted}).ProgressPercent(), 0)
+	// Но задача в очереди ещё не сегментирована — это 0%, а не готово.
+	require.InDelta(t, 0.0, (&models.TranslationProject{Status: models.ProjectQueued}).ProgressPercent(), 0)
 	require.InDelta(t, 25.0, (&models.TranslationProject{SegmentsTotal: 4, SegmentsDone: 1}).ProgressPercent(), 1e-9)
 	require.InDelta(t, 50.0, (&models.TranslationProject{SegmentsTotal: 4, SegmentsDone: 1, SegmentsFailed: 1}).ProgressPercent(), 1e-9,
 		"сегмент, исчерпавший попытки, тоже обработан")
