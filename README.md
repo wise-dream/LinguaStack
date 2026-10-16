@@ -15,9 +15,16 @@
 
 ## Требования
 
-* Python 3.10 (целевая версия — см. дополнение §0.1)
+* Go — язык `1.26`, тулчейн `go1.27.2` (задан в `backend/go.mod`; при
+  `GOTOOLCHAIN=auto` установленный go ≥ 1.21 скачает его сам)
 * Docker и Docker Compose
 * Ollama — для локальных моделей
+* golangci-lint v2, собранный тем же тулчейном:
+  `GOTOOLCHAIN=go1.27.2 go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.14.0`
+
+> На машине разработки `/usr/bin/go` — это gccgo 1.16, он не понимает
+> современный `go.mod`. Нужный `go` лежит в `/usr/local/go/bin`, а линтер
+> v2 — в `/root/go/bin`: `export PATH=/root/go/bin:/usr/local/go/bin:$PATH`.
 
 ## Запуск для разработки
 
@@ -29,19 +36,13 @@ docker compose up -d db
 # pg_isready может ответить «готов» ещё во время initdb.
 until docker compose exec -T db psql -U linguastack -d linguastack -c 'select 1' >/dev/null 2>&1; do sleep 1; done
 
-# 2. Зависимости
+# 2. Настройки
+cp .env.example .env
+openssl rand -base64 32   # вписать в LINGUASTACK_SECRET_KEY
+
+# 3. Сервер
 cd backend
-python3 -m venv .venv
-.venv/bin/pip install -e ".[dev]"
-
-# 3. Настройки
-cp ../.env.example ../.env
-# Сгенерировать ключ шифрования пользовательских API-ключей:
-.venv/bin/python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
-# и вписать его в LINGUASTACK_SECRET_KEY
-
-# 4. Приложение
-.venv/bin/uvicorn linguastack.main:app --reload
+make run-api
 ```
 
 Postgres публикуется на **127.0.0.1:5434** — только на localhost и не на 5432/5433,
@@ -51,11 +52,11 @@ Postgres публикуется на **127.0.0.1:5434** — только на lo
 
 ```bash
 cd backend
-.venv/bin/python -m pytest              # без обращений к сети
-.venv/bin/ruff check src tests
+make test        # без обращений к сети
+make lint
 
 # Тесты против живой модели (требуют запущенного Ollama):
-LINGUASTACK_LIVE_OLLAMA=1 .venv/bin/python -m pytest -m live
+make test-live
 ```
 
 ## Статус

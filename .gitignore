@@ -1,12 +1,13 @@
-__pycache__/
-*.py[cod]
-.venv/
-venv/
+# Go
+/backend/bin/
+*.test
+*.out
+coverage.*
+
+# окружение и данные
 .env
 storage/
-.pytest_cache/
-.ruff_cache/
-*.egg-info/
-dist/
-build/
+
+# frontend (этап 4)
 node_modules/
+dist/
