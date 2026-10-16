@@ -106,10 +106,11 @@ type tocLabel struct {
 
 func decodeXML(data []byte, v any) error {
 	d := xml.NewDecoder(bytes.NewReader(data))
-	// Нестрогий режим и HTML-сущности: в реальных NCX встречаются &nbsp;
-	// и незакрытые теги. Кодировка из XML-декларации учитывается.
+	// Нестрогий режим и HTML-сущности: в реальных NCX встречаются &nbsp;.
+	// HTMLAutoClose здесь недопустим: в OPF есть <meta property="…">текст</meta>,
+	// а для HTML meta — пустой элемент; непарный </meta> разваливал разбор
+	// всего описания книги (найдено на реальном EPUB с Project Gutenberg).
 	d.Strict = false
-	d.AutoClose = xml.HTMLAutoClose
 	d.Entity = xml.HTMLEntity
 	d.CharsetReader = charset.NewReaderLabel
 	return d.Decode(v)
@@ -132,15 +133,15 @@ func (e EPUB) Load(data []byte, filename string) (Result, error) {
 		return finish(cdm.NewBuilder(fallback).Build(), []Issue{issue}), nil
 	}
 
-	entries, broken, err := openArchive(data, e.limits)
+	archive, err := openArchive(data, e.limits)
 	if err != nil {
 		return Result{}, err
 	}
-	if broken {
+	if archive.corrupt {
 		return corrupt("")
 	}
-	book := &epubBook{files: map[string]*zip.File{}}
-	for _, entry := range entries {
+	book := &epubBook{files: map[string]*zip.File{}, issues: archive.issues}
+	for _, entry := range archive.entries {
 		if _, seen := book.files[entry.name]; !seen {
 			book.files[entry.name] = entry.file
 		}
@@ -229,10 +230,18 @@ func (e EPUB) Load(data []byte, filename string) (Result, error) {
 			}
 		}
 		if label == "" {
+			// Страницы вне оглавления без заголовков — обложка, титул:
+			// у Project Gutenberg это <title>"Cover"</title>.
+			if title := findElement(doc, atom.Title); title != nil {
+				label = strings.Trim(collapseSpaces(textContent(title)), `"'«»“”`)
+			}
+		}
+		if label == "" {
 			label = titleFromFilename(item.href)
 		}
 		builder.StartChapter(label, depth)
-		em := &htmlEmitter{b: builder, dir: path.Dir(item.href)}
+		em := &htmlEmitter{b: builder, dir: path.Dir(item.href), blockish: map[*html.Node]bool{}}
+		em.markBlockish(body)
 		em.blocks(body, htmlContext{})
 		images = append(images, em.images...)
 	}
@@ -369,6 +378,38 @@ type htmlEmitter struct {
 	b      *cdm.Builder
 	dir    string
 	images []string
+	// blockish: элемент блочный сам или содержит блочных потомков.
+	// Встроенный элемент может обернуть абзацы: HTML5-разбор восстанавливает
+	// незакрытый <a id="…"/> из заголовка вокруг всех следующих <p>
+	// (так устроены главы Project Gutenberg). Решать «блок или встроенный»
+	// по одному имени тега нельзя — вся глава склеилась бы в один абзац.
+	blockish map[*html.Node]bool
+}
+
+// markBlockish вычисляет blockish снизу вверх один раз на документ, чтобы
+// проверка «есть ли блочные потомки» не была квадратичной.
+func (e *htmlEmitter) markBlockish(n *html.Node) bool {
+	if n.Type == html.ElementNode && skippedTags[n.DataAtom] {
+		return false
+	}
+	has := n.Type == html.ElementNode &&
+		(blockTags[n.DataAtom] || (n.DataAtom == atom.Math && attr(n, "display") == "block"))
+	for c := n.FirstChild; c != nil; c = c.NextSibling {
+		if e.markBlockish(c) {
+			has = true
+		}
+	}
+	e.blockish[n] = has
+	return has
+}
+
+func (e *htmlEmitter) hasBlockChild(n *html.Node) bool {
+	for c := n.FirstChild; c != nil; c = c.NextSibling {
+		if e.blockish[c] {
+			return true
+		}
+	}
+	return false
 }
 
 var blockTags = map[atom.Atom]bool{
@@ -395,7 +436,7 @@ func (e *htmlEmitter) blocks(n *html.Node, ctx htmlContext) {
 	for c := n.FirstChild; c != nil; c = c.NextSibling {
 		switch {
 		case c.Type == html.ElementNode && skippedTags[c.DataAtom]:
-		case c.Type == html.ElementNode && (blockTags[c.DataAtom] || (c.DataAtom == atom.Math && attr(c, "display") == "block")):
+		case c.Type == html.ElementNode && e.blockish[c]:
 			flush()
 			e.block(c, ctx)
 		case c.Type == html.TextNode || c.Type == html.ElementNode:
@@ -412,7 +453,13 @@ func (e *htmlEmitter) block(n *html.Node, ctx htmlContext) {
 			e.b.Add(cdm.Heading, text, int(n.Data[1]-'0'), nil)
 		}
 	case atom.P, atom.Dt, atom.Dd, atom.Summary, atom.Address:
-		e.inlineBlock(childNodes(n), ctx)
+		// В режиме quirks (XHTML без DOCTYPE) таблица не закрывает <p>,
+		// так что абзац может содержать блоки.
+		if e.hasBlockChild(n) {
+			e.blocks(n, ctx)
+		} else {
+			e.inlineBlock(childNodes(n), ctx)
+		}
 	case atom.Pre:
 		var meta map[string]string
 		if code := findElement(n, atom.Code); code != nil {

@@ -220,11 +220,61 @@ func TestZipSlipInHiddenEntryStillRejected(t *testing.T) {
 	require.ErrorIs(t, err, storage.ErrUnsafePath)
 }
 
-func TestZipSymlinkEntryRejected(t *testing.T) {
-	data := makeZip(t, zipFile{name: "ok.md", body: "# Ok\n\nx."},
-		zipFile{name: "link", body: "/etc/passwd", mode: fs.ModeSymlink | 0o777})
-	_, err := importers.NewZipRepo(testLimits).Load(data, "repo.zip")
-	require.ErrorIs(t, err, storage.ErrUnsafePath)
+// Симлинки: архив читается в памяти и ничего не распаковывает, поэтому
+// ссылка опасна, только если через неё что-то прочитать или записать вне
+// архива. Ссылка внутри архива разрешается (так GitHub хранит LICENSE и
+// логотипы), ссылка наружу пропускается.
+
+func TestZipSymlinkOutsideArchiveSkipped(t *testing.T) {
+	for _, target := range []string{"/etc/passwd", "../../../etc/passwd", "../outside.md"} {
+		res := loadZip(t, makeZip(t, zipFile{name: "ok.md", body: "# Ok\n\nx."},
+			zipFile{name: "dir/link.md", body: target, mode: fs.ModeSymlink | 0o777}))
+		require.Equal(t, []string{"Ok"}, chapterTitles(res.Document.Chapters), "цель %q", target)
+		require.NotNil(t, issueWith(res.Issues, "symlink_skipped"), "цель %q", target)
+		for _, b := range res.Document.Blocks() {
+			require.NotContains(t, b.Text, "root:", "содержимое вне архива не читается")
+		}
+	}
+}
+
+func TestZipSymlinkInsideArchiveResolved(t *testing.T) {
+	res := loadZip(t, makeZip(t,
+		zipFile{name: "repo-main/guide/ch.md", body: "# Глава\n\n![лого](images/logo.png)\n"},
+		zipFile{name: "repo-main/assets/logo.png", body: "\x89PNG-настоящий"},
+		zipFile{name: "repo-main/guide/images/logo.png", body: "../../assets/logo.png", mode: fs.ModeSymlink | 0o777},
+	))
+	require.Nil(t, issueWith(res.Issues, "missing_resource"))
+	require.Nil(t, issueWith(res.Issues, "symlink_skipped"))
+	require.Len(t, res.Assets, 1)
+	require.Equal(t, "guide/images/logo.png", res.Assets[0].Name)
+	raw, err := res.Assets[0].Open()
+	require.NoError(t, err)
+	require.Equal(t, "\x89PNG-настоящий", string(raw), "содержимое — цели ссылки, а не путь")
+}
+
+func TestZipSymlinkLoopSkipped(t *testing.T) {
+	res := loadZip(t, makeZip(t, zipFile{name: "ok.md", body: "# Ok"},
+		zipFile{name: "a.md", body: "b.md", mode: fs.ModeSymlink | 0o777},
+		zipFile{name: "b.md", body: "a.md", mode: fs.ModeSymlink | 0o777}))
+	require.Equal(t, []string{"Ok"}, chapterTitles(res.Document.Chapters))
+	require.NotNil(t, issueWith(res.Issues, "symlink_skipped"))
+}
+
+func TestZipFilesOutsideBookRootIgnored(t *testing.T) {
+	// Книга mdBook лежит в guide/src; README, CHANGELOG и фикстуры
+	// репозитория — не главы книги.
+	res := loadZip(t, makeZip(t, files(
+		"README.md", "# Репозиторий\n\nx.",
+		"CHANGELOG.md", "# Изменения\n\nx.",
+		"tests/fixture.md", "# Фикстура\n\nx.",
+		"guide/src/SUMMARY.md", "- [Введение](intro.md)\n",
+		"guide/src/intro.md", "# Введение\n\nx.",
+		"guide/src/extra.md", "# Дополнение\n\nx.",
+	)...))
+	require.Equal(t, []string{"Введение", "Дополнение"}, chapterTitles(res.Document.Chapters))
+	outside := issueWith(res.Issues, "outside_book")
+	require.NotNil(t, outside)
+	require.Contains(t, outside.Message, "3")
 }
 
 func TestZipTooManyEntriesRejected(t *testing.T) {

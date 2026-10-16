@@ -33,6 +33,51 @@ func TestEPUBChaptersAndMetadata(t *testing.T) {
 	require.Equal(t, []string{"Глава 1", "Глава 2"}, chapterTitles(res.Document.Chapters))
 }
 
+func TestEPUBMetadataWithMetaElementsParsed(t *testing.T) {
+	// Регрессия с реального EPUB (Project Gutenberg): <meta property="…">текст</meta>
+	// в OPF разваливал разбор — книга выходила пустой с названием из имени файла.
+	res := loadEPUB(t, buildEPUB(t, epubOptions{title: "Alice's Adventures", author: "Lewis Carroll",
+		chapters: []epubChapter{{title: "I", body: "<p>Down the Rabbit-Hole.</p>"}}}))
+	require.Equal(t, "Alice's Adventures", res.Document.Meta.Title)
+	require.Equal(t, "Lewis Carroll", res.Document.Meta.Author)
+	require.Equal(t, []string{"Down the Rabbit-Hole."}, texts(res.Document.TranslatableBlocks()))
+}
+
+func TestEPUBGutenbergChapterStructure(t *testing.T) {
+	// Регрессия с реального EPUB: <a id="chap01"/> в заголовке плюс перевод
+	// строки после </h2> — и HTML5-разбор оборачивает все абзацы главы в <a>.
+	// Раньше вся глава склеивалась в один абзац (85% книги — в 15 блоков).
+	body := "<div class=\"chapter\" id=\"x\">\n<h2><a id=\"chap01\"/>CHAPTER I.<br/>\nDown the Rabbit-Hole</h2>\n" +
+		"<p>\nAlice was beginning to get very tired.\n</p>\n<p>\nThere was nothing so <i>very</i> remarkable.\n</p>\n" +
+		"<p>\nThird paragraph.\n</p>\n</div>"
+	for _, quirks := range []bool{true, false} {
+		res := loadEPUB(t, buildEPUB(t, epubOptions{title: "Alice", quirks: quirks,
+			chapters: []epubChapter{{title: "CHAPTER I.", body: body}}}))
+		require.Equal(t, []string{
+			"CHAPTER I.\nDown the Rabbit-Hole",
+			"Alice was beginning to get very tired.",
+			"There was nothing so *very* remarkable.",
+			"Third paragraph.",
+		}, texts(res.Document.Blocks()), "quirks=%v", quirks)
+	}
+}
+
+func TestEPUBInlineWrapperAroundBlocksIsDescended(t *testing.T) {
+	res := loadEPUB(t, buildEPUB(t, epubOptions{title: "T", chapters: []epubChapter{
+		{title: "C", body: "<span class=\"w\"><p>Первый.</p><p>Второй.</p></span>"},
+	}}))
+	require.Equal(t, []string{"Первый.", "Второй."}, texts(res.Document.Blocks()))
+}
+
+func TestEPUBTitleElementFallbackForUntitledPages(t *testing.T) {
+	// Обложка вне оглавления без заголовков: название — из <title>, а не
+	// из имени файла вроде «wrap0000».
+	res := loadEPUB(t, buildEPUB(t, epubOptions{title: "Книга", noTOC: true, chapters: []epubChapter{
+		{file: "wrap0000.xhtml", title: `"Cover"`, body: `<div><img src="c.jpg" alt=""/></div>`},
+	}}))
+	require.Equal(t, []string{"Cover"}, chapterTitles(res.Document.Chapters))
+}
+
 func TestEPUBHeadingIsBlockNotExtraChapter(t *testing.T) {
 	// Глава задаётся оглавлением; <h1> внутри файла — её заголовок, а не
 	// ещё одна глава.

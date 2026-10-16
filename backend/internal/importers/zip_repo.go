@@ -48,21 +48,25 @@ type repo struct {
 	mdFiles []string
 	issues  []Issue
 	cache   map[string][]byte
+	// root — каталог книги внутри репозитория (каталог SUMMARY.md или
+	// docs_dir из mkdocs.yml). Markdown вне него — README, CHANGELOG,
+	// тестовые фикстуры — к книге не относится.
+	root string
 }
 
 func (z ZipRepo) Load(data []byte, filename string) (Result, error) {
-	entries, corrupt, err := openArchive(data, z.limits)
+	archive, err := openArchive(data, z.limits)
 	if err != nil {
 		return Result{}, err
 	}
-	if corrupt {
+	if archive.corrupt {
 		meta := cdm.BookMeta{Title: titleFromFilename(filename), SourceFormat: "zip_repo"}
 		return finish(cdm.NewBuilder(meta).Build(), []Issue{corruptIssue("ZIP")}), nil
 	}
 
-	r := &repo{files: map[string]*zip.File{}, cache: map[string][]byte{}}
+	r := &repo{files: map[string]*zip.File{}, cache: map[string][]byte{}, issues: archive.issues}
 	var duplicates []string
-	for _, e := range entries {
+	for _, e := range archive.entries {
 		if isJunk(e.name) {
 			continue
 		}
@@ -206,17 +210,31 @@ func (r *repo) complete(entries []tocEntry, strict bool) []tocEntry {
 	}
 
 	var unlisted []string
+	outside := 0
 	for _, name := range r.mdFiles {
-		if !seen[name] && !isTOCFile(name) {
-			unlisted = append(unlisted, name)
-			plan = append(plan, tocEntry{path: name, depth: 1})
+		if seen[name] || isTOCFile(name) {
+			continue
 		}
+		if !r.inBook(name) {
+			outside++
+			continue
+		}
+		unlisted = append(unlisted, name)
+		plan = append(plan, tocEntry{path: name, depth: 1})
+	}
+	if outside > 0 {
+		r.issues = append(r.issues, Issue{Severity: Info, Code: "outside_book",
+			Message: fmt.Sprintf("Файлов Markdown вне каталога книги %q: %d; они не включены.", r.root, outside)})
 	}
 	if strict && len(unlisted) > 0 {
 		r.issues = append(r.issues, Issue{Severity: Warning, Code: "unlisted_file",
 			Message: "Файлы не упомянуты в оглавлении и добавлены в конец: " + listNames(unlisted)})
 	}
 	return plan
+}
+
+func (r *repo) inBook(name string) bool {
+	return r.root == "" || r.root == "." || strings.HasPrefix(name, r.root+"/")
 }
 
 func isTOCFile(name string) bool {
@@ -260,6 +278,7 @@ func (r *repo) fromSummary() ([]tocEntry, string, bool, error) {
 	if len(entries) == 0 {
 		return nil, "", false, nil
 	}
+	r.root = path.Dir(summary)
 	return entries, summary, true, nil
 }
 
@@ -334,6 +353,7 @@ func (r *repo) fromMkdocs() ([]tocEntry, string, bool, error) {
 	if len(entries) == 0 {
 		return nil, "", false, nil
 	}
+	r.root = docsDir
 	return entries, "mkdocs.yml (раздел nav)", true, nil
 }
 

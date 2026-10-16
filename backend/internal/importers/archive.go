@@ -8,6 +8,7 @@ import (
 	"io"
 	"io/fs"
 	"math"
+	"path"
 	"strings"
 
 	"github.com/vnovels/linguastack/internal/config"
@@ -50,55 +51,130 @@ type archiveEntry struct {
 	file *zip.File
 }
 
+// archive — проверенное содержимое ZIP.
+type archive struct {
+	entries []archiveEntry
+	corrupt bool // архив не читается вовсе; это замечание, а не отказ
+	issues  []Issue
+}
+
+const (
+	maxSymlinkHops   = 5
+	maxSymlinkTarget = 4096
+)
+
 // openArchive открывает ZIP и проверяет его целиком до чтения содержимого:
-// имена (path traversal), символические ссылки, число записей, суммарный
-// объявленный размер и степень сжатия. Ошибка — отказ принять файл.
-// corrupt == true — архив не читается вовсе; это замечание, а не отказ.
-func openArchive(data []byte, limits ArchiveLimits) (entries []archiveEntry, corrupt bool, err error) {
+// имена (path traversal), число записей, суммарный объявленный размер и
+// степень сжатия. Ошибка — отказ принять файл.
+//
+// Символические ссылки не распаковываются и не создаются: архив читается
+// в памяти. Ссылка, ведущая на запись внутри того же архива, заменяется
+// этой записью (архивы репозиториев с GitHub хранят так LICENSE и
+// логотипы); ссылка наружу пропускается с замечанием. Так ссылка не
+// может ни прочитать, ни записать что-либо вне архива.
+func openArchive(data []byte, limits ArchiveLimits) (archive, error) {
 	reader, zerr := zip.NewReader(bytes.NewReader(data), int64(len(data)))
 	if zerr != nil {
-		return nil, true, nil
+		return archive{corrupt: true}, nil
 	}
 	if limits.MaxEntries > 0 && len(reader.File) > limits.MaxEntries {
-		return nil, false, fmt.Errorf("%w: записей %d при лимите %d (entries)", ErrArchiveLimits, len(reader.File), limits.MaxEntries)
+		return archive{}, fmt.Errorf("%w: записей %d при лимите %d (entries)", ErrArchiveLimits, len(reader.File), limits.MaxEntries)
 	}
 
+	var entries, links []archiveEntry
 	var total int64
 	for _, f := range reader.File {
 		isDir := strings.HasSuffix(f.Name, "/")
 		name := strings.TrimSuffix(f.Name, "/")
 		if _, err := storage.ValidateMemberName(name); err != nil {
-			return nil, false, err
-		}
-		// Ссылок мы не создаём, но и принимать не станем: дополнение §10.
-		if f.Mode()&fs.ModeSymlink != 0 {
-			return nil, false, fmt.Errorf("%w: символическая ссылка %q в архиве", storage.ErrUnsafePath, f.Name)
+			return archive{}, err
 		}
 		if isDir {
 			continue
 		}
 		size, err := entrySize(f)
 		if err != nil {
-			return nil, false, err
+			return archive{}, err
 		}
 		if limits.MaxTotalBytes > 0 && size > limits.MaxTotalBytes {
-			return nil, false, fmt.Errorf("%w: запись %q больше %d байт (size)", ErrArchiveLimits, f.Name, limits.MaxTotalBytes)
+			return archive{}, fmt.Errorf("%w: запись %q больше %d байт (size)", ErrArchiveLimits, f.Name, limits.MaxTotalBytes)
 		}
 		if total > math.MaxInt64-size {
-			return nil, false, fmt.Errorf("%w: суммарный размер записей переполняет счётчик (size)", ErrArchiveLimits)
+			return archive{}, fmt.Errorf("%w: суммарный размер записей переполняет счётчик (size)", ErrArchiveLimits)
 		}
 		total += size
 		if limits.MaxTotalBytes > 0 && total > limits.MaxTotalBytes {
-			return nil, false, fmt.Errorf("%w: распакованный размер больше %d байт (size)", ErrArchiveLimits, limits.MaxTotalBytes)
+			return archive{}, fmt.Errorf("%w: распакованный размер больше %d байт (size)", ErrArchiveLimits, limits.MaxTotalBytes)
 		}
 		if limits.MaxRatio > 0 && f.UncompressedSize64 > ratioCheckFloor && f.CompressedSize64 > 0 &&
 			f.UncompressedSize64/f.CompressedSize64 > uint64(limits.MaxRatio) {
-			return nil, false, fmt.Errorf("%w: запись %q сжата в %d раз (ratio)", ErrArchiveLimits, f.Name,
+			return archive{}, fmt.Errorf("%w: запись %q сжата в %d раз (ratio)", ErrArchiveLimits, f.Name,
 				f.UncompressedSize64/f.CompressedSize64)
 		}
-		entries = append(entries, archiveEntry{name: name, file: f})
+		entry := archiveEntry{name: name, file: f}
+		if f.Mode()&fs.ModeSymlink != 0 {
+			links = append(links, entry)
+		} else {
+			entries = append(entries, entry)
+		}
 	}
-	return stripCommonRoot(entries), false, nil
+
+	resolved, skipped := resolveSymlinks(entries, links)
+	out := archive{entries: stripCommonRoot(append(entries, resolved...))}
+	if len(skipped) > 0 {
+		out.issues = append(out.issues, Issue{Severity: Warning, Code: "symlink_skipped",
+			Message: "Символические ссылки за пределы архива пропущены: " + listNames(skipped)})
+	}
+	return out, nil
+}
+
+// resolveSymlinks заменяет ссылки записями, на которые они указывают внутри
+// архива. Цели разрешаются до снятия общей корневой папки, относительно
+// исходного положения ссылки — так же, как это сделала бы файловая система.
+func resolveSymlinks(entries, links []archiveEntry) (resolved []archiveEntry, skipped []string) {
+	regular := make(map[string]*zip.File, len(entries))
+	for _, e := range entries {
+		regular[e.name] = e.file
+	}
+	linkTargets := make(map[string]string, len(links))
+	for _, l := range links {
+		if target, ok := readLinkTarget(l); ok {
+			linkTargets[l.name] = target
+		}
+	}
+	for _, l := range links {
+		name, ok := l.name, false
+		for range maxSymlinkHops {
+			target, isLink := linkTargets[name]
+			if !isLink {
+				break
+			}
+			name = path.Join(path.Dir(name), target)
+			if _, err := storage.ValidateMemberName(name); err != nil || path.IsAbs(target) {
+				break
+			}
+			if f, exists := regular[name]; exists {
+				resolved = append(resolved, archiveEntry{name: l.name, file: f})
+				ok = true
+				break
+			}
+		}
+		if !ok {
+			skipped = append(skipped, l.name)
+		}
+	}
+	return resolved, skipped
+}
+
+func readLinkTarget(l archiveEntry) (string, bool) {
+	if l.file.UncompressedSize64 > maxSymlinkTarget {
+		return "", false
+	}
+	raw, err := readEntry(l.file)
+	if err != nil {
+		return "", false
+	}
+	return strings.TrimSpace(string(raw)), true
 }
 
 // readEntry читает запись не больше объявленного размера: заголовок ZIP

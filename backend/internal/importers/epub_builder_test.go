@@ -24,10 +24,15 @@ type epubOptions struct {
 	nav                     map[string]string // EPUB 3 nav: файл → подпись (перекрывает NCX)
 	spine                   []string          // порядок чтения, если отличается от порядка chapters
 	extra                   map[string]string // дополнительные файлы: путь в архиве → содержимое
+	// quirks — главы без DOCTYPE, как у Project Gutenberg: HTML5-разбор
+	// идёт в режиме quirks и строит дерево иначе.
+	quirks bool
 }
 
 // buildEPUB собирает минимальный корректный EPUB, чтобы не держать
-// бинарные фикстуры в репозитории.
+// бинарные фикстуры в репозитории. «Корректный» — по спецификации EPUB 3:
+// в метаданных обязателен <meta property="dcterms:modified">. Без него
+// фикстура не ловила ошибку разбора, которую дал первый же реальный EPUB.
 func buildEPUB(t *testing.T, o epubOptions) []byte {
 	t.Helper()
 	for i := range o.chapters {
@@ -56,7 +61,7 @@ func buildEPUB(t *testing.T, o epubOptions) []byte {
 	var manifest, spine strings.Builder
 	for i, ch := range o.chapters {
 		fmt.Fprintf(&manifest, `<item id="c%d" href="%s" media-type="application/xhtml+xml"/>`, i, ch.file)
-		write("OEBPS/"+strings.ReplaceAll(ch.file, "%20", " "), xhtml(ch.title, ch.body), zip.Deflate)
+		write("OEBPS/"+strings.ReplaceAll(ch.file, "%20", " "), xhtml(ch.title, ch.body, o.quirks), zip.Deflate)
 	}
 	order := o.spine
 	if order == nil {
@@ -110,7 +115,10 @@ func buildEPUB(t *testing.T, o epubOptions) []byte {
 <package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="id">
   <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
     <dc:identifier id="id">urn:uuid:test</dc:identifier>
+    <meta property="dcterms:modified">2026-01-01T00:00:00Z</meta>
+    <meta property="file-as" refines="#id">Тест</meta>
     <dc:title>`+o.title+`</dc:title>`+author+`<dc:language>`+lang+`</dc:language>
+    <meta name="cover" content="cover-image"/>
   </metadata>
   <manifest>`+manifest.String()+`</manifest>
   <spine`+spineAttr+`>`+spine.String()+`</spine>
@@ -119,10 +127,13 @@ func buildEPUB(t *testing.T, o epubOptions) []byte {
 	return buf.Bytes()
 }
 
-func xhtml(title, body string) string {
+func xhtml(title, body string, quirks bool) string {
+	doctype := "<!DOCTYPE html>\n"
+	if quirks {
+		doctype = ""
+	}
 	return `<?xml version="1.0" encoding="utf-8"?>
-<!DOCTYPE html>
-<html xmlns="http://www.w3.org/1999/xhtml"><head><title>` + title + `</title>
+` + doctype + `<html xmlns="http://www.w3.org/1999/xhtml"><head><title>` + title + `</title>
 <style>p { margin: 0 }</style></head>
 <body>` + body + `</body></html>`
 }
