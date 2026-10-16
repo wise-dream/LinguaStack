@@ -346,7 +346,15 @@ UPDATE translation_segments
 				return fmt.Errorf("запись ошибки сегмента: %w", err)
 			}
 		}
-		return tx.Exec(`
+		return RefreshCounters(ctx, tx, projectID, outcome.CostUSD)
+	})
+}
+
+// RefreshCounters пересчитывает счётчики проекта из сегментов, а не
+// увеличивает их: повторный прогон и гонка двух worker-ов не могут их
+// рассинхронизировать с данными.
+func RefreshCounters(ctx context.Context, db *gorm.DB, projectID uuid.UUID, addCost float64) error {
+	return db.WithContext(ctx).Exec(`
 UPDATE translation_projects p
    SET segments_done = s.done, segments_failed = s.failed, warnings_count = s.warnings,
        cost_usd = p.cost_usd + ?, updated_at = now()
@@ -354,14 +362,20 @@ UPDATE translation_projects p
                count(*) FILTER (WHERE status = 'failed') AS failed,
                count(*) FILTER (WHERE severity = 'warning') AS warnings
           FROM translation_segments WHERE project_id = ?) s
- WHERE p.id = ?`, outcome.CostUSD, projectID, projectID).Error
-	})
+ WHERE p.id = ?`, addCost, projectID, projectID).Error
 }
 
 // finalize ставит итоговый статус (дополнение §5), только если проект всё
 // ещё выполняется: приостановленный или отменённый остаётся таким.
 func (w *Worker) finalize(ctx context.Context, projectID uuid.UUID) error {
-	return w.db.WithContext(ctx).Exec(`
+	return SettleStatus(ctx, w.db, projectID, models.ProjectRunning)
+}
+
+// SettleStatus ставит итоговый статус по счётчикам, если текущий статус —
+// один из from. Ручная правка последнего упавшего сегмента так переводит
+// проект из failed в completed.
+func SettleStatus(ctx context.Context, db *gorm.DB, projectID uuid.UUID, from ...string) error {
+	return db.WithContext(ctx).Exec(`
 UPDATE translation_projects
    SET status = CASE WHEN segments_failed > 0 THEN 'failed'
                      WHEN warnings_count > 0 THEN 'completed_with_warnings'
@@ -369,5 +383,5 @@ UPDATE translation_projects
        last_error = CASE WHEN segments_failed > 0
                          THEN segments_failed || ' сегм. не переведено — см. ошибки сегментов' ELSE '' END,
        finished_at = now(), updated_at = now()
- WHERE id = ? AND status = 'running'`, projectID).Error
+ WHERE id = ? AND status IN ?`, projectID, from).Error
 }

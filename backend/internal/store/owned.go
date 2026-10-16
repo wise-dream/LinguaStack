@@ -12,6 +12,8 @@ import (
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
+
+	"github.com/vnovels/linguastack/internal/db/models"
 )
 
 var (
@@ -66,4 +68,26 @@ func requireOwnerColumn(db *gorm.DB, model any) error {
 		return fmt.Errorf("%w: %s", ErrNoOwnerColumn, stmt.Schema.Name)
 	}
 	return nil
+}
+
+// OwnedSegment — сегмент перевода, если его проект принадлежит ownerID.
+// У сегмента нет своего owner_id: владение проверяется через проект, и
+// эта проверка тоже живёт здесь, а не в обработчике.
+func OwnedSegment(ctx context.Context, db *gorm.DB, id, ownerID uuid.UUID) (*models.TranslationSegment, *models.TranslationProject, error) {
+	var seg models.TranslationSegment
+	err := db.WithContext(ctx).
+		Joins("JOIN translation_projects p ON p.id = translation_segments.project_id").
+		Where("translation_segments.id = ? AND p.owner_id = ?", id, ownerID).
+		First(&seg).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, nil, fmt.Errorf("загрузка сегмента: %w", err)
+	}
+	project, err := Owned[models.TranslationProject](ctx, db, seg.ProjectID, ownerID)
+	if err != nil {
+		return nil, nil, err
+	}
+	return &seg, project, nil
 }

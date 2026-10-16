@@ -45,9 +45,12 @@ RETURNING *`
 // Enqueue ставит проект в очередь. Идемпотентно: если у проекта уже есть
 // активная задача (уникальный частичный индекс), возвращается она.
 func Enqueue(ctx context.Context, db *gorm.DB, project *models.TranslationProject, priority, maxAttempts int) (*models.TranslationTask, error) {
+	// available_at не задаётся: его ставит БД (DEFAULT now()). Очередь
+	// считает время только по часам базы — иначе расхождение часов
+	// приложения и БД откладывало бы задачи «на будущее».
 	task := models.TranslationTask{
 		ProjectID: project.ID, OwnerID: project.OwnerID, Kind: "translate", Status: models.TaskPending,
-		Priority: priority, MaxAttempts: maxAttempts, AvailableAt: time.Now().UTC(),
+		Priority: priority, MaxAttempts: maxAttempts,
 	}
 	err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error { return tx.Create(&task).Error })
 	if errors.Is(err, gorm.ErrDuplicatedKey) {

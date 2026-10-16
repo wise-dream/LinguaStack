@@ -3,6 +3,8 @@ package httpapi
 
 import (
 	"net/http"
+	"strings"
+	"time"
 
 	"gorm.io/gorm"
 
@@ -26,11 +28,38 @@ type Deps struct {
 	// BuildProvider собирает адаптер по конфигурации; nil — сборка по
 	// настройкам сервера. Тесты подставляют Fake.
 	BuildProvider func(cfg models.ProviderConfig, apiKey string) (providers.Provider, error)
+	// SSEInterval — частота опроса прогресса для потока событий.
+	SSEInterval time.Duration
 }
 
 type server struct {
 	Deps
 }
+
+// Route — зарегистрированный маршрут. Auth — нужен вход.
+type Route struct {
+	Method string
+	Path   string
+	Auth   bool
+}
+
+type router struct {
+	mux    *http.ServeMux
+	routes []Route
+	s      *server
+}
+
+func (rt *router) add(pattern string, auth bool, h http.HandlerFunc) {
+	method, path, _ := strings.Cut(pattern, " ")
+	rt.routes = append(rt.routes, Route{Method: method, Path: path, Auth: auth})
+	if auth {
+		h = rt.s.requireUser(h)
+	}
+	rt.mux.HandleFunc(pattern, h)
+}
+
+func (rt *router) public(pattern string, h http.HandlerFunc)    { rt.add(pattern, false, h) }
+func (rt *router) protected(pattern string, h http.HandlerFunc) { rt.add(pattern, true, h) }
 
 // NewServer возвращает маршрутизатор со всеми эндпоинтами.
 //
@@ -42,33 +71,57 @@ func NewServer(d Deps) http.Handler {
 	if s.BuildProvider == nil {
 		s.BuildProvider = s.defaultBuildProvider
 	}
-	mux := http.NewServeMux()
+	if s.SSEInterval <= 0 {
+		s.SSEInterval = time.Second
+	}
+	return buildRoutes(s).mux
+}
 
-	mux.HandleFunc("GET /api/health", s.health)
+// Routes — все маршруты сервера. По ним матрица изоляции в тестах
+// проверяет каждый эндпоинт: новый маршрут без записи в матрице роняет тест.
+func Routes() []Route {
+	return buildRoutes(&server{}).routes
+}
 
-	mux.HandleFunc("POST /api/auth/register", s.register)
-	mux.HandleFunc("POST /api/auth/login", s.login)
-	mux.HandleFunc("POST /api/auth/logout", s.logout)
-	mux.HandleFunc("GET /api/me", s.requireUser(s.me))
+func buildRoutes(s *server) *router {
+	rt := &router{mux: http.NewServeMux(), s: s}
 
-	mux.HandleFunc("POST /api/books", s.requireUser(s.uploadBook))
-	mux.HandleFunc("GET /api/books", s.requireUser(s.listBooks))
-	mux.HandleFunc("GET /api/books/{id}", s.requireUser(s.getBook))
-	mux.HandleFunc("DELETE /api/books/{id}", s.requireUser(s.deleteBook))
-	mux.HandleFunc("GET /api/books/{id}/toc", s.requireUser(s.getTOC))
-	mux.HandleFunc("PUT /api/books/{id}/toc", s.requireUser(s.putTOC))
+	rt.public("GET /api/health", s.health)
+	rt.public("POST /api/auth/register", s.register)
+	rt.public("POST /api/auth/login", s.login)
+	rt.public("POST /api/auth/logout", s.logout)
+	rt.protected("GET /api/me", s.me)
 
-	mux.HandleFunc("GET /api/providers", s.requireUser(s.listKinds))
-	mux.HandleFunc("GET /api/providers/{kind}/models", s.requireUser(s.kindModels))
-	mux.HandleFunc("POST /api/provider-configs", s.requireUser(s.createProviderConfig))
-	mux.HandleFunc("GET /api/provider-configs", s.requireUser(s.listProviderConfigs))
-	mux.HandleFunc("GET /api/provider-configs/{id}", s.requireUser(s.getProviderConfig))
-	mux.HandleFunc("PATCH /api/provider-configs/{id}", s.requireUser(s.patchProviderConfig))
-	mux.HandleFunc("DELETE /api/provider-configs/{id}", s.requireUser(s.deleteProviderConfig))
-	mux.HandleFunc("GET /api/provider-configs/{id}/models", s.requireUser(s.configModels))
-	mux.HandleFunc("GET /api/provider-configs/{id}/health", s.requireUser(s.configHealth))
+	rt.protected("POST /api/books", s.uploadBook)
+	rt.protected("GET /api/books", s.listBooks)
+	rt.protected("GET /api/books/{id}", s.getBook)
+	rt.protected("DELETE /api/books/{id}", s.deleteBook)
+	rt.protected("GET /api/books/{id}/toc", s.getTOC)
+	rt.protected("PUT /api/books/{id}/toc", s.putTOC)
+	rt.protected("POST /api/books/{id}/translations", s.createTranslation)
 
-	return mux
+	rt.protected("GET /api/providers", s.listKinds)
+	rt.protected("GET /api/providers/{kind}/models", s.kindModels)
+	rt.protected("POST /api/provider-configs", s.createProviderConfig)
+	rt.protected("GET /api/provider-configs", s.listProviderConfigs)
+	rt.protected("GET /api/provider-configs/{id}", s.getProviderConfig)
+	rt.protected("PATCH /api/provider-configs/{id}", s.patchProviderConfig)
+	rt.protected("DELETE /api/provider-configs/{id}", s.deleteProviderConfig)
+	rt.protected("GET /api/provider-configs/{id}/models", s.configModels)
+	rt.protected("GET /api/provider-configs/{id}/health", s.configHealth)
+
+	rt.protected("GET /api/translations", s.listTranslations)
+	rt.protected("GET /api/translations/{id}", s.getTranslation)
+	rt.protected("POST /api/translations/{id}/pause", s.pauseTranslation)
+	rt.protected("POST /api/translations/{id}/resume", s.resumeTranslation)
+	rt.protected("POST /api/translations/{id}/cancel", s.cancelTranslation)
+	rt.protected("GET /api/translations/{id}/segments", s.listSegments)
+	rt.protected("GET /api/translations/{id}/events", s.translationEvents)
+
+	rt.protected("PATCH /api/segments/{id}", s.patchSegment)
+	rt.protected("POST /api/segments/{id}/retry", s.retrySegment)
+	rt.protected("GET /api/segments/{id}/revisions", s.segmentRevisions)
+	return rt
 }
 
 func (s *server) health(w http.ResponseWriter, _ *http.Request) {

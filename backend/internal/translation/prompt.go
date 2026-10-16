@@ -126,6 +126,12 @@ var styles = map[string]string{
 	"simplified": "Use plain, simple %s; where the original is dense or technical, explain it more simply without losing meaning.",
 }
 
+// IsKnownStyle — поддерживается ли стиль перевода.
+func IsKnownStyle(style string) bool {
+	_, ok := styles[style]
+	return ok
+}
+
 func languageLabel(code string) string {
 	if name, ok := LanguageName(code); ok {
 		return name + " (" + code + ")"
