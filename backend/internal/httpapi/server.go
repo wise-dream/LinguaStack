@@ -2,6 +2,7 @@
 package httpapi
 
 import (
+	"context"
 	"net/http"
 	"strings"
 	"time"
@@ -30,6 +31,11 @@ type Deps struct {
 	BuildProvider func(cfg models.ProviderConfig, apiKey string) (providers.Provider, error)
 	// SSEInterval — частота опроса прогресса для потока событий.
 	SSEInterval time.Duration
+	// Stopping отменяется в начале остановки сервера: потоки событий по
+	// нему закрываются. http.Server.Shutdown контексты запросов не
+	// отменяет и ждёт их завершения, а поток сам не кончается. nil —
+	// сервер не останавливается (тесты).
+	Stopping context.Context
 }
 
 type server struct {
@@ -73,6 +79,9 @@ func NewServer(d Deps) http.Handler {
 	}
 	if s.SSEInterval <= 0 {
 		s.SSEInterval = time.Second
+	}
+	if s.Stopping == nil {
+		s.Stopping = context.Background()
 	}
 	return buildRoutes(s).mux
 }

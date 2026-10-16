@@ -80,13 +80,19 @@ func run() error {
 		slog.Warn("LINGUASTACK_SECRET_KEY не задан: конфигурации провайдеров с ключами API недоступны")
 	}
 
+	stopping, stopStreams := context.WithCancel(context.Background())
+	defer stopStreams()
 	server := &http.Server{
 		Addr: cfg.HTTPAddr,
 		Handler: httpapi.NewServer(httpapi.Deps{
 			Cfg: cfg, DB: gdb, Store: fileStore, Importers: importers.Default(cfg), Secrets: secrets,
+			Stopping: stopping,
 		}),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
+	// Shutdown ждёт завершения запросов, но потоки событий сами не
+	// кончаются — их надо закрыть в начале остановки.
+	server.RegisterOnShutdown(stopStreams)
 
 	errs := make(chan error, 1)
 	go func() {
@@ -103,8 +109,8 @@ func run() error {
 	case <-ctx.Done():
 	}
 
-	// Корректное завершение: дать текущим запросам (в том числе SSE) закрыться,
-	// а не обрывать их на полуслове при перезапуске сервиса.
+	// Корректное завершение: дать текущим запросам закрыться, а не обрывать
+	// их на полуслове при перезапуске сервиса; потоки SSE закрываются сразу.
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer cancel()
 	slog.Info("останавливаю сервер")

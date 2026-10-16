@@ -404,6 +404,24 @@ func TestSSEEmitsProgressAndClosesOnTerminalStatus(t *testing.T) {
 	require.Contains(t, events[0], `"progress_percent":100`)
 }
 
+func TestSSEClosesWhenServerStops(t *testing.T) {
+	// http.Server.Shutdown не отменяет контексты запросов и ждёт их конца,
+	// а поток сам не закрывается: без сигнала остановки каждый перезапуск
+	// api висел бы до тайм-аута и завершался ошибкой.
+	stopping, stop := context.WithCancel(t.Context())
+	e := newTranslationEnv(t, func(d *httpapi.Deps) { d.Stopping = stopping })
+	p := e.project(t, e.book(t, "# Ch\n\nOne.")) // queued — поток сам не закроется
+	time.AfterFunc(100*time.Millisecond, stop)
+
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	start := time.Now()
+	events := readSSE(t, e.c, ctx, "/api/translations/"+p.ID+"/events", 1000)
+	require.NotEmpty(t, events)
+	require.NoError(t, ctx.Err(), "поток закрыл сервер, а не тайм-аут клиента")
+	require.Less(t, time.Since(start), 2*time.Second)
+}
+
 func TestSSEStopsWhenClientDisconnects(t *testing.T) {
 	e := newTranslationEnv(t, nil)
 	p := e.project(t, e.book(t, "# Ch\n\nOne.")) // queued — поток сам не закроется

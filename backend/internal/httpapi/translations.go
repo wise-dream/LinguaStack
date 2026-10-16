@@ -372,7 +372,8 @@ type progressEvent struct {
 
 // translationEvents — поток прогресса (ТЗ §8.4, дополнение §13): событие
 // при каждом изменении, комментарий-«пинг» для прокси, закрытие на
-// терминальном статусе и при отключении клиента.
+// терминальном статусе, при отключении клиента и при остановке сервера
+// (клиент EventSource переподключится сам).
 func (s *server) translationEvents(w http.ResponseWriter, r *http.Request) {
 	p, ok := loadOwned[models.TranslationProject](s, w, r, "id")
 	if !ok {
@@ -414,6 +415,8 @@ func (s *server) translationEvents(w http.ResponseWriter, r *http.Request) {
 		}
 		select {
 		case <-r.Context().Done():
+			return
+		case <-s.Stopping.Done():
 			return
 		case <-ticker.C:
 		}
