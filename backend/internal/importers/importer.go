@@ -53,7 +53,7 @@ type Importer interface {
 // ErrUnsupportedFormat — ни один импортёр не узнал файл.
 var ErrUnsupportedFormat = errors.New("формат файла не поддерживается")
 
-func extension(filename string) string {
+func fileExt(filename string) string {
 	return strings.ToLower(path.Ext(strings.ReplaceAll(filename, "\\", "/")))
 }
 
@@ -71,7 +71,7 @@ func sanitizeUTF8(s string) (string, []Issue) {
 	if utf8.ValidString(s) {
 		return s, nil
 	}
-	return strings.ToValidUTF8(s, "�"), []Issue{{
+	return strings.ToValidUTF8(s, "\uFFFD"), []Issue{{
 		Severity: Warning,
 		Code:     "invalid_utf8",
 		Message:  "В файле есть некорректные последовательности UTF-8; они заменены символом «�».",
@@ -79,5 +79,23 @@ func sanitizeUTF8(s string) (string, []Issue) {
 }
 
 func emptyDocumentIssue() Issue {
-	return Issue{Severity: Error, Code: "empty_document", Message: "В документе нет текста для перевода."}
+	return Issue{Severity: Error, Code: "empty_document", Message: "Документ пуст."}
+}
+
+// finish добавляет замечания о содержимом документа в целом.
+//
+// Документ из одного кода или изображений законен (Review Focus №1:
+// перевод такой книги завершается сразу), но пользователь должен знать
+// об этом до запуска, а не увидеть «0 из 0».
+func finish(doc cdm.Document, issues []Issue) Result {
+	switch {
+	case len(doc.Blocks()) == 0:
+		issues = append([]Issue{emptyDocumentIssue()}, issues...)
+	case len(doc.TranslatableBlocks()) == 0:
+		issues = append(issues, Issue{
+			Severity: Warning, Code: "nothing_to_translate",
+			Message: "В документе нет текста для перевода: только код, формулы или изображения.",
+		})
+	}
+	return Result{Document: doc, Issues: issues}
 }

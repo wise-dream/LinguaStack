@@ -20,7 +20,7 @@ func NewTXT() Importer { return TXT{} }
 func (TXT) FormatID() string { return "txt" }
 
 func (TXT) Sniff(_ []byte, filename string) bool {
-	return extension(filename) == ".txt"
+	return fileExt(filename) == ".txt"
 }
 
 var (
@@ -44,11 +44,7 @@ func (TXT) Load(data []byte, filename string) (Result, error) {
 	for _, para := range splitParagraphs(text) {
 		builder.Add(cdm.Paragraph, para, 0, nil)
 	}
-	doc := builder.Build()
-	if len(doc.Blocks()) == 0 {
-		issues = append([]Issue{emptyDocumentIssue()}, issues...)
-	}
-	return Result{Document: doc, Issues: issues}, nil
+	return finish(builder.Build(), issues), nil
 }
 
 // decodeText определяет кодировку: BOM однозначен; без него — UTF-8, если

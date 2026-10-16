@@ -11,6 +11,7 @@ require (
 	github.com/jackc/pgx/v5 v5.11.0
 	github.com/pressly/goose/v3 v3.29.0
 	github.com/stretchr/testify v1.12.1
+	github.com/yuin/goldmark v1.8.6
 	golang.org/x/text v0.43.0
 	gorm.io/driver/postgres v1.6.3
 	gorm.io/gorm v1.31.2

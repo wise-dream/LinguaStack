@@ -19,7 +19,7 @@ func NewRegistry(importers ...Importer) *Registry {
 
 // Default — реестр со всеми поддерживаемыми форматами.
 func Default(_ config.Settings) *Registry {
-	return NewRegistry(NewTXT())
+	return NewRegistry(NewMarkdown(), NewTXT())
 }
 
 // Pick возвращает первый импортёр, узнавший файл.
