@@ -26,6 +26,9 @@ type Fake struct {
 	FailAfterCalls int             // после N успешных вызовов — ErrUnavailable (0 — выключено)
 	ViolateTimes   int             // protocol_violation: сколько раз ломать конверт
 	FailForTexts   map[string]bool // сегмент с таким текстом ломает протокол всего ответа
+	RefuseForTexts map[string]bool // сегмент с таким текстом вызывает отказ по политике
+	TruncateTimes  int             // первые N ответов на конверт помечены как оборванные
+	CostPerCall    float64         // стоимость каждого успешного вызова
 	Unavailable    bool            // всегда ErrUnavailable
 
 	mu         sync.Mutex
@@ -33,6 +36,7 @@ type Fake struct {
 	failed     int
 	succeeded  int
 	violated   int
+	truncated  int
 	translated int
 }
 
@@ -124,16 +128,30 @@ func (f *Fake) Complete(ctx context.Context, modelID string, req CompletionReque
 
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	for _, s := range segs {
+		if f.RefuseForTexts[s.text] {
+			return CompletionResult{}, &RefusedError{Category: "violence", Explanation: "fake отказ на сегменте"}
+		}
+	}
 	f.succeeded++
+	var cost *float64
+	if f.CostPerCall > 0 {
+		c := f.CostPerCall
+		cost = &c
+	}
+	if f.truncated < f.TruncateTimes {
+		f.truncated++
+		return CompletionResult{Text: render(segs[:len(segs)-1]), ModelID: modelID, Truncated: true, CostUSD: cost}, nil
+	}
 	for _, s := range segs {
 		if f.FailForTexts[s.text] {
 			// Ответ без этого сегмента: сервис увидит нарушение протокола.
-			return CompletionResult{Text: render(without(segs, s.n)), ModelID: modelID}, nil
+			return CompletionResult{Text: render(without(segs, s.n)), ModelID: modelID, CostUSD: cost}, nil
 		}
 	}
 	if f.Scenario == "protocol_violation" && f.violated < f.ViolateTimes {
 		f.violated++
-		return CompletionResult{Text: "Вот перевод:\n" + render(segs[:len(segs)-1]), ModelID: modelID}, nil
+		return CompletionResult{Text: "Вот перевод:\n" + render(segs[:len(segs)-1]), ModelID: modelID, CostUSD: cost}, nil
 	}
 
 	out := make([]fakeSegment, len(segs))
@@ -152,7 +170,10 @@ func (f *Fake) Complete(ctx context.Context, modelID string, req CompletionReque
 	if f.Scenario != "empty" {
 		f.translated += len(segs)
 	}
-	return CompletionResult{Text: render(out), ModelID: modelID, InputTokens: intPtr(len(req.User)), OutputTokens: intPtr(len(segs))}, nil
+	return CompletionResult{
+		Text: render(out), ModelID: modelID, CostUSD: cost,
+		InputTokens: intPtr(len(req.User)), OutputTokens: intPtr(len(segs)),
+	}, nil
 }
 
 func without(segs []fakeSegment, n int) []fakeSegment {
