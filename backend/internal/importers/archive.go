@@ -179,3 +179,37 @@ func stripCommonRoot(entries []archiveEntry) []archiveEntry {
 func corruptIssue(format string) Issue {
 	return Issue{Severity: Error, Code: "corrupt_file", Message: "Не удалось прочитать файл " + format + ": архив повреждён."}
 }
+
+var imageExtensions = map[string]bool{
+	".png": true, ".jpg": true, ".jpeg": true, ".gif": true, ".svg": true, ".webp": true, ".bmp": true, ".avif": true,
+}
+
+// collectAssets превращает используемые картинки в ресурсы книги и
+// возвращает отсутствующие (ТЗ §3.1, §4.3: о них сообщается до перевода).
+func collectAssets(files map[string]*zip.File, images []string) (assets []Asset, missing []string) {
+	seen := map[string]bool{}
+	for _, name := range images {
+		if seen[name] {
+			continue
+		}
+		seen[name] = true
+		f, ok := files[name]
+		if !ok {
+			missing = append(missing, name)
+			continue
+		}
+		if !imageExtensions[fileExt(name)] {
+			continue
+		}
+		size, err := entrySize(f)
+		if err != nil {
+			continue // уже отсечено в openArchive; повторная проверка дешевле допущения
+		}
+		assets = append(assets, Asset{Name: name, Size: size, Open: func() ([]byte, error) { return readEntry(f) }})
+	}
+	return assets, missing
+}
+
+func missingResourceIssue(missing []string) Issue {
+	return Issue{Severity: Warning, Code: "missing_resource", Message: "Не найдены изображения: " + listNames(missing)}
+}

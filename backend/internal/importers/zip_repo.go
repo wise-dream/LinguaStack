@@ -36,10 +36,6 @@ func (ZipRepo) Sniff(_ []byte, filename string) bool { return fileExt(filename) 
 
 const listLimit = 20 // сколько имён перечислять в одном замечании
 
-var imageExtensions = map[string]bool{
-	".png": true, ".jpg": true, ".jpeg": true, ".gif": true, ".svg": true, ".webp": true, ".bmp": true, ".avif": true,
-}
-
 // tocEntry — элемент плана книги. path == "" — раздел без собственного файла.
 type tocEntry struct {
 	path  string
@@ -425,31 +421,9 @@ func (r *repo) bookTitle(filename string) (string, error) {
 // resources собирает используемые картинки как ресурсы книги и отмечает
 // отсутствующие ресурсы и битые ссылки на главы (ТЗ §4.3).
 func (r *repo) resources(images, links []string, issues []Issue) ([]Asset, []Issue) {
-	var assets []Asset
-	var missing []string
-	seen := map[string]bool{}
-	for _, name := range images {
-		if seen[name] {
-			continue
-		}
-		seen[name] = true
-		f, ok := r.files[name]
-		if !ok {
-			missing = append(missing, name)
-			continue
-		}
-		if !imageExtensions[fileExt(name)] {
-			continue
-		}
-		size, err := entrySize(f)
-		if err != nil {
-			continue // уже отсечено в openArchive; повторная проверка дешевле допущения
-		}
-		assets = append(assets, Asset{Name: name, Size: size, Open: func() ([]byte, error) { return readEntry(f) }})
-	}
+	assets, missing := collectAssets(r.files, images)
 	if len(missing) > 0 {
-		issues = append(issues, Issue{Severity: Warning, Code: "missing_resource",
-			Message: "Не найдены изображения: " + listNames(missing)})
+		issues = append(issues, missingResourceIssue(missing))
 	}
 
 	var broken []string
