@@ -17,6 +17,7 @@ import (
 	"github.com/vnovels/linguastack/internal/config"
 	"github.com/vnovels/linguastack/internal/httpapi"
 	"github.com/vnovels/linguastack/internal/importers"
+	"github.com/vnovels/linguastack/internal/security"
 	"github.com/vnovels/linguastack/internal/storage"
 	"github.com/vnovels/linguastack/internal/testdb"
 )
@@ -34,6 +35,13 @@ type testEnv struct {
 
 func newTestEnv(t *testing.T) *testEnv {
 	t.Helper()
+	return newTestEnvWith(t, nil)
+}
+
+// newTestEnvWith позволяет подменить зависимости, например сборку
+// провайдера на Fake или отсутствие ключа шифрования.
+func newTestEnvWith(t *testing.T, adjust func(*httpapi.Deps)) *testEnv {
+	t.Helper()
 	cfg, err := config.Load()
 	require.NoError(t, err)
 	// Тестовый сервер работает по http: cookie с Secure клиент не вернёт.
@@ -42,9 +50,15 @@ func newTestEnv(t *testing.T) *testEnv {
 	root := t.TempDir()
 	store, err := storage.New(root, cfg.MaxUploadBytes)
 	require.NoError(t, err)
-	srv := httptest.NewServer(httpapi.NewServer(httpapi.Deps{
-		Cfg: cfg, DB: tx, Store: store, Importers: importers.Default(cfg),
-	}))
+	key, err := config.Settings{SecretKey: config.GenerateSecretKey()}.RequireSecretKey()
+	require.NoError(t, err)
+	box, err := security.NewSecretBox(key)
+	require.NoError(t, err)
+	deps := httpapi.Deps{Cfg: cfg, DB: tx, Store: store, Importers: importers.Default(cfg), Secrets: box}
+	if adjust != nil {
+		adjust(&deps)
+	}
+	srv := httptest.NewServer(httpapi.NewServer(deps))
 	// Cleanup выполняется в обратном порядке: сервер закроется раньше,
 	// чем откатится транзакция, которой он пользуется.
 	t.Cleanup(srv.Close)

@@ -99,12 +99,18 @@ func capabilitiesOf(m anthropicModel) ModelCapabilities {
 	}
 }
 
-func (a *Anthropic) ListModels(context.Context) ([]ModelCapabilities, error) {
+// AnthropicCatalog — модели для выбора с ценами; первая — по умолчанию.
+// Каталог статичен, ключ для него не нужен.
+func AnthropicCatalog() []ModelCapabilities {
 	out := make([]ModelCapabilities, 0, len(anthropicCatalog))
 	for _, m := range anthropicCatalog {
 		out = append(out, capabilitiesOf(m))
 	}
-	return out, nil
+	return out
+}
+
+func (a *Anthropic) ListModels(context.Context) ([]ModelCapabilities, error) {
+	return AnthropicCatalog(), nil
 }
 
 func (a *Anthropic) Capabilities(_ context.Context, modelID string) (ModelCapabilities, error) {

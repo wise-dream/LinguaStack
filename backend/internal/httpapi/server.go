@@ -7,7 +7,10 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/vnovels/linguastack/internal/config"
+	"github.com/vnovels/linguastack/internal/db/models"
 	"github.com/vnovels/linguastack/internal/importers"
+	"github.com/vnovels/linguastack/internal/providers"
+	"github.com/vnovels/linguastack/internal/security"
 	"github.com/vnovels/linguastack/internal/storage"
 )
 
@@ -17,6 +20,12 @@ type Deps struct {
 	DB        *gorm.DB
 	Store     *storage.FileStore
 	Importers *importers.Registry
+	// Secrets — nil, если не задан LINGUASTACK_SECRET_KEY: сервер работает,
+	// но конфигурации с ключами API недоступны.
+	Secrets *security.SecretBox
+	// BuildProvider собирает адаптер по конфигурации; nil — сборка по
+	// настройкам сервера. Тесты подставляют Fake.
+	BuildProvider func(cfg models.ProviderConfig, apiKey string) (providers.Provider, error)
 }
 
 type server struct {
@@ -30,6 +39,9 @@ type server struct {
 // отдельный роутер как зависимость не нужен.
 func NewServer(d Deps) http.Handler {
 	s := &server{Deps: d}
+	if s.BuildProvider == nil {
+		s.BuildProvider = s.defaultBuildProvider
+	}
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /api/health", s.health)
@@ -45,6 +57,16 @@ func NewServer(d Deps) http.Handler {
 	mux.HandleFunc("DELETE /api/books/{id}", s.requireUser(s.deleteBook))
 	mux.HandleFunc("GET /api/books/{id}/toc", s.requireUser(s.getTOC))
 	mux.HandleFunc("PUT /api/books/{id}/toc", s.requireUser(s.putTOC))
+
+	mux.HandleFunc("GET /api/providers", s.requireUser(s.listKinds))
+	mux.HandleFunc("GET /api/providers/{kind}/models", s.requireUser(s.kindModels))
+	mux.HandleFunc("POST /api/provider-configs", s.requireUser(s.createProviderConfig))
+	mux.HandleFunc("GET /api/provider-configs", s.requireUser(s.listProviderConfigs))
+	mux.HandleFunc("GET /api/provider-configs/{id}", s.requireUser(s.getProviderConfig))
+	mux.HandleFunc("PATCH /api/provider-configs/{id}", s.requireUser(s.patchProviderConfig))
+	mux.HandleFunc("DELETE /api/provider-configs/{id}", s.requireUser(s.deleteProviderConfig))
+	mux.HandleFunc("GET /api/provider-configs/{id}/models", s.requireUser(s.configModels))
+	mux.HandleFunc("GET /api/provider-configs/{id}/health", s.requireUser(s.configHealth))
 
 	return mux
 }

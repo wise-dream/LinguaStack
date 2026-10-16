@@ -16,6 +16,8 @@ import (
 	"github.com/vnovels/linguastack/internal/db"
 	"github.com/vnovels/linguastack/internal/httpapi"
 	"github.com/vnovels/linguastack/internal/importers"
+	"github.com/vnovels/linguastack/internal/logging"
+	"github.com/vnovels/linguastack/internal/security"
 	"github.com/vnovels/linguastack/internal/storage"
 )
 
@@ -31,6 +33,9 @@ func main() {
 func run() error {
 	migrateOnly := flag.Bool("migrate", false, "накатить миграции и выйти")
 	flag.Parse()
+	// Фильтр секретов на всех логах: ключ мог оказаться в тексте ошибки
+	// провайдера (ТЗ §13).
+	slog.SetDefault(slog.New(logging.NewRedactingHandler(slog.NewTextHandler(os.Stderr, nil))))
 
 	cfg, err := config.Load()
 	if err != nil {
@@ -59,11 +64,15 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	secrets, err := openSecrets(cfg)
+	if err != nil {
+		return err
+	}
 
 	server := &http.Server{
 		Addr: cfg.HTTPAddr,
 		Handler: httpapi.NewServer(httpapi.Deps{
-			Cfg: cfg, DB: gdb, Store: fileStore, Importers: importers.Default(cfg),
+			Cfg: cfg, DB: gdb, Store: fileStore, Importers: importers.Default(cfg), Secrets: secrets,
 		}),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
@@ -89,4 +98,19 @@ func run() error {
 	defer cancel()
 	slog.Info("останавливаю сервер")
 	return server.Shutdown(shutdownCtx)
+}
+
+// openSecrets — шифратор ключей API. Без LINGUASTACK_SECRET_KEY сервер
+// работает (Ollama ключ не нужен), но конфигурации с ключами недоступны;
+// неверно заданный ключ — ошибка запуска, а не сюрприз при первой загрузке.
+func openSecrets(cfg config.Settings) (*security.SecretBox, error) {
+	if cfg.SecretKey == "" {
+		slog.Warn("LINGUASTACK_SECRET_KEY не задан: конфигурации провайдеров с ключами API недоступны")
+		return nil, nil
+	}
+	key, err := cfg.RequireSecretKey()
+	if err != nil {
+		return nil, err
+	}
+	return security.NewSecretBox(key)
 }

@@ -34,6 +34,10 @@ type Settings struct {
 	// Контекстное окно Ollama (ТЗ §6.2). Задаётся явно: значение сервера по
 	// умолчанию меньше батча, и Ollama молча обрезает запрос.
 	OllamaNumCtx int `env:"LINGUASTACK_OLLAMA_NUM_CTX" envDefault:"8192"`
+	// Разрешить OpenAI-совместимые сервисы на частных адресах (локальный
+	// vLLM, LM Studio). По умолчанию запрещено: адрес задаёт пользователь,
+	// и без запрета сервер можно направить во внутреннюю сеть (SSRF).
+	AllowPrivateProviderURLs bool `env:"LINGUASTACK_ALLOW_PRIVATE_PROVIDER_URLS" envDefault:"false"`
 	// Тайм-аут одного запроса к модели. Локальная генерация батча на CPU
 	// может идти минутами.
 	ProviderTimeout time.Duration `env:"LINGUASTACK_PROVIDER_TIMEOUT" envDefault:"10m"`
