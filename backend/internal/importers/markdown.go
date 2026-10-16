@@ -46,7 +46,7 @@ func (Markdown) Load(data []byte, filename string) (Result, error) {
 	}
 
 	builder := cdm.NewBuilder(meta)
-	doc.emit(builder, meta.Title, "")
+	doc.emit(builder, meta.Title, "", 1)
 	return finish(builder.Build(), issues), nil
 }
 
@@ -118,8 +118,15 @@ type markdownRefs struct {
 // Глубина главы считается от самого мелкого заголовка файла, поэтому файл,
 // где верхний уровень — «##», даёт главы, а не подглавы. baseDir — каталог
 // файла в репозитории, относительно него разрешаются пути картинок и ссылок.
-func (d markdownDoc) emit(b *cdm.Builder, fileTitle, baseDir string) markdownRefs {
-	e := &mdEmitter{b: b, src: d.src, fileTitle: fileTitle, baseDir: baseDir, minLevel: minHeadingLevel(d.root)}
+//
+// baseDepth — глубина файла в оглавлении репозитория (1 — верхний уровень):
+// раздел, вложенный в SUMMARY.md, становится подглавой.
+func (d markdownDoc) emit(b *cdm.Builder, fileTitle, baseDir string, baseDepth int) markdownRefs {
+	if baseDepth < 1 {
+		baseDepth = 1
+	}
+	e := &mdEmitter{b: b, src: d.src, fileTitle: fileTitle, baseDir: baseDir,
+		minLevel: minHeadingLevel(d.root), baseDepth: baseDepth}
 	e.children(d.root, mdContext{})
 	return e.refs
 }
@@ -136,6 +143,7 @@ type mdEmitter struct {
 	fileTitle string
 	baseDir   string
 	minLevel  int
+	baseDepth int
 	started   bool
 	refs      markdownRefs
 }
@@ -156,7 +164,7 @@ func minHeadingLevel(root ast.Node) int {
 
 func (e *mdEmitter) add(t cdm.BlockType, txt string, level int, meta map[string]string) {
 	if !e.started {
-		e.b.StartChapter(e.fileTitle, 1)
+		e.b.StartChapter(e.fileTitle, e.baseDepth)
 		e.started = true
 	}
 	e.b.Add(t, txt, level, meta)
@@ -171,7 +179,7 @@ func (e *mdEmitter) children(n ast.Node, ctx mdContext) {
 func (e *mdEmitter) block(n ast.Node, ctx mdContext) {
 	switch node := n.(type) {
 	case *ast.Heading:
-		e.b.StartChapter(plainText(node, e.src), node.Level-e.minLevel+1)
+		e.b.StartChapter(plainText(node, e.src), node.Level-e.minLevel+e.baseDepth)
 		e.started = true
 		e.b.Add(cdm.Heading, linesText(node, e.src), node.Level, nil)
 	case *ast.Paragraph, *ast.TextBlock:
@@ -210,9 +218,7 @@ func (e *mdEmitter) textBlock(n ast.Node, ctx mdContext) {
 	e.collectLinks(n)
 
 	if img, ok := soleImage(n); ok {
-		src := e.resolve(string(img.Destination))
-		e.refs.images = append(e.refs.images, src)
-		e.add(cdm.Image, "", 0, map[string]string{"src": src, "alt": plainText(img, e.src)})
+		e.add(cdm.Image, "", 0, map[string]string{"src": e.resolve(string(img.Destination)), "alt": plainText(img, e.src)})
 		return
 	}
 	if trimmed := strings.TrimSpace(raw); len(trimmed) >= 4 && strings.HasPrefix(trimmed, "$$") && strings.HasSuffix(trimmed, "$$") {
@@ -251,13 +257,26 @@ func (e *mdEmitter) table(t *east.Table) {
 	}
 }
 
-// collectLinks запоминает относительные ссылки — по ним импорт репозитория
-// определяет порядок глав и ищет отсутствующие.
+// collectLinks запоминает относительные ссылки и картинки — включая
+// встроенные в текст абзаца. По ним импорт репозитория определяет порядок
+// глав, ищет отсутствующие главы и ресурсы (ТЗ §4.3).
 func (e *mdEmitter) collectLinks(n ast.Node) {
 	_ = ast.Walk(n, func(c ast.Node, entering bool) (ast.WalkStatus, error) {
-		if link, ok := c.(*ast.Link); ok && entering {
-			if target := e.resolve(string(link.Destination)); isRelative(string(link.Destination)) && target != "" {
-				e.refs.links = append(e.refs.links, target)
+		if !entering {
+			return ast.WalkContinue, nil
+		}
+		switch node := c.(type) {
+		case *ast.Link:
+			if dest := string(node.Destination); isRelative(dest) {
+				if target := e.resolve(dest); target != "" {
+					e.refs.links = append(e.refs.links, target)
+				}
+			}
+		case *ast.Image:
+			if dest := string(node.Destination); isRelative(dest) {
+				if target := e.resolve(dest); target != "" {
+					e.refs.images = append(e.refs.images, target)
+				}
 			}
 		}
 		return ast.WalkContinue, nil

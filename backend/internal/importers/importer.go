@@ -40,6 +40,9 @@ type Issue struct {
 type Result struct {
 	Document cdm.Document
 	Issues   []Issue
+	// Assets — используемые ресурсы (картинки) из архивов; сохраняются
+	// вместе с книгой.
+	Assets []Asset
 }
 
 // Importer — адаптер одного формата.

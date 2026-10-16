@@ -18,8 +18,8 @@ func NewRegistry(importers ...Importer) *Registry {
 }
 
 // Default — реестр со всеми поддерживаемыми форматами.
-func Default(_ config.Settings) *Registry {
-	return NewRegistry(NewMarkdown(), NewTXT())
+func Default(cfg config.Settings) *Registry {
+	return NewRegistry(NewZipRepo(LimitsFrom(cfg)), NewMarkdown(), NewTXT())
 }
 
 // Pick возвращает первый импортёр, узнавший файл.
