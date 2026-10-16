@@ -6,7 +6,10 @@ coverage.*
 
 # окружение и данные
 .env
-storage/
+# Каталог данных — только в корне и в backend/. Без привязки шаблон
+# совпадает с любым каталогом storage, включая исходники internal/storage.
+/storage/
+/backend/storage/
 
 # frontend (этап 4)
 node_modules/
