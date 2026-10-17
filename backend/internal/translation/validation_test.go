@@ -82,6 +82,15 @@ func TestShortIdenticalTextIsFine(t *testing.T) {
 	require.Empty(t, validate("Linux kernel 6.1", "Linux kernel 6.1"))
 }
 
+func TestTextWithoutLettersIsNotUntranslated(t *testing.T) {
+	// Smoke на «Алисе»: декоративный разделитель из звёздочек переводить
+	// нечего — совпадение с исходником верное, а не пропущенный перевод.
+	stars := "\\*      \\*      \\*      \\*      \\*      \\*      \\*\n\n    \\*      \\*      \\*      \\*"
+	require.NotContains(t, codes(validate(stars, stars)), "untranslated")
+	numbers := "1 000 000 — 2 000 000 — 3 000 000 — 4 000 000 — 5 000 000"
+	require.NotContains(t, codes(validate(numbers, numbers)), "untranslated")
+}
+
 func TestSameLanguagePairSkipsUntranslatedCheck(t *testing.T) {
 	// Перевод en→en (упрощение) законно может совпадать с исходником.
 	source := "This is a reasonably long English sentence that should change."

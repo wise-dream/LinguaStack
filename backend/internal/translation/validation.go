@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/vnovels/linguastack/internal/cdm"
@@ -100,7 +101,9 @@ func ValidateSegment(in ValidationInput) []Finding {
 	}
 
 	sourceChars := utf8.RuneCountInString(strings.TrimSpace(in.Source))
-	if in.SourceLang != in.TargetLang && sourceChars > untranslatedMinChars &&
+	// Без букв (разделитель «* * *», числа) переводить нечего — совпадение
+	// с исходником верное.
+	if in.SourceLang != in.TargetLang && sourceChars > untranslatedMinChars && hasLetters(in.Source) &&
 		cdm.NormalizeText(in.Source) == cdm.NormalizeText(in.Translation) {
 		add("untranslated", Warning, "Перевод дословно совпадает с исходником.")
 	}
@@ -138,4 +141,8 @@ func headingMarks(s string) int {
 		return len(m[1])
 	}
 	return 0
+}
+
+func hasLetters(s string) bool {
+	return strings.ContainsFunc(s, unicode.IsLetter)
 }
