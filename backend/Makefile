@@ -1,7 +1,9 @@
 # Тулчейн задан в go.mod (toolchain go1.27.2); при GOTOOLCHAIN=auto любой
 # установленный go >= 1.21 скачает нужную версию сам.
 GO ?= go
-LINT ?= golangci-lint
+# Не LINT: у GNU make это встроенная переменная (= lint), и ?= её не
+# перекрывает.
+GOLANGCI_LINT ?= golangci-lint
 
 # Настройки разработки из ../.env (если файл есть) — в окружение команд.
 # Само приложение .env не читает: в контейнере переменные задаёт compose.
@@ -17,7 +19,7 @@ test-live:
 	LINGUASTACK_LIVE_OLLAMA=1 $(GO) test -run Live ./...
 
 lint:
-	$(LINT) run ./...
+	$(GOLANGCI_LINT) run ./...
 
 build:
 	$(GO) build -o bin/ ./cmd/...
