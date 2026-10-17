@@ -130,6 +130,20 @@ RETURNING status`, retryIn.Seconds(), clip(errText), taskID, workerID).Scan(&row
 	return row.Status == models.TaskFailed, nil
 }
 
+// MarkProgress отмечает, что задача продвинулась: счётчик попыток снова
+// учитывает только текущий захват. Попытки — это сбои подряд без
+// прогресса: книга, которая переводится часами, не должна падать из-за
+// редких сбоев за это время, а застрявшая на одном месте — должна.
+func MarkProgress(ctx context.Context, db *gorm.DB, taskID [16]byte, workerID string) error {
+	err := db.WithContext(ctx).Exec(`
+UPDATE translation_tasks SET attempts = 1
+ WHERE id = ? AND locked_by = ? AND status = 'running' AND attempts > 1`, taskID, workerID).Error
+	if err != nil {
+		return fmt.Errorf("отметка прогресса задачи: %w", err)
+	}
+	return nil
+}
+
 // Release возвращает задачу в очередь при остановке сервиса. Остановка —
 // не сбой, поэтому попытка не расходуется.
 func Release(ctx context.Context, db *gorm.DB, taskID [16]byte, workerID string) error {

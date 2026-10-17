@@ -140,11 +140,16 @@ func (w *Worker) heartbeat(ctx context.Context, taskID uuid.UUID, cancel context
 }
 
 // settle фиксирует итог задачи в очереди и в проекте.
+// Сбои пишутся в лог здесь, а не только в last_error задачи: иначе по логу
+// worker-а не понять, почему книга встала или упала.
 func (w *Worker) settle(ctx context.Context, task *models.TranslationTask, status string, err error) error {
+	log := slog.With("worker", w.id, "task", task.ID, "project", task.ProjectID, "attempt", task.Attempts)
 	switch {
 	case err == nil:
+		log.Info("worker: задача завершена", "status", status)
 		return ignoreLeaseLost(Finish(ctx, w.db, task.ID, w.id, status, ""))
 	case errors.Is(err, errStopping):
+		log.Info("worker: задача возвращена в очередь при остановке")
 		return ignoreLeaseLost(Release(ctx, w.db, task.ID, w.id))
 	case providers.Retryable(err):
 		retryIn := w.RetryBackoff(task.Attempts)
@@ -156,12 +161,15 @@ func (w *Worker) settle(ctx context.Context, task *models.TranslationTask, statu
 			return ignoreLeaseLost(ferr)
 		}
 		if terminal {
+			log.Error("worker: задача исчерпала попытки", "max_attempts", task.MaxAttempts, "error", err)
 			return w.failProject(ctx, task.ProjectID, err)
 		}
+		log.Warn("worker: сбой провайдера, задача будет повторена", "retry_in", retryIn, "error", err)
 		return nil
 	default:
 		// Неверный ключ, нет модели, запрет передачи наружу: повтор не
 		// поможет, задача завершается сразу и с причиной.
+		log.Error("worker: задача завершена с ошибкой без повтора", "error", err)
 		if ferr := Finish(ctx, w.db, task.ID, w.id, models.TaskFailed, err.Error()); ferr != nil {
 			return ignoreLeaseLost(ferr)
 		}
@@ -237,6 +245,12 @@ func (w *Worker) process(stop, work, calls context.Context, task *models.Transla
 		// (Review Focus №5).
 		if err := w.persist(work, project.ID, outcome); err != nil {
 			return "", err
+		}
+		if len(outcome.Results) > 0 && task.Attempts > 1 {
+			if err := MarkProgress(work, w.db, task.ID, w.id); err != nil {
+				return "", err
+			}
+			task.Attempts = 1
 		}
 		if w.AfterBatch != nil {
 			w.AfterBatch(project.ID)

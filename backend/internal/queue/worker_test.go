@@ -286,6 +286,37 @@ func TestUnavailableProviderFailsTaskAfterAttempts(t *testing.T) {
 	require.Equal(t, e.cfg.MaxSegmentAttempts, task.Attempts)
 }
 
+// flakyProvider падает на каждом чётном вызове — сбои перемежаются
+// успешными батчами.
+type flakyProvider struct {
+	*providers.Fake
+	n int
+}
+
+func (f *flakyProvider) Complete(ctx context.Context, model string, req providers.CompletionRequest) (providers.CompletionResult, error) {
+	f.n++
+	if f.n%2 == 0 {
+		return providers.CompletionResult{}, fmt.Errorf("%w: сбой %d", providers.ErrUnavailable, f.n)
+	}
+	return f.Fake.Complete(ctx, model, req)
+}
+
+func TestProgressResetsAttemptBudget(t *testing.T) {
+	// Smoke на «Алисе»: книга перевела 477 сегментов за три часа и упала
+	// после трёх сбоев — счётчик попыток копил сбои за всё время. Попытки
+	// считают сбои подряд без прогресса: задача, которая двигается, не
+	// должна падать из-за редких сбоев, а застрявшая — должна.
+	e := newWorkerEnv(t)
+	e.cfg.MaxSegmentAttempts = 2
+	project := e.projectFromMarkdown(paragraphs(7)) // 4 батча по 2 сегмента
+	e.provider = &flakyProvider{Fake: e.fake}
+	e.runUntilIdle(e.worker("w"))
+
+	done := e.reload(project)
+	require.Equal(t, models.ProjectCompleted, done.Status, "ошибка: %s", done.LastError)
+	require.Equal(t, 8, done.SegmentsDone)
+}
+
 func TestAuthErrorFailsImmediately(t *testing.T) {
 	// Неверный ключ — повторять бессмысленно; попытки не тратятся впустую.
 	e := newWorkerEnv(t)
