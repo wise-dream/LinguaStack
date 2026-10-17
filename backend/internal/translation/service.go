@@ -160,11 +160,13 @@ func (j *batchJob) attempt(ctx context.Context, b Batch, attempts int) (retry []
 		}
 
 		if res.Truncated {
-			// Ответ оборван по лимиту токенов: поодиночке он короче.
+			// Ответ оборван (лимит токенов или зацикливание модели):
+			// поодиночке ответ короче, а цикл на другом контексте обычно
+			// не повторяется.
 			if n > 1 {
 				return all(), nil
 			}
-			lastReason = "Ответ модели оборван по лимиту токенов.\n" + clip(res.Text)
+			lastReason = "Ответ модели оборван: лимит токенов или зацикливание модели.\n" + clip(res.Text)
 			continue
 		}
 		parsed, perr := ParseEnvelope(res.Text, n)

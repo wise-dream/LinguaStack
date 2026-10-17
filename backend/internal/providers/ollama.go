@@ -3,6 +3,7 @@ package providers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"regexp"
@@ -86,6 +87,9 @@ func (o *Ollama) outputBudget(user string) int {
 	return min(o.opts.NumCtx, 2*utf8.RuneCountInString(user)+256)
 }
 
+// errRepetition — генерация прервана: модель зациклилась.
+var errRepetition = errors.New("модель зациклилась")
+
 // ollamaChunk — событие потока /api/chat; последнее несёт done и метрики.
 type ollamaChunk struct {
 	Message struct {
@@ -133,14 +137,23 @@ func (o *Ollama) Complete(ctx context.Context, modelID string, req CompletionReq
 		text.WriteString(chunk.Message.Content)
 		if chunk.Done {
 			last = chunk
+		} else if repetitionLoop(text.String()) {
+			// Закрытие потока останавливает генерацию на сервере.
+			return errRepetition
 		}
 		return nil
 	})
-	if err != nil {
+	switch {
+	case errors.Is(err, errRepetition):
+		return CompletionResult{Text: text.String(), ModelID: modelID, Truncated: true}, nil
+	case err != nil:
 		return CompletionResult{}, err
-	}
-	if !last.Done {
-		return CompletionResult{}, fmt.Errorf("%w: поток ответа оборван до завершения", ErrUnavailable)
+	case !last.Done:
+		// Поток закрыт штатно, но без финального события: так Ollama
+		// обрывает зациклившуюся генерацию. Это сбой содержания, а не
+		// сети (обрыв соединения — ошибка чтения выше): повтор того же
+		// батча при temperature 0 даст то же, поодиночке — переведётся.
+		return CompletionResult{Text: text.String(), ModelID: modelID, Truncated: true}, nil
 	}
 	return CompletionResult{
 		Text:         thinkRe.ReplaceAllString(text.String(), ""),

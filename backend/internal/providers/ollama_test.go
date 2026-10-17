@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -172,14 +173,62 @@ func TestOllamaErrorInsideStream(t *testing.T) {
 	require.Contains(t, err.Error(), "unexpectedly stopped")
 }
 
-func TestOllamaStreamCutBeforeDone(t *testing.T) {
-	// Соединение оборвалось до финального события: это не готовый ответ.
+func TestOllamaStreamEndedWithoutDoneIsTruncated(t *testing.T) {
+	// Smoke на «Алисе»: модель зациклилась, и Ollama штатно закрыл ответ
+	// (200, конец потока) без финального события. Это сбой содержания, а
+	// не сети: повтор того же батча при temperature 0 даёт тот же сбой, а
+	// поодиночке сегменты переводятся.
 	o := ollamaServer(t, func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = io.WriteString(w, `{"message":{"content":"Книга на"},"done":false}`+"\n")
+	})
+	res, err := o.Complete(t.Context(), "m", providers.CompletionRequest{User: "x"})
+	require.NoError(t, err)
+	require.True(t, res.Truncated)
+	require.Equal(t, "Книга на", res.Text)
+}
+
+func TestOllamaConnectionDropMidStreamIsUnavailable(t *testing.T) {
+	// Обрыв соединения (процесс упал, сеть) — сбой инфраструктуры.
+	o := ollamaServer(t, func(w http.ResponseWriter, _ *http.Request) {
+		conn, buf, err := w.(http.Hijacker).Hijack()
+		require.NoError(t, err)
+		chunk := `{"message":{"content":"Кни"},"done":false}` + "\n"
+		_, _ = fmt.Fprintf(buf, "HTTP/1.1 200 OK\r\nContent-Type: application/x-ndjson\r\nTransfer-Encoding: chunked\r\n\r\n%x\r\n%s\r\n", len(chunk), chunk)
+		_ = buf.Flush()
+		_ = conn.Close() // без завершающего пустого чанка
 	})
 	_, err := o.Complete(t.Context(), "m", providers.CompletionRequest{User: "x"})
 	require.ErrorIs(t, err, providers.ErrUnavailable)
 	require.True(t, providers.Retryable(err))
+}
+
+func TestOllamaAbortsRepetitionLoop(t *testing.T) {
+	// На CPU цикл до num_predict — это десятки минут на попытку: зацикливание
+	// обрывается сразу, ответ помечается оборванным.
+	// Сервер «генерирует», пока клиент не отключится (не дольше 30 с).
+	clientLeft := make(chan bool, 1)
+	o := ollamaServer(t, func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.Copy(io.Discard, r.Body)
+		_ = json.NewEncoder(w).Encode(map[string]any{"message": map[string]string{"content": "«Она так"}, "done": false})
+		deadline := time.Now().Add(30 * time.Second)
+		for time.Now().Before(deadline) {
+			err := json.NewEncoder(w).Encode(map[string]any{"message": map[string]string{"content": "о"}, "done": false})
+			w.(http.Flusher).Flush()
+			if err != nil || r.Context().Err() != nil {
+				clientLeft <- true
+				return
+			}
+			time.Sleep(time.Millisecond)
+		}
+		clientLeft <- false
+	})
+	start := time.Now()
+	res, err := o.Complete(t.Context(), "m", providers.CompletionRequest{User: "x"})
+	require.NoError(t, err)
+	require.True(t, res.Truncated)
+	require.True(t, strings.HasPrefix(res.Text, "«Она так"))
+	require.Less(t, time.Since(start), 5*time.Second, "цикл не распознан")
+	require.True(t, <-clientLeft, "генерацию прервал клиент, а не сервер закончил сам")
 }
 
 func TestOllamaDeterminismMapsToTemperature(t *testing.T) {
