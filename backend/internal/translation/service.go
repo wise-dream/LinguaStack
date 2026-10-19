@@ -52,6 +52,9 @@ type BatchOutcome struct {
 	Results       map[string]SegmentOutcome
 	ProviderCalls int
 	CostUSD       float64
+	// Токены — по всем вызовам батча, если провайдер их сообщает.
+	InputTokens  int64
+	OutputTokens int64
 }
 
 const maxRawInError = 4000
@@ -157,6 +160,12 @@ func (j *batchJob) attempt(ctx context.Context, b Batch, attempts int) (retry []
 		}
 		if res.CostUSD != nil {
 			j.out.CostUSD += *res.CostUSD
+		}
+		if res.InputTokens != nil {
+			j.out.InputTokens += int64(*res.InputTokens)
+		}
+		if res.OutputTokens != nil {
+			j.out.OutputTokens += int64(*res.OutputTokens)
 		}
 
 		if res.Truncated {

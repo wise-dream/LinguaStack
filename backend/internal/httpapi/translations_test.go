@@ -3,7 +3,9 @@ package httpapi_test
 import (
 	"bufio"
 	"context"
+	"fmt"
 	"net/http"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -28,6 +30,10 @@ type projectBody struct {
 	ProgressPercent     float64 `json:"progress_percent"`
 	SendsDataExternally bool    `json:"sends_data_externally"`
 	LastError           string  `json:"last_error"`
+	BookTitle           string  `json:"book_title"`
+	InputTokens         int64   `json:"input_tokens"`
+	OutputTokens        int64   `json:"output_tokens"`
+	ProviderCalls       int     `json:"provider_calls"`
 }
 
 type segmentBody struct {
@@ -290,6 +296,79 @@ func TestListTranslationsOnlyOwn(t *testing.T) {
 	var mine []projectBody
 	e.c.do(http.MethodGet, "/api/translations", nil).JSON(t, &mine)
 	require.Len(t, mine, 1)
+}
+
+func TestTranslationOptions(t *testing.T) {
+	// Списки для формы настройки перевода (ТЗ §8.1 п.5).
+	e := newTranslationEnv(t, nil)
+	var opts struct {
+		Languages []struct {
+			Code string `json:"code"`
+			Name string `json:"name"`
+		} `json:"languages"`
+		Styles      []string `json:"styles"`
+		Determinism []string `json:"determinism"`
+	}
+	r := e.c.do(http.MethodGet, "/api/translation-options", nil)
+	require.Equal(t, http.StatusOK, r.Status)
+	r.JSON(t, &opts)
+	codes := map[string]string{}
+	for _, l := range opts.Languages {
+		codes[l.Code] = l.Name
+	}
+	require.Equal(t, "English", codes["en"])
+	require.Equal(t, "Russian", codes["ru"])
+	require.True(t, sort.SliceIsSorted(opts.Languages, func(i, j int) bool { return opts.Languages[i].Code < opts.Languages[j].Code }))
+	require.Equal(t, []string{"literary", "neutral", "simplified", "technical"}, opts.Styles)
+	require.Equal(t, []string{"strict", "balanced", "creative"}, opts.Determinism)
+}
+
+func TestTranslationResponseHasUsage(t *testing.T) {
+	// ТЗ §8.4: монитор показывает доступную статистику провайдера.
+	e := newTranslationEnv(t, nil)
+	e.fake.TokensPerCall = 7
+	p := e.project(t, e.book(t, "# Ch\n\nOne."))
+	e.runWorker(t)
+	done := e.get(t, p.ID)
+	require.Equal(t, e.fake.CallCount(), done.ProviderCalls)
+	require.Equal(t, int64(7*done.ProviderCalls), done.InputTokens)
+	require.Equal(t, int64(7*done.ProviderCalls), done.OutputTokens)
+
+	events := readSSE(t, e.c, t.Context(), "/api/translations/"+p.ID+"/events", 1)
+	require.Contains(t, events[0], fmt.Sprintf(`"provider_calls":%d`, done.ProviderCalls))
+	require.Contains(t, events[0], `"input_tokens":`)
+}
+
+func TestTranslationHasBookTitle(t *testing.T) {
+	e := newTranslationEnv(t, nil)
+	p := e.project(t, e.book(t, "# Глава\n\nOne."))
+	var list []projectBody
+	e.c.do(http.MethodGet, "/api/translations", nil).JSON(t, &list)
+	require.Len(t, list, 1)
+	require.Equal(t, e.get(t, p.ID).BookTitle, list[0].BookTitle)
+	require.NotEmpty(t, list[0].BookTitle)
+}
+
+func TestTranslationsFilterByBook(t *testing.T) {
+	e := newTranslationEnv(t, nil)
+	first := e.book(t, "# A\n\nOne.")
+	second := e.book(t, "# B\n\nTwo.")
+	p := e.project(t, first)
+	e.project(t, second)
+
+	var list []projectBody
+	e.c.do(http.MethodGet, "/api/translations?book_id="+first, nil).JSON(t, &list)
+	require.Len(t, list, 1)
+	require.Equal(t, p.ID, list[0].ID)
+
+	// Чужая книга — пустой список, а не 404: фильтр не раскрывает,
+	// существует ли книга.
+	other := e.signedIn(t, "other@example.com")
+	r := other.do(http.MethodGet, "/api/translations?book_id="+first, nil)
+	require.Equal(t, http.StatusOK, r.Status)
+	require.JSONEq(t, "[]", string(r.Body))
+
+	require.Equal(t, http.StatusUnprocessableEntity, e.c.do(http.MethodGet, "/api/translations?book_id=nope", nil).Status)
 }
 
 func TestSegmentsListIsPaged(t *testing.T) {

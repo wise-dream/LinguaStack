@@ -43,30 +43,43 @@ type translationIn struct {
 }
 
 type projectOut struct {
-	ID                  uuid.UUID         `json:"id"`
-	BookID              uuid.UUID         `json:"book_id"`
-	ProviderConfigID    uuid.UUID         `json:"provider_config_id"`
-	SourceLang          string            `json:"source_lang"`
-	TargetLang          string            `json:"target_lang"`
-	ModelID             string            `json:"model_id"`
-	Style               string            `json:"style"`
-	Determinism         string            `json:"determinism"`
-	Glossary            map[string]string `json:"glossary"`
-	Status              string            `json:"status"`
-	SegmentsTotal       int               `json:"segments_total"`
-	SegmentsDone        int               `json:"segments_done"`
-	SegmentsFailed      int               `json:"segments_failed"`
-	WarningsCount       int               `json:"warnings_count"`
-	ProgressPercent     float64           `json:"progress_percent"`
-	CostUSD             float64           `json:"cost_usd"`
-	LastError           string            `json:"last_error,omitempty"`
-	SendsDataExternally bool              `json:"sends_data_externally"`
-	CreatedAt           time.Time         `json:"created_at"`
-	StartedAt           *time.Time        `json:"started_at,omitempty"`
-	FinishedAt          *time.Time        `json:"finished_at,omitempty"`
+	ID               uuid.UUID         `json:"id"`
+	BookID           uuid.UUID         `json:"book_id"`
+	ProviderConfigID uuid.UUID         `json:"provider_config_id"`
+	SourceLang       string            `json:"source_lang"`
+	TargetLang       string            `json:"target_lang"`
+	ModelID          string            `json:"model_id"`
+	Style            string            `json:"style"`
+	Determinism      string            `json:"determinism"`
+	Glossary         map[string]string `json:"glossary"`
+	Status           string            `json:"status"`
+	SegmentsTotal    int               `json:"segments_total"`
+	SegmentsDone     int               `json:"segments_done"`
+	SegmentsFailed   int               `json:"segments_failed"`
+	WarningsCount    int               `json:"warnings_count"`
+	ProgressPercent  float64           `json:"progress_percent"`
+	CostUSD          float64           `json:"cost_usd"`
+	usageOut
+	LastError           string     `json:"last_error,omitempty"`
+	BookTitle           string     `json:"book_title"`
+	SendsDataExternally bool       `json:"sends_data_externally"`
+	CreatedAt           time.Time  `json:"created_at"`
+	StartedAt           *time.Time `json:"started_at,omitempty"`
+	FinishedAt          *time.Time `json:"finished_at,omitempty"`
 }
 
-func projectResponse(p *models.TranslationProject, cfg *models.ProviderConfig) projectOut {
+// usageOut — статистика провайдера для монитора (ТЗ §8.4).
+type usageOut struct {
+	InputTokens   int64 `json:"input_tokens"`
+	OutputTokens  int64 `json:"output_tokens"`
+	ProviderCalls int   `json:"provider_calls"`
+}
+
+func usageResponse(p *models.TranslationProject) usageOut {
+	return usageOut{InputTokens: p.InputTokens, OutputTokens: p.OutputTokens, ProviderCalls: p.ProviderCalls}
+}
+
+func projectResponse(p *models.TranslationProject, cfg *models.ProviderConfig, bookTitle string) projectOut {
 	glossary := p.Glossary.Data
 	if glossary == nil {
 		glossary = map[string]string{}
@@ -75,7 +88,8 @@ func projectResponse(p *models.TranslationProject, cfg *models.ProviderConfig) p
 		ID: p.ID, BookID: p.BookID, ProviderConfigID: p.ProviderConfigID, SourceLang: p.SourceLang,
 		TargetLang: p.TargetLang, ModelID: p.ModelID, Style: p.Style, Determinism: p.Determinism, Glossary: glossary,
 		Status: p.Status, SegmentsTotal: p.SegmentsTotal, SegmentsDone: p.SegmentsDone, SegmentsFailed: p.SegmentsFailed,
-		WarningsCount: p.WarningsCount, ProgressPercent: p.ProgressPercent(), CostUSD: p.CostUSD, LastError: p.LastError,
+		WarningsCount: p.WarningsCount, ProgressPercent: p.ProgressPercent(), CostUSD: p.CostUSD, usageOut: usageResponse(p),
+		LastError: p.LastError, BookTitle: bookTitle,
 		CreatedAt: p.CreatedAt.UTC(), StartedAt: p.StartedAt, FinishedAt: p.FinishedAt,
 	}
 	if cfg != nil {
@@ -191,15 +205,47 @@ func (s *server) createTranslation(w http.ResponseWriter, r *http.Request) {
 		internalError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, projectResponse(&project, cfg))
+	writeJSON(w, http.StatusCreated, projectResponse(&project, cfg, book.Title))
+}
+
+// translationOptions — списки для формы настройки перевода. Языки, которые
+// понимает конкретная модель, сообщает её ModelCapabilities (ТЗ §5.2).
+func (s *server) translationOptions(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{
+		"languages": translation.Languages(),
+		"styles":    translation.Styles(),
+		"determinism": []providers.Determinism{
+			providers.Strict, providers.Balanced, providers.Creative,
+		},
+	})
 }
 
 func (s *server) listTranslations(w http.ResponseWriter, r *http.Request) {
 	user := UserFromContext(r.Context())
+	q := s.DB.WithContext(r.Context()).Scopes(store.OwnedScope(user.ID))
+	if raw := r.URL.Query().Get("book_id"); raw != "" {
+		bookID, err := uuid.Parse(raw)
+		if err != nil {
+			writeError(w, http.StatusUnprocessableEntity, "book_id должен быть UUID")
+			return
+		}
+		// Фильтр по владельцу уже в OwnedScope: для чужой книги список
+		// пуст, а не 404 — существование книги не раскрывается.
+		q = q.Where("book_id = ?", bookID)
+	}
 	var list []models.TranslationProject
-	if err := s.DB.WithContext(r.Context()).Scopes(store.OwnedScope(user.ID)).Order("created_at DESC").Find(&list).Error; err != nil {
+	if err := q.Order("created_at DESC").Find(&list).Error; err != nil {
 		internalError(w, r, err)
 		return
+	}
+	var books []models.Book
+	if err := s.DB.WithContext(r.Context()).Scopes(store.OwnedScope(user.ID)).Select("id", "title").Find(&books).Error; err != nil {
+		internalError(w, r, err)
+		return
+	}
+	titles := make(map[uuid.UUID]string, len(books))
+	for _, b := range books {
+		titles[b.ID] = b.Title
 	}
 	var configs []models.ProviderConfig
 	if err := s.DB.WithContext(r.Context()).Scopes(store.OwnedScope(user.ID)).Find(&configs).Error; err != nil {
@@ -212,7 +258,7 @@ func (s *server) listTranslations(w http.ResponseWriter, r *http.Request) {
 	}
 	out := make([]projectOut, len(list))
 	for i := range list {
-		out[i] = projectResponse(&list[i], byID[list[i].ProviderConfigID])
+		out[i] = projectResponse(&list[i], byID[list[i].ProviderConfigID], titles[list[i].BookID])
 	}
 	writeJSON(w, http.StatusOK, out)
 }
@@ -225,9 +271,18 @@ func (s *server) projectConfig(r *http.Request, p *models.TranslationProject) *m
 	return cfg
 }
 
+// projectFor — ответ по одному проекту: конфигурация и название книги
+// дочитываются отдельно.
+func (s *server) projectFor(r *http.Request, p *models.TranslationProject) projectOut {
+	var title string
+	_ = s.DB.WithContext(r.Context()).Model(&models.Book{}).
+		Where("id = ? AND owner_id = ?", p.BookID, p.OwnerID).Pluck("title", &title).Error
+	return projectResponse(p, s.projectConfig(r, p), title)
+}
+
 func (s *server) getTranslation(w http.ResponseWriter, r *http.Request) {
 	if p, ok := loadOwned[models.TranslationProject](s, w, r, "id"); ok {
-		writeJSON(w, http.StatusOK, projectResponse(p, s.projectConfig(r, p)))
+		writeJSON(w, http.StatusOK, s.projectFor(r, p))
 	}
 }
 
@@ -269,7 +324,7 @@ func (s *server) transition(w http.ResponseWriter, r *http.Request, from []strin
 		internalError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, projectResponse(p, s.projectConfig(r, p)))
+	writeJSON(w, http.StatusOK, s.projectFor(r, p))
 }
 
 var errConflict = errors.New("недопустимый переход статуса")
@@ -391,7 +446,8 @@ type progressEvent struct {
 	WarningsCount   int     `json:"warnings_count"`
 	ProgressPercent float64 `json:"progress_percent"`
 	CostUSD         float64 `json:"cost_usd"`
-	LastError       string  `json:"last_error,omitempty"`
+	usageOut
+	LastError string `json:"last_error,omitempty"`
 }
 
 // translationEvents — поток прогресса (ТЗ §8.4, дополнение §13): событие
@@ -422,7 +478,8 @@ func (s *server) translationEvents(w http.ResponseWriter, r *http.Request) {
 		}
 		raw, _ := json.Marshal(progressEvent{
 			Status: p.Status, SegmentsTotal: p.SegmentsTotal, SegmentsDone: p.SegmentsDone, SegmentsFailed: p.SegmentsFailed,
-			WarningsCount: p.WarningsCount, ProgressPercent: p.ProgressPercent(), CostUSD: p.CostUSD, LastError: p.LastError,
+			WarningsCount: p.WarningsCount, ProgressPercent: p.ProgressPercent(), CostUSD: p.CostUSD,
+			usageOut: usageResponse(p), LastError: p.LastError,
 		})
 		switch {
 		case string(raw) != last:

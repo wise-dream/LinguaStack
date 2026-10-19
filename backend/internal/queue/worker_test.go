@@ -139,6 +139,20 @@ func TestWorkerTranslatesWholeBook(t *testing.T) {
 	require.Equal(t, models.TaskCompleted, task.Status)
 }
 
+func TestWorkerAccumulatesUsage(t *testing.T) {
+	e := newWorkerEnv(t)
+	project := e.projectFromMarkdown(paragraphs(3)) // 4 сегмента — 2 батча
+	e.fake.TokensPerCall = 3
+	e.fake.CostPerCall = 0.25
+	e.runUntilIdle(e.worker("w"))
+
+	done := e.reload(project)
+	require.Equal(t, 2, done.ProviderCalls)
+	require.Equal(t, int64(6), done.InputTokens)
+	require.Equal(t, int64(6), done.OutputTokens)
+	require.InDelta(t, 0.5, done.CostUSD, 1e-9)
+}
+
 func TestRerunDoesNotRetranslateCompleted(t *testing.T) {
 	// ТЗ §7, §17: идемпотентность — повторный прогон пропускает готовое.
 	e := newWorkerEnv(t)

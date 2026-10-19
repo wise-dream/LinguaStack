@@ -383,23 +383,37 @@ UPDATE translation_segments
 				return fmt.Errorf("запись ошибки сегмента: %w", err)
 			}
 		}
-		return RefreshCounters(ctx, tx, projectID, outcome.CostUSD)
+		return RefreshCounters(ctx, tx, projectID, Usage{
+			CostUSD: outcome.CostUSD, InputTokens: outcome.InputTokens, OutputTokens: outcome.OutputTokens,
+			Calls: outcome.ProviderCalls,
+		})
 	})
+}
+
+// Usage — расход на провайдера, который добавляется к проекту: стоимость,
+// токены и число вызовов (статистика монитора, ТЗ §8.4).
+type Usage struct {
+	CostUSD      float64
+	InputTokens  int64
+	OutputTokens int64
+	Calls        int
 }
 
 // RefreshCounters пересчитывает счётчики проекта из сегментов, а не
 // увеличивает их: повторный прогон и гонка двух worker-ов не могут их
-// рассинхронизировать с данными.
-func RefreshCounters(ctx context.Context, db *gorm.DB, projectID uuid.UUID, addCost float64) error {
+// рассинхронизировать с данными. Расход провайдера (add) прибавляется:
+// его в сегментах нет.
+func RefreshCounters(ctx context.Context, db *gorm.DB, projectID uuid.UUID, add Usage) error {
 	return db.WithContext(ctx).Exec(`
 UPDATE translation_projects p
    SET segments_done = s.done, segments_failed = s.failed, warnings_count = s.warnings,
-       cost_usd = p.cost_usd + ?, updated_at = now()
+       cost_usd = p.cost_usd + ?, input_tokens = p.input_tokens + ?, output_tokens = p.output_tokens + ?,
+       provider_calls = p.provider_calls + ?, updated_at = now()
   FROM (SELECT count(*) FILTER (WHERE status = 'completed') AS done,
                count(*) FILTER (WHERE status = 'failed') AS failed,
                count(*) FILTER (WHERE severity = 'warning') AS warnings
           FROM translation_segments WHERE project_id = ?) s
- WHERE p.id = ?`, addCost, projectID, projectID).Error
+ WHERE p.id = ?`, add.CostUSD, add.InputTokens, add.OutputTokens, add.Calls, projectID, projectID).Error
 }
 
 // finalize ставит итоговый статус (дополнение §5), только если проект всё

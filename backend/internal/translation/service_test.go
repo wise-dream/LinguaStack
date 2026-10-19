@@ -244,6 +244,19 @@ func TestCostIsSummed(t *testing.T) {
 	require.InDelta(t, 0.50, out.CostUSD, 1e-9, "платим и за ответ, нарушивший протокол")
 }
 
+func TestBatchUsageSummed(t *testing.T) {
+	// Статистика провайдера для монитора (ТЗ §8.4): токены считаются по
+	// всем вызовам, включая повтор после нарушения протокола.
+	fake := providers.NewFake("protocol_violation")
+	fake.ViolateTimes = 1
+	fake.TokensPerCall = 5
+	out, err := run(t, fake, "One.", "Two.")
+	require.NoError(t, err)
+	require.Equal(t, 2, out.ProviderCalls)
+	require.Equal(t, int64(10), out.InputTokens)
+	require.Equal(t, int64(10), out.OutputTokens)
+}
+
 func TestGlossaryAndContextReachTheModel(t *testing.T) {
 	fake := providers.NewFake("prefix")
 	svc := translation.NewService(fake, "fake-1", translation.ServiceOptions{})

@@ -39,6 +39,9 @@ type TranslationProject struct {
 	SegmentsFailed   int
 	WarningsCount    int
 	CostUSD          float64 `gorm:"column:cost_usd"`
+	InputTokens      int64
+	OutputTokens     int64
+	ProviderCalls    int
 	LastError        string
 	UpdatedAt        time.Time
 	StartedAt        *time.Time

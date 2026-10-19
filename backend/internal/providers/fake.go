@@ -29,6 +29,7 @@ type Fake struct {
 	RefuseForTexts map[string]bool // сегмент с таким текстом вызывает отказ по политике
 	TruncateTimes  int             // первые N ответов на конверт помечены как оборванные
 	CostPerCall    float64         // стоимость каждого успешного вызова
+	TokensPerCall  int             // токенов входа и выхода у каждого успешного вызова
 	Unavailable    bool            // всегда ErrUnavailable
 	// TimeoutOverSegments > 0 — конверт больше N сегментов «не успевает»:
 	// тайм-аут адаптера (медленная локальная модель).
@@ -88,6 +89,14 @@ func render(segs []fakeSegment) string {
 var fakeMarkerRe = regexp.MustCompile(`⟦\d+⟧`)
 
 func (f *Fake) Complete(ctx context.Context, modelID string, req CompletionRequest) (CompletionResult, error) {
+	res, err := f.complete(ctx, modelID, req)
+	if err == nil && f.TokensPerCall > 0 {
+		res.InputTokens, res.OutputTokens = intPtr(f.TokensPerCall), intPtr(f.TokensPerCall)
+	}
+	return res, err
+}
+
+func (f *Fake) complete(ctx context.Context, modelID string, req CompletionRequest) (CompletionResult, error) {
 	f.mu.Lock()
 	f.calls = append(f.calls, req)
 	switch {

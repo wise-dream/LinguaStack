@@ -126,6 +126,16 @@ var styles = map[string]string{
 	"simplified": "Use plain, simple %s; where the original is dense or technical, explain it more simply without losing meaning.",
 }
 
+// Styles — идентификаторы стилей перевода по алфавиту.
+func Styles() []string {
+	out := make([]string, 0, len(styles))
+	for id := range styles {
+		out = append(out, id)
+	}
+	slices.Sort(out)
+	return out
+}
+
 // IsKnownStyle — поддерживается ли стиль перевода.
 func IsKnownStyle(style string) bool {
 	_, ok := styles[style]

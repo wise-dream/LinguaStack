@@ -64,7 +64,7 @@ func (s *server) patchSegment(w http.ResponseWriter, r *http.Request) {
 		if err := tx.Create(&models.TranslationSegmentRevision{SegmentID: seg.ID, TranslatedText: text, Origin: models.OriginManual}).Error; err != nil {
 			return err
 		}
-		if err := queue.RefreshCounters(r.Context(), tx, project.ID, 0); err != nil {
+		if err := queue.RefreshCounters(r.Context(), tx, project.ID, queue.Usage{}); err != nil {
 			return err
 		}
 		// Правка последнего упавшего сегмента завершает проект.
@@ -105,7 +105,7 @@ func (s *server) retrySegment(w http.ResponseWriter, r *http.Request) {
 		}).Error; err != nil {
 			return err
 		}
-		if err := queue.RefreshCounters(r.Context(), tx, project.ID, 0); err != nil {
+		if err := queue.RefreshCounters(r.Context(), tx, project.ID, queue.Usage{}); err != nil {
 			return err
 		}
 		if project.Status == models.ProjectPaused {

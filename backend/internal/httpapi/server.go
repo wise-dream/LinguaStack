@@ -119,6 +119,7 @@ func buildRoutes(s *server) *router {
 	rt.protected("GET /api/provider-configs/{id}/models", s.configModels)
 	rt.protected("GET /api/provider-configs/{id}/health", s.configHealth)
 
+	rt.protected("GET /api/translation-options", s.translationOptions)
 	rt.protected("GET /api/translations", s.listTranslations)
 	rt.protected("GET /api/translations/{id}", s.getTranslation)
 	rt.protected("POST /api/translations/{id}/pause", s.pauseTranslation)

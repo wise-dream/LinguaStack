@@ -1,5 +1,10 @@
 package translation
 
+import (
+	"slices"
+	"strings"
+)
+
 // languageNames — коды ISO 639-1 и английские названия для промпта
 // (модели надёжнее следуют инструкциям на английском). Список не
 // ограничивает модель: возможности конкретной модели — в ModelCapabilities
@@ -24,4 +29,21 @@ func LanguageName(code string) (string, bool) {
 func IsKnownLanguage(code string) bool {
 	_, ok := languageNames[code]
 	return ok
+}
+
+// Language — язык из списка поддерживаемых: код ISO 639-1 и английское
+// название.
+type Language struct {
+	Code string `json:"code"`
+	Name string `json:"name"`
+}
+
+// Languages — все поддерживаемые языки по возрастанию кода.
+func Languages() []Language {
+	out := make([]Language, 0, len(languageNames))
+	for code, name := range languageNames {
+		out = append(out, Language{Code: code, Name: name})
+	}
+	slices.SortFunc(out, func(a, b Language) int { return strings.Compare(a.Code, b.Code) })
+	return out
 }
