@@ -324,6 +324,10 @@ func TestLiveAnthropicTranslatesSentence(t *testing.T) {
 		User:   "The book is on the table.", Determinism: providers.Strict, MaxOutputTokens: 1024,
 	})
 	require.NoError(t, err)
+	if res.CostUSD != nil && res.InputTokens != nil && res.OutputTokens != nil {
+		t.Logf("перевод: %q; модель %s; токены %d/%d; стоимость $%.6f",
+			res.Text, res.ModelID, *res.InputTokens, *res.OutputTokens, *res.CostUSD)
+	}
 	require.Contains(t, res.Text, "Книга")
 	require.NotNil(t, res.CostUSD)
 }
