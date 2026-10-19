@@ -84,6 +84,11 @@ func (z ZipRepo) Load(data []byte, filename string) (Result, error) {
 		r.issues = append(r.issues, Issue{Severity: Warning, Code: "duplicate_entry",
 			Message: "В архиве повторяются имена; использована первая запись: " + listNames(duplicates)})
 	}
+	if len(r.mdFiles) == 0 {
+		if result, ok, err := r.loadHTML(filename); ok || err != nil {
+			return result, err
+		}
+	}
 
 	plan, err := r.plan()
 	if err != nil {
@@ -120,6 +125,31 @@ func (z ZipRepo) Load(data []byte, filename string) (Result, error) {
 	result := finish(builder.Build(), r.issues)
 	result.Assets, result.Issues = r.resources(images, links, result.Issues)
 	return result, nil
+}
+
+// loadHTML — архив без Markdown, но с HTML-страницами («Сохранить страницу
+// полностью» или набор глав): импорт HTML с картинками из архива
+// (дополнение §15.3). false — HTML в архиве нет.
+func (r *repo) loadHTML(filename string) (Result, bool, error) {
+	names := make([]string, 0, len(r.files))
+	for name := range r.files {
+		names = append(names, name)
+	}
+	pages := htmlPages(names)
+	if len(pages) == 0 {
+		return Result{}, false, nil
+	}
+	files := make([]htmlFile, 0, len(pages))
+	for _, name := range pages {
+		data, ok, err := r.read(name)
+		if err != nil {
+			return Result{}, true, err
+		}
+		if ok {
+			files = append(files, htmlFile{name: name, data: data})
+		}
+	}
+	return loadHTMLFiles(files, titleFromFilename(filename), r.files, r.issues), true, nil
 }
 
 // read читает текстовый файл архива. Нарушение лимитов — отказ (error);

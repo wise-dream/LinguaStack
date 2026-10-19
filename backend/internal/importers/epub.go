@@ -384,6 +384,24 @@ type htmlEmitter struct {
 	// (так устроены главы Project Gutenberg). Решать «блок или встроенный»
 	// по одному имени тега нельзя — вся глава склеилась бы в один абзац.
 	blockish map[*html.Node]bool
+	// splitChapters — заголовок открывает главу глубины level-minLevel+1
+	// (импорт HTML). В EPUB главы задаёт spine, и заголовок — просто блок.
+	splitChapters bool
+	minLevel      int
+	// imageSrc разрешает адрес картинки в имя ресурса книги; false —
+	// картинка пропускается. nil — путь относительно dir.
+	imageSrc func(raw string) (string, bool)
+}
+
+// resolveImage — имя ресурса для адреса картинки из разметки.
+func (e *htmlEmitter) resolveImage(raw string) (string, bool) {
+	if raw == "" {
+		return "", false
+	}
+	if e.imageSrc != nil {
+		return e.imageSrc(raw)
+	}
+	return cleanHref(e.dir, raw), true
 }
 
 // markBlockish вычисляет blockish снизу вверх один раз на документ, чтобы
@@ -450,7 +468,11 @@ func (e *htmlEmitter) block(n *html.Node, ctx htmlContext) {
 	switch n.DataAtom {
 	case atom.H1, atom.H2, atom.H3, atom.H4, atom.H5, atom.H6:
 		if text := e.inlineText(childNodes(n)); text != "" {
-			e.b.Add(cdm.Heading, text, int(n.Data[1]-'0'), nil)
+			level := int(n.Data[1] - '0')
+			if e.splitChapters {
+				e.b.StartChapter(collapseSpaces(textContent(n)), max(1, level-e.minLevel+1))
+			}
+			e.b.Add(cdm.Heading, text, level, nil)
 		}
 	case atom.P, atom.Dt, atom.Dd, atom.Summary, atom.Address:
 		// В режиме quirks (XHTML без DOCTYPE) таблица не закрывает <p>,
@@ -600,8 +622,7 @@ func (e *htmlEmitter) inline(b *strings.Builder, n *html.Node) {
 	case atom.Br:
 		b.WriteString("\n")
 	case atom.Img:
-		if src := attr(n, "src"); src != "" {
-			resolved := cleanHref(e.dir, src)
+		if resolved, ok := e.resolveImage(attr(n, "src")); ok {
 			e.images = append(e.images, resolved)
 			b.WriteString("![" + escapeMarkdown(attr(n, "alt")) + "](" + resolved + ")")
 		}
@@ -662,8 +683,8 @@ func (e *htmlEmitter) soleImage(nodes []*html.Node) (src, alt string, ok bool) {
 		}
 		return "", "", false
 	}
-	if s := attr(found, "src"); s != "" {
-		return cleanHref(e.dir, s), attr(found, "alt"), true
+	if s, ok := e.resolveImage(attr(found, "src")); ok {
+		return s, attr(found, "alt"), true
 	}
 	return "", "", false
 }
@@ -678,10 +699,8 @@ func (e *htmlEmitter) svgImage(n *html.Node) string {
 		}
 		return src == ""
 	})
-	if src == "" {
-		return ""
-	}
-	return cleanHref(e.dir, src)
+	resolved, _ := e.resolveImage(src)
+	return resolved
 }
 
 // --- помощники DOM ---

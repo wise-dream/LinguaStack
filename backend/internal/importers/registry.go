@@ -20,7 +20,7 @@ func NewRegistry(importers ...Importer) *Registry {
 // Default — реестр со всеми поддерживаемыми форматами.
 func Default(cfg config.Settings) *Registry {
 	limits := LimitsFrom(cfg)
-	return NewRegistry(NewEPUB(limits), NewZipRepo(limits), NewMarkdown(), NewTXT())
+	return NewRegistry(NewEPUB(limits), NewZipRepo(limits), NewMarkdown(), NewHTML(), NewTXT())
 }
 
 // Pick возвращает первый импортёр, узнавший файл.

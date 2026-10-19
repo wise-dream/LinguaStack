@@ -208,6 +208,19 @@ func TestUploadSavesArchiveAssets(t *testing.T) {
 	require.Contains(t, strings.Join(stored, "\n"), filepath.Join(b.ID, "assets", "img", "d.png"))
 }
 
+func TestUploadZipWithHTMLPageIsHTMLBook(t *testing.T) {
+	// Формат книги — тот, что определил импорт по содержимому архива: от
+	// него зависит, как экспорт понимает переносы строк (дополнение §16).
+	env := newTestEnv(t)
+	c := env.signedIn(t, "u@example.com")
+	b := uploadBook(t, c, "page.zip", string(zipBytes(t, map[string]string{
+		"page.html":        `<h1>Глава</h1><p>Текст.</p><p><img src="page_files/a.png"></p>`,
+		"page_files/a.png": "\x89PNG\r\n\x1a\n",
+	})))
+	require.Equal(t, "html", b.SourceFormat)
+	require.Contains(t, strings.Join(filesUnder(t, env.storage), "\n"), filepath.Join(b.ID, "assets", "page_files", "a.png"))
+}
+
 func TestUploadedFilenameNotUsedOnDisk(t *testing.T) {
 	env := newTestEnv(t)
 	c := env.signedIn(t, "u@example.com")

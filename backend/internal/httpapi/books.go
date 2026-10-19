@@ -170,9 +170,15 @@ func (s *server) uploadBook(w http.ResponseWriter, r *http.Request) {
 	}
 
 	doc := result.Document
+	// Формат — тот, что определил импорт: ZIP со страницей HTML — книга
+	// HTML, а не репозиторий Markdown.
+	format := doc.Meta.SourceFormat
+	if format == "" {
+		format = importer.FormatID()
+	}
 	book := models.Book{
 		OwnerID: user.ID, Title: doc.Meta.Title, Author: doc.Meta.Author, Language: doc.Meta.Language,
-		SourceFormat: importer.FormatID(), OriginalFilename: filename, OriginalSuffix: suffix,
+		SourceFormat: format, OriginalFilename: filename, OriginalSuffix: suffix,
 		OriginalSize: int64(len(data)), Status: models.BookStatusImported,
 		ChaptersCount: chapterCount(doc.Chapters), BlocksCount: len(doc.Blocks()),
 		TranslatableCount: len(doc.TranslatableBlocks()),
