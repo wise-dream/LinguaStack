@@ -55,3 +55,13 @@ func TestShortSkPrefixedWordsUntouched(t *testing.T) {
 	newLogger(&buf).Info("ask-sk-ok")
 	require.Contains(t, buf.String(), "ask-sk-ok")
 }
+
+func TestRedactsTelegramToken(t *testing.T) {
+	var buf bytes.Buffer
+	log := newLogger(&buf)
+	log.Error("запрос https://api.telegram.org/bot123456789:AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsawQ/getMe не прошёл",
+		"url", "bot987654321:BBHdqTcvCH1vGWJxfSeofSAs0K5PALDsawZ/sendMessage")
+	require.NotContains(t, buf.String(), "AAHdq")
+	require.NotContains(t, buf.String(), "BBHdq")
+	require.Contains(t, buf.String(), "***")
+}

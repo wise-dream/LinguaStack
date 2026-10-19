@@ -12,8 +12,10 @@ import (
 
 const mask = "***"
 
-// keyRe — значения в форме ключей провайдеров (sk-…, sk-ant-…, sk-proj-…).
-var keyRe = regexp.MustCompile(`\bsk-[A-Za-z0-9_-]{8,}`)
+// keyRe — значения в форме ключей провайдеров (sk-…, sk-ant-…, sk-proj-…)
+// и токенов Telegram-бота («123456789:AA…»): токен стоит в адресе
+// каждого запроса к Bot API, «…/bot<токен>/getMe», поэтому без \b слева.
+var keyRe = regexp.MustCompile(`\bsk-[A-Za-z0-9_-]{8,}|\d{5,}:[A-Za-z0-9_-]{30,}`)
 
 var sensitiveKeys = map[string]bool{
 	"password": true, "api_key": true, "apikey": true, "token": true, "secret": true,
