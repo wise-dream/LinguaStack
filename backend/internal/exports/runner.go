@@ -21,8 +21,10 @@ import (
 //
 // Захват — FOR UPDATE SKIP LOCKED с арендой на время сборки: несколько
 // worker-ов не возьмут одну задачу, а задачу упавшего worker-а подберёт
-// другой, когда аренда истечёт. Сборка идемпотентна: файл пишется во
-// временный и переименовывается, повторный запуск его просто перезапишет.
+// другой, когда аренда истечёт. Аренда — это и знак владения: результат
+// пишется условием «locked_until всё ещё мой», иначе опоздавший worker
+// затёр бы состояние того, кто подхватил задачу. Сборка идемпотентна:
+// файл пишется во временный и переименовывается.
 type Runner struct {
 	db      *gorm.DB
 	store   *storage.FileStore
@@ -30,7 +32,8 @@ type Runner struct {
 
 	// PollInterval — пауза, когда задач нет.
 	PollInterval time.Duration
-	// BeforeFinish вызывается перед записью результата (для тестов).
+	// BeforeFinish вызывается перед записью результата — успеха или
+	// сбоя (для тестов).
 	BeforeFinish func()
 }
 
@@ -78,10 +81,12 @@ func (r *Runner) RunOnce(ctx context.Context) (bool, error) {
 	if err := r.db.WithContext(ctx).Raw(claimSQL, r.timeout.Seconds()).Scan(&job).Error; err != nil {
 		return false, fmt.Errorf("захват задачи экспорта: %w", err)
 	}
-	if job.ID == uuid.Nil {
+	if job.ID == uuid.Nil || job.LockedUntil == nil {
 		return false, nil
 	}
-	return true, r.process(ctx, &job)
+	// Начатый экспорт дописывается и при остановке worker-а: сборка
+	// занимает секунды, а брошенная задача ждала бы конца аренды.
+	return true, r.process(context.WithoutCancel(ctx), &job)
 }
 
 // errUserFacing — что видит пользователь при сбое сборки: подробности
@@ -115,7 +120,7 @@ func (r *Runner) process(ctx context.Context, job *models.ExportJob) error {
 
 	exporter, ok := exporters.Get(job.Format)
 	if !ok {
-		return r.fail(ctx, job, fmt.Errorf("неизвестный формат %q", job.Format))
+		return r.fail(work, job, fmt.Errorf("неизвестный формат %q", job.Format))
 	}
 	doc, untranslated := Assemble(book.CDM.Data, book.SourceFormat, segs, exporters.Mode(job.Mode),
 		project.SourceLang, project.TargetLang)
@@ -139,8 +144,7 @@ func (r *Runner) process(ctx context.Context, job *models.ExportJob) error {
 	if r.BeforeFinish != nil {
 		r.BeforeFinish()
 	}
-	res := r.db.WithContext(ctx).Model(&models.ExportJob{}).
-		Where("id = ? AND status = ?", job.ID, models.ExportRunning).
+	res := r.owned(ctx, job).
 		Updates(map[string]any{
 			"status": models.ExportCompleted, "file_ext": out.Ext, "content_type": out.ContentType,
 			"size_bytes": size, "untranslated": untranslated, "error": "",
@@ -150,18 +154,36 @@ func (r *Runner) process(ctx context.Context, job *models.ExportJob) error {
 		return fmt.Errorf("завершение экспорта: %w", res.Error)
 	}
 	if res.RowsAffected == 0 {
-		// Задачу удалили, пока файл собирался (вместе с книгой или
-		// пользователем): файл никому не нужен.
-		return r.store.DeleteExport(book.OwnerID, book.ID, job.ID, out.Ext)
+		// Аренды больше нет. Задачу удалили, пока файл собирался (вместе с
+		// книгой или пользователем), — файл никому не нужен; задачу ведёт
+		// другой worker — файл его, не трогаем.
+		var left int64
+		if err := r.db.WithContext(ctx).Model(&models.ExportJob{}).Where("id = ?", job.ID).Count(&left).Error; err != nil {
+			return fmt.Errorf("проверка задачи экспорта: %w", err)
+		}
+		if left == 0 {
+			return r.store.DeleteExport(book.OwnerID, book.ID, job.ID, out.Ext)
+		}
+		slog.Warn("экспорт: аренда истекла, задачу ведёт другой worker", "export", job.ID)
+		return nil
 	}
 	slog.Info("экспорт готов", "export", job.ID, "format", job.Format, "size", size, "untranslated", untranslated)
 	return nil
 }
 
+// owned — запрос к задаче, пока она за этим исполнителем: статус running и
+// та же аренда, что при захвате.
+func (r *Runner) owned(ctx context.Context, job *models.ExportJob) *gorm.DB {
+	return r.db.WithContext(ctx).Model(&models.ExportJob{}).
+		Where("id = ? AND status = ? AND locked_until = ?", job.ID, models.ExportRunning, *job.LockedUntil)
+}
+
 func (r *Runner) fail(ctx context.Context, job *models.ExportJob, cause error) error {
 	slog.Error("экспорт не удался", "export", job.ID, "format", job.Format, "error", cause)
-	err := r.db.WithContext(ctx).Model(&models.ExportJob{}).
-		Where("id = ? AND status = ?", job.ID, models.ExportRunning).
+	if r.BeforeFinish != nil {
+		r.BeforeFinish()
+	}
+	err := r.owned(ctx, job).
 		Updates(map[string]any{
 			"status": models.ExportFailed, "error": errUserFacing, "locked_until": nil,
 			"finished_at": time.Now().UTC(), "updated_at": time.Now().UTC(),

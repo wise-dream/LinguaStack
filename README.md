@@ -5,14 +5,15 @@
 
 Цикл работы: **импорт → структурирование → перевод → проверка → чтение → экспорт.**
 
-Реализованы этапы 1–4 ТЗ: фундамент (пользователи, сессии, хранилище,
-изоляция данных), импорт TXT / Markdown / EPUB / репозиториев документации
-(zip, mdBook, MkDocs), перевод через Ollama, OpenAI-совместимые API и
-Anthropic Claude — с очередью, паузой, отменой, восстановлением после сбоев,
-проверкой качества и ручной правкой — и веб-приложение: библиотека,
-импорт с оглавлением, настройка перевода, монитор задач и читалка
-оригинала и перевода рядом. PDF/DOCX/HTML, экспорт и Telegram-бот —
-следующие этапы.
+Реализованы этапы 1–5 ТЗ: фундамент (пользователи, сессии, хранилище,
+изоляция данных); импорт EPUB, PDF, DOCX, HTML, Markdown, TXT и
+репозиториев документации (zip, mdBook, MkDocs); перевод через Ollama,
+OpenAI-совместимые API и Anthropic Claude — с очередью, паузой, отменой,
+восстановлением после сбоев, проверкой качества и ручной правкой;
+экспорт в EPUB, Markdown, DOCX, HTML и TXT — только перевод или вместе с
+оригиналом; веб-приложение: библиотека, импорт с оглавлением, настройка
+перевода, монитор задач, читалка оригинала и перевода рядом, экспорт.
+Telegram-бот — следующий этап.
 
 ## Документы
 
@@ -30,12 +31,34 @@ Go-модуля (`backend/`) и PostgreSQL:
 * **api** (`cmd/api`) — HTTP API, импорт книг, управление переводами; он же
   раздаёт собранное веб-приложение (`LINGUASTACK_WEB_ROOT`) — один origin,
   cookie сессии без CORS;
-* **worker** (`cmd/worker`) — фоновый перевод. Задачи раздаются через аренды
-  в PostgreSQL (`FOR UPDATE SKIP LOCKED`), worker-ов может быть несколько;
-  упавший worker теряет аренду, и задачу подхватывает другой.
+* **worker** (`cmd/worker`) — фоновый перевод и сборка файлов экспорта.
+  Задачи раздаются через аренды в PostgreSQL (`FOR UPDATE SKIP LOCKED`),
+  worker-ов может быть несколько; упавший worker теряет аренду, и задачу
+  подхватывает другой.
 
-Оригиналы книг и ресурсы лежат в файловом хранилище (`LINGUASTACK_STORAGE_ROOT`),
-всё остальное — в БД. Миграции (goose, `backend/migrations`) накатывают оба
+Оригиналы книг, ресурсы и файлы экспорта лежат в файловом хранилище
+(`LINGUASTACK_STORAGE_ROOT`; в compose — общий том api и worker), всё
+остальное — в БД.
+
+### Форматы
+
+| Импорт | Что извлекается |
+|---|---|
+| EPUB 2/3 | главы по spine, оглавление (nav/NCX), текст, ссылки, картинки |
+| PDF с текстовым слоем | текст, порядок страниц, главы по закладкам или заголовкам, списки, код; колонтитулы убираются; сканы распознаются, но не читаются (OCR — после MVP) |
+| DOCX | заголовки по стилям, абзацы, списки, таблицы, код, картинки, ссылки, сноски |
+| HTML (файл или ZIP «страница полностью») | содержимое `<main>`/`<article>`, главы по заголовкам, картинки из `data:` и архива |
+| Markdown, ZIP-репозиторий | заголовки, списки, таблицы, код, ссылки, порядок глав по SUMMARY.md/mkdocs.yml |
+| TXT | кодировки, абзацы |
+
+PDF разбирает PDFium, собранный в WebAssembly (go-pdfium + wazero): без CGO,
+в песочнице без доступа к файловой системе. Первый PDF после запуска api
+компилирует модуль (~3 с), дальше api держит ~300 МБ памяти.
+
+Экспорт — EPUB 3 (проходит epubcheck), Markdown (с картинками — ZIP),
+DOCX, HTML (один файл) и TXT; режим «только перевод» или «оригинал и
+перевод». Непереведённые фрагменты остаются в оригинале, их число видно
+в списке экспортов. Миграции (goose, `backend/migrations`) накатывают оба
 процесса при старте.
 
 ## Требования
@@ -186,7 +209,7 @@ docker compose start api worker
 | Маршрут | Назначение |
 |---|---|
 | `POST /api/auth/register`, `/login`, `/logout`, `GET /api/me` | Учётная запись и сессия |
-| `POST /api/books` (multipart, поле `file`) | Импорт TXT, MD, EPUB, zip-репозитория документации |
+| `POST /api/books` (multipart, поле `file`) | Импорт EPUB, PDF, DOCX, HTML, MD, TXT, zip-репозитория документации |
 | `GET /api/books`, `GET/DELETE /api/books/{id}` | Книги |
 | `GET/PUT /api/books/{id}/toc` | Оглавление; перестановка глав |
 | `GET /api/books/{id}/chapters/{index}` | Блоки одной главы для читалки |
@@ -203,6 +226,9 @@ docker compose start api worker
 | `GET /api/translations/{id}/segments?offset=&limit=&chapter=&status=&severity=` | Оригинал и перевод по сегментам с замечаниями проверки; `status=failed`, `severity=warning` — найти проблемные |
 | `GET /api/translations/{id}/events` | Прогресс в реальном времени (SSE) |
 | `PATCH /api/segments/{id}`, `POST /api/segments/{id}/retry`, `GET /api/segments/{id}/revisions` | Ручная правка, повтор, история версий |
+| `POST /api/books/{id}/exports` (`translation_id`, `format`, `mode`) | Экспорт перевода: `epub`, `markdown`, `docx`, `html`, `txt`; `translation` или `bilingual` |
+| `GET /api/books/{id}/exports`, `GET/DELETE /api/exports/{id}` | История экспортов книги, состояние, удаление |
+| `GET /api/exports/{id}/file` | Скачивание готового файла (вложение «Название (язык).ext») |
 
 Пример полного цикла с локальной моделью:
 
@@ -218,6 +244,10 @@ P=$($C -XPOST localhost:8000/api/books/$BOOK/translations -H 'content-type: appl
    -d "{\"target_lang\":\"ru\",\"provider_config_id\":\"$CFG\",\"model_id\":\"qwen3:8b\",\"style\":\"literary\"}" | jq -r .id)
 $C -N localhost:8000/api/translations/$P/events          # прогресс
 $C "localhost:8000/api/translations/$P/segments?limit=20" # результат
+E=$($C -XPOST localhost:8000/api/books/$BOOK/exports -H 'content-type: application/json' \
+   -d "{\"translation_id\":\"$P\",\"format\":\"epub\",\"mode\":\"bilingual\"}" | jq -r .id)
+$C localhost:8000/api/exports/$E                          # status: completed
+$C -OJ localhost:8000/api/exports/$E/file                 # файл с именем из Content-Disposition
 ```
 
 Облачный провайдер получает текст книги, поэтому конфигурацию с ним нужно

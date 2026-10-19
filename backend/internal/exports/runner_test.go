@@ -166,3 +166,50 @@ func TestRunnerBookDeletedDuringExport(t *testing.T) {
 	_, err = os.Stat(filepath.Join(f.store.BookDir(job.OwnerID, job.BookID), "exports", job.ID.String()+".txt"))
 	require.True(t, os.IsNotExist(err), "файл убран")
 }
+
+// reclaim имитирует другой worker, подхвативший задачу после истечения
+// аренды: у задачи новая аренда.
+func reclaim(t *testing.T, f *fixture, job *models.ExportJob) {
+	t.Helper()
+	later := time.Now().Add(time.Hour)
+	require.NoError(t, f.db.Model(&models.ExportJob{}).Where("id = ?", job.ID).Update("locked_until", later).Error)
+}
+
+func TestRunnerStaleCompletionLeavesNewOwner(t *testing.T) {
+	f := newFixture(t, testdb.New(t))
+	job := f.job(t, "txt", nil)
+	f.runner.BeforeFinish = func() { reclaim(t, f, job) }
+	worked, err := f.runner.RunOnce(context.Background())
+	require.NoError(t, err)
+	require.True(t, worked)
+	got := f.reload(t, job)
+	require.Equal(t, models.ExportRunning, got.Status, "результат пишет только владелец аренды")
+	_, err = os.Stat(filepath.Join(f.store.BookDir(job.OwnerID, job.BookID), "exports", job.ID.String()+".txt"))
+	require.NoError(t, err, "файл нового владельца не удалён")
+}
+
+func TestRunnerStaleFailureLeavesNewOwner(t *testing.T) {
+	f := newFixture(t, testdb.New(t))
+	job := f.job(t, "txt", nil)
+	dir := f.store.BookDir(job.OwnerID, job.BookID)
+	require.NoError(t, os.MkdirAll(dir, 0o750))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "exports"), nil, 0o600))
+	f.runner.BeforeFinish = func() { reclaim(t, f, job) }
+	worked, err := f.runner.RunOnce(context.Background())
+	require.NoError(t, err)
+	require.True(t, worked)
+	got := f.reload(t, job)
+	require.Equal(t, models.ExportRunning, got.Status, "просроченный исполнитель не отмечает чужую задачу как ошибку")
+	require.Empty(t, got.Error)
+}
+
+func TestRunnerFinishesJobOnShutdown(t *testing.T) {
+	f := newFixture(t, testdb.New(t))
+	job := f.job(t, "epub", nil)
+	ctx, stop := context.WithCancel(context.Background())
+	f.runner.BeforeFinish = stop // сигнал остановки посреди сборки
+	worked, err := f.runner.RunOnce(ctx)
+	require.NoError(t, err)
+	require.True(t, worked)
+	require.Equal(t, models.ExportCompleted, f.reload(t, job).Status, "начатый экспорт дописывается")
+}
