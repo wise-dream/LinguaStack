@@ -68,6 +68,11 @@ type Settings struct {
 	MaxSegmentAttempts int           `env:"LINGUASTACK_MAX_SEGMENT_ATTEMPTS" envDefault:"3"`
 	LoginMaxAttempts   int           `env:"LINGUASTACK_LOGIN_MAX_ATTEMPTS" envDefault:"10"`
 	LoginWindow        time.Duration `env:"LINGUASTACK_LOGIN_WINDOW" envDefault:"15m"`
+	// Разбор PDF (дополнение §15.1): страниц больше — отказ принять файл;
+	// по тайм-ауту экземпляр PDFium уничтожается; память модуля wasm.
+	PDFMaxPages int           `env:"LINGUASTACK_PDF_MAX_PAGES" envDefault:"2000"`
+	PDFTimeout  time.Duration `env:"LINGUASTACK_PDF_TIMEOUT" envDefault:"2m"`
+	PDFMemoryMB int           `env:"LINGUASTACK_PDF_MEMORY_MB" envDefault:"1024"`
 
 	// --- сегментация и батчинг, дополнение §2 ---
 	MaxBatchSegments int `env:"LINGUASTACK_MAX_BATCH_SEGMENTS" envDefault:"20"`

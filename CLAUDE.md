@@ -26,6 +26,11 @@ go test -race -count=1 ./...
 Живой тест Anthropic (`LINGUASTACK_LIVE_ANTHROPIC=1`) тратит деньги
 пользователя — запускать только с его явного согласия.
 
+PDF-фикстуры (`internal/importers/testdata/pdf/`) печатает headless Chrome:
+`./generate.sh` в этом каталоге; результат коммитится, тестам Chrome не
+нужен. Пул PDFium (wasm) общий на процесс и компилируется при первом PDF —
+~3 с, под `-race` ~30 с.
+
 ## Веб-приложение (из `frontend/`)
 
 ```bash

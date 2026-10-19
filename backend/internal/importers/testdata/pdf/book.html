@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Пробная книга</title>
+<style>
+  @page {
+    size: A5;
+    margin: 2cm 1.8cm;
+    @top-center { content: "Пробная книга — колонтитул"; font-family: "DejaVu Serif"; font-size: 8pt; }
+    @bottom-center { content: counter(page); font-family: "DejaVu Serif"; font-size: 8pt; }
+  }
+  body { font-family: "DejaVu Serif"; font-size: 10pt; line-height: 1.35; }
+  h1 { font-size: 20pt; break-before: page; margin: 0 0 0.6em; }
+  h1:first-of-type { break-before: auto; }
+  h2 { font-size: 14pt; margin: 1em 0 0.4em; }
+  p { margin: 0 0 0.7em; text-align: justify; }
+  pre { font-family: "DejaVu Sans Mono"; font-size: 9pt; margin: 0.5em 0; }
+  .narrow { width: 7.5cm; }
+</style>
+</head>
+<body>
+<h1>Глава первая</h1>
+<p>Первый абзац главы, достаточно длинный, чтобы перенестись на следующую строку и проверить склейку строк в абзац при разборе документа.</p>
+<p class="narrow">Пере&shy;носы: интер&shy;на&shy;цио&shy;на&shy;ли&shy;за&shy;ция пре&shy;доста&shy;вляет воз&shy;мож&shy;ность про&shy;ве&shy;рить мяг&shy;кие пере&shy;носы, кото&shy;рые до&shy;ку&shy;мент ста&shy;вит в длин&shy;ных сло&shy;вах: высоко&shy;произ&shy;води&shy;тель&shy;ность, само&shy;сто&shy;ятель&shy;ность, взаимо&shy;дей&shy;ствие.</p>
+<p>Второй абзац.</p>
+<h2>Раздел 1.1</h2>
+<ul>
+  <li>Пункт один</li>
+  <li>Пункт два</li>
+</ul>
+<pre>func main() {
+    fmt.Println("код не переводится")
+}</pre>
+<p>Абзац после кода. Колонтитулы и номера страниц в текст книги попадать не должны: они повторяются на каждой странице.</p>
+<h1>Chapter Two</h1>
+<p>English paragraph with <b>bold</b> text and more words to fill the line completely and wrap it.</p>
+<ol>
+  <li>First item</li>
+  <li>Second item</li>
+</ol>
+<h1>Глава третья</h1>
+<p>Последний абзац книги.</p>
+</body>
+</html>

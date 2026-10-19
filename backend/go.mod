@@ -6,11 +6,14 @@ toolchain go1.27.2
 
 require (
 	github.com/alexedwards/argon2id v1.0.0
+	github.com/anthropics/anthropic-sdk-go v1.82.0
 	github.com/caarlos0/env/v11 v11.4.1
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.11.0
+	github.com/klippa-app/go-pdfium v1.21.1
 	github.com/pressly/goose/v3 v3.29.0
 	github.com/stretchr/testify v1.12.1
+	github.com/tetratelabs/wazero v1.12.0
 	github.com/yuin/goldmark v1.8.6
 	golang.org/x/net v0.61.0
 	golang.org/x/text v0.43.0
@@ -19,7 +22,6 @@ require (
 )
 
 require (
-	github.com/anthropics/anthropic-sdk-go v1.82.0 // indirect
 	github.com/bahlo/generic-list-go v0.2.0 // indirect
 	github.com/buger/jsonparser v1.1.2 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
@@ -31,6 +33,7 @@ require (
 	github.com/jackc/puddle/v2 v2.2.3 // indirect
 	github.com/jinzhu/inflection v1.0.0 // indirect
 	github.com/jinzhu/now v1.1.5 // indirect
+	github.com/jolestar/go-commons-pool/v2 v2.1.2 // indirect
 	github.com/mfridman/interpolate v0.0.2 // indirect
 	github.com/pb33f/ordered-map/v2 v2.3.1 // indirect
 	github.com/sethvargo/go-retry v0.5.0 // indirect
