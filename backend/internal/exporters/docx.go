@@ -80,7 +80,7 @@ func (docxExporter) Write(w io.Writer, b *Book) error {
 	x := &docxWriter{book: b, images: map[string]*docxImage{}}
 	zw := zip.NewWriter(w)
 	put := func(name string, data []byte) error {
-		f, err := zw.Create(name)
+		f, err := createZipEntry(zw, name)
 		if err != nil {
 			return err
 		}
@@ -214,7 +214,7 @@ func (x *docxWriter) group(blocks []Block) {
 			x.para("", `<w:jc w:val="center"/>`, x.drawing(img, blk.Meta["alt"]))
 			return
 		}
-		x.para("", "", textRun("[Изображение: "+blk.Meta["alt"]+"]", ""))
+		x.para("", "", textRun(imageCaption(blk.Meta["alt"]), ""))
 	case cdm.ThematicBreak:
 		x.para("", `<w:pBdr><w:bottom w:val="single" w:sz="6" w:space="1" w:color="auto"/></w:pBdr>`, "")
 	case cdm.Blockquote:

@@ -46,8 +46,10 @@ func (epubExporter) Write(w io.Writer, b *Book) error {
 	// mimetype — первой записью, без сжатия и без дескриптора данных
 	// (OCF): по этим байтам EPUB узнают, не распаковывая архив.
 	mime := []byte(epubMime)
+	date, clock := msDosTime(time.Now())
 	mf, err := zw.CreateRaw(&zip.FileHeader{Name: "mimetype", Method: zip.Store, CRC32: crc32.ChecksumIEEE(mime),
-		CompressedSize64: uint64(len(mime)), UncompressedSize64: uint64(len(mime))})
+		CompressedSize64: uint64(len(mime)), UncompressedSize64: uint64(len(mime)),
+		ModifiedDate: date, ModifiedTime: clock}) //nolint:staticcheck // SA1019: CreateRaw читает только эти поля, не Modified
 	if err != nil {
 		return err
 	}
@@ -55,7 +57,7 @@ func (epubExporter) Write(w io.Writer, b *Book) error {
 		return err
 	}
 	put := func(name, body string) error {
-		f, err := zw.Create(name)
+		f, err := createZipEntry(zw, name)
 		if err != nil {
 			return err
 		}
@@ -78,7 +80,7 @@ func (epubExporter) Write(w io.Writer, b *Book) error {
 		if err != nil {
 			continue
 		}
-		f, err := zw.Create("OEBPS/images/" + names[src])
+		f, err := createZipEntry(zw, "OEBPS/images/"+names[src])
 		if err != nil {
 			return err
 		}
@@ -199,4 +201,14 @@ func ncxDocument(id, title string, chs []Chapter, files map[*Chapter]string) str
 <navMap>` + b.String() + `</navMap>
 </ncx>
 `
+}
+
+// msDosTime — время в формате заголовка ZIP. CreateRaw, в отличие от
+// CreateHeader, поле Modified не переводит, а без даты архиватор покажет
+// 1980 год.
+func msDosTime(t time.Time) (date, clock uint16) {
+	t = t.UTC()
+	date = uint16(t.Day() + int(t.Month())<<5 + max(t.Year()-1980, 0)<<9) //nolint:gosec // G115: поля даты ZIP ограничены по построению
+	clock = uint16(t.Second()/2 + t.Minute()<<5 + t.Hour()<<11)           //nolint:gosec // G115: то же
+	return date, clock
 }

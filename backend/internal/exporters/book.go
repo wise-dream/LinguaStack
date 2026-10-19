@@ -5,10 +5,12 @@
 package exporters
 
 import (
+	"archive/zip"
 	"io"
 	"path"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/yuin/goldmark/ast"
 
@@ -213,6 +215,20 @@ func bookImages(b *Book) (order []string, names map[string]string) {
 	}
 	walk(b.Chapters)
 	return order, names
+}
+
+// imageCaption — подпись вместо картинки: в TXT и когда картинки нет.
+func imageCaption(alt string) string {
+	if strings.TrimSpace(alt) == "" {
+		return "[Изображение]"
+	}
+	return "[Изображение: " + alt + "]"
+}
+
+// createZipEntry — запись архива с текущим временем: без него архиватор
+// покажет у файлов 1980 год.
+func createZipEntry(zw *zip.Writer, name string) (io.Writer, error) {
+	return zw.CreateHeader(&zip.FileHeader{Name: name, Method: zip.Deflate, Modified: time.Now()})
 }
 
 func leftPad(n int) string {

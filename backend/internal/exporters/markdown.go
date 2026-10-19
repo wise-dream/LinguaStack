@@ -39,7 +39,7 @@ func (markdownExporter) Write(w io.Writer, b *Book) error {
 			continue
 		}
 		name := "images/" + names[src]
-		f, err := zw.Create(name)
+		f, err := createZipEntry(zw, name)
 		if err != nil {
 			return err
 		}
@@ -48,7 +48,7 @@ func (markdownExporter) Write(w io.Writer, b *Book) error {
 		}
 		packed[src] = name
 	}
-	f, err := zw.Create("book.md")
+	f, err := createZipEntry(zw, "book.md")
 	if err != nil {
 		return err
 	}
@@ -153,7 +153,7 @@ func (m *mdWriter) group(blocks []Block) []string {
 		if name, ok := m.image(blk.Meta["src"]); ok {
 			return []string{"![" + escapeAlt(alt) + "](" + name + ")"}
 		}
-		return []string{"\\[Изображение: " + escapeAlt(alt) + "\\]"}
+		return []string{escapeAlt(imageCaption(alt))}
 	case cdm.ThematicBreak:
 		return []string{"* * *"}
 	case cdm.Blockquote:

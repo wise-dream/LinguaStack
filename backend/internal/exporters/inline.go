@@ -196,7 +196,7 @@ func plainNode(b *strings.Builder, n ast.Node, src []byte, hardBreaks bool) {
 	case *ast.AutoLink:
 		b.Write(n.Label(src))
 	case *ast.Image:
-		b.WriteString("[Изображение: " + plainChildren(n, src, false) + "]")
+		b.WriteString(imageCaption(plainChildren(n, src, false)))
 	case *ast.RawHTML:
 	default:
 		b.WriteString(plainChildren(n, src, hardBreaks))

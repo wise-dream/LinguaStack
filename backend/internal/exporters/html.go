@@ -123,7 +123,7 @@ func (r *htmlRenderer) group(blocks []Block) string {
 			}
 			return `<figure><img src="` + html.EscapeString(name) + `" alt="` + alt + `"` + end + "</figure>"
 		}
-		return `<p class="image-missing">[Изображение: ` + alt + "]</p>"
+		return `<p class="image-missing">` + html.EscapeString(imageCaption(xmlSafe(blk.Meta["alt"]))) + "</p>"
 	case cdm.ThematicBreak:
 		return r.void("hr")
 	case cdm.RawHTML:

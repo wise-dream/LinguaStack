@@ -1,6 +1,7 @@
 package exporters
 
 import (
+	"archive/zip"
 	"bytes"
 	"encoding/base64"
 	"strings"
@@ -151,4 +152,23 @@ func TestTXTExport(t *testing.T) {
 func TestTXTBilingual(t *testing.T) {
 	s := string(export(t, "txt", sampleBook(ModeBilingual)))
 	require.Contains(t, s, "Text with em & .\nТекст с курсивом & .\n\n", "пара — оригинал и перевод подряд")
+}
+
+func TestImageWithoutAltCaption(t *testing.T) {
+	b := sampleBook(ModeTranslation)
+	b.Chapters[0].Blocks = []Block{raw(cdm.Image, "", "src", "gone.png")}
+	require.Contains(t, string(export(t, "txt", b)), "\n[Изображение]\n")
+	require.Contains(t, string(export(t, "html", b)), "[Изображение]</p>")
+	require.Equal(t, "[Изображение]", inlinePlain("![](a.png)", false))
+}
+
+func TestZipEntriesDated(t *testing.T) {
+	for _, format := range []string{"epub", "markdown", "docx"} {
+		data := export(t, format, sampleBook(ModeTranslation))
+		r, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
+		require.NoError(t, err)
+		for _, f := range r.File {
+			require.Greater(t, f.Modified.Year(), 2020, "%s: %s датирован %v", format, f.Name, f.Modified)
+		}
+	}
 }

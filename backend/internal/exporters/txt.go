@@ -74,7 +74,7 @@ func (t *txtWriter) group(blocks []Block) string {
 	case cdm.CodeBlock, cdm.MathBlock:
 		return blk.Original
 	case cdm.Image:
-		return "[Изображение: " + blk.Meta["alt"] + "]"
+		return imageCaption(blk.Meta["alt"])
 	case cdm.ThematicBreak:
 		return "* * *"
 	case cdm.RawHTML:
