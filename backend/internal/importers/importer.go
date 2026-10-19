@@ -56,6 +56,10 @@ type Importer interface {
 // ErrUnsupportedFormat — ни один импортёр не узнал файл.
 var ErrUnsupportedFormat = errors.New("формат файла не поддерживается")
 
+// ErrDocumentLimits — документ превышает пределы (дополнение §10:
+// страниц в PDF). Как и ErrArchiveLimits — отказ принять файл.
+var ErrDocumentLimits = errors.New("документ превышает допустимые пределы")
+
 func fileExt(filename string) string {
 	return strings.ToLower(path.Ext(strings.ReplaceAll(filename, "\\", "/")))
 }

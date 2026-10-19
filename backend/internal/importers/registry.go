@@ -4,7 +4,12 @@ import (
 	"fmt"
 
 	"github.com/vnovels/linguastack/internal/config"
+	"github.com/vnovels/linguastack/internal/pdftext"
 )
+
+// pdfInstances — одновременных разборов PDF на процесс: каждый экземпляр
+// PDFium — это своя память модуля wasm.
+const pdfInstances = 2
 
 // Registry выбирает импортёр для загруженного файла.
 type Registry struct {
@@ -20,7 +25,10 @@ func NewRegistry(importers ...Importer) *Registry {
 // Default — реестр со всеми поддерживаемыми форматами.
 func Default(cfg config.Settings) *Registry {
 	limits := LimitsFrom(cfg)
-	return NewRegistry(NewEPUB(limits), NewDOCX(limits), NewZipRepo(limits), NewMarkdown(), NewHTML(), NewTXT())
+	pdf := pdftext.NewPDFium(pdftext.Options{MaxPages: cfg.PDFMaxPages, Timeout: cfg.PDFTimeout,
+		MemoryLimitMB: cfg.PDFMemoryMB, Instances: pdfInstances})
+	// PDF — последним: он узнаётся и по содержимому.
+	return NewRegistry(NewEPUB(limits), NewDOCX(limits), NewZipRepo(limits), NewMarkdown(), NewHTML(), NewTXT(), NewPDF(pdf))
 }
 
 // Pick возвращает первый импортёр, узнавший файл.

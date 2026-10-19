@@ -164,6 +164,9 @@ func (s *server) uploadBook(w http.ResponseWriter, r *http.Request) {
 	case errors.Is(err, importers.ErrArchiveLimits):
 		writeError(w, http.StatusRequestEntityTooLarge, "Архив превышает допустимые пределы")
 		return
+	case errors.Is(err, importers.ErrDocumentLimits):
+		writeError(w, http.StatusRequestEntityTooLarge, "Документ превышает допустимые пределы")
+		return
 	case err != nil:
 		internalError(w, r, err)
 		return

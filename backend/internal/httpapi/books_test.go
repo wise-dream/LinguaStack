@@ -13,6 +13,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/vnovels/linguastack/internal/db/models"
+	"github.com/vnovels/linguastack/internal/httpapi"
+	"github.com/vnovels/linguastack/internal/importers"
 )
 
 type bookBody struct {
@@ -219,6 +221,35 @@ func TestUploadZipWithHTMLPageIsHTMLBook(t *testing.T) {
 	})))
 	require.Equal(t, "html", b.SourceFormat)
 	require.Contains(t, strings.Join(filesUnder(t, env.storage), "\n"), filepath.Join(b.ID, "assets", "page_files", "a.png"))
+}
+
+func pdfFixture(t *testing.T, name string) []byte {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join("..", "importers", "testdata", "pdf", name))
+	require.NoError(t, err)
+	return data
+}
+
+func TestUploadPDFBook(t *testing.T) {
+	env := newTestEnv(t)
+	c := env.signedIn(t, "u@example.com")
+	b := uploadBook(t, c, "book.pdf", string(pdfFixture(t, "outline.pdf")))
+	require.Equal(t, "pdf", b.SourceFormat)
+	require.Equal(t, "Пробная книга", b.Title)
+	require.Equal(t, 4, b.Chapters, "три главы и раздел")
+}
+
+func TestPDFTooManyPagesIs413AndNothingSaved(t *testing.T) {
+	env := newTestEnvWith(t, func(d *httpapi.Deps) {
+		cfg := d.Cfg
+		cfg.PDFMaxPages = 2
+		d.Importers = importers.Default(cfg)
+	})
+	c := env.signedIn(t, "u@example.com")
+	r := c.upload("book.pdf", pdfFixture(t, "outline.pdf"))
+	require.Equal(t, http.StatusRequestEntityTooLarge, r.Status, r.Body)
+	require.Contains(t, string(r.Body), "Документ превышает допустимые пределы")
+	require.Empty(t, filesUnder(t, env.storage))
 }
 
 func TestUploadedFilenameNotUsedOnDisk(t *testing.T) {
