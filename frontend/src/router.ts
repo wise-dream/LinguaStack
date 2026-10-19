@@ -6,6 +6,7 @@ import LibraryPage from './pages/LibraryPage.vue'
 import LoginPage from './pages/LoginPage.vue'
 import PendingPage from './pages/PendingPage.vue'
 import ProvidersPage from './pages/ProvidersPage.vue'
+import ReaderPage from './pages/ReaderPage.vue'
 import RegisterPage from './pages/RegisterPage.vue'
 import TranslationDetailPage from './pages/TranslationDetailPage.vue'
 import TranslationSetupPage from './pages/TranslationSetupPage.vue'
@@ -35,7 +36,7 @@ export function createAppRouter(history: RouterHistory = createWebHistory()) {
       { path: '/books/:id/translate', component: TranslationSetupPage, meta: { title: 'Новый перевод', section: 'library' } },
       { path: '/translations', component: TranslationsPage, meta: { title: 'Переводы', section: 'translations' } },
       { path: '/translations/:id', component: TranslationDetailPage, meta: { title: 'Перевод', section: 'translations' } },
-      { path: '/read/:bookId', component: PendingPage, meta: { title: 'Чтение', section: 'library' } },
+      { path: '/read/:bookId', component: ReaderPage, meta: { title: 'Чтение', section: 'library' } },
       { path: '/settings/providers', component: ProvidersPage, meta: { title: 'Модели', section: 'providers' } },
       { path: '/:pathMatch(.*)*', component: PendingPage, meta: { title: 'Страница не найдена' } },
     ],
