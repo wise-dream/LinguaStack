@@ -140,6 +140,11 @@ func buildRoutes(s *server) *router {
 	rt.protected("GET /api/translations/{id}/segments", s.listSegments)
 	rt.protected("GET /api/translations/{id}/events", s.translationEvents)
 
+	rt.protected("GET /api/telegram", s.getTelegram)
+	rt.protected("POST /api/telegram/link", s.linkTelegram)
+	rt.protected("PATCH /api/telegram", s.patchTelegram)
+	rt.protected("DELETE /api/telegram", s.unlinkTelegram)
+
 	rt.protected("PATCH /api/segments/{id}", s.patchSegment)
 	rt.protected("POST /api/segments/{id}/retry", s.retrySegment)
 	rt.protected("GET /api/segments/{id}/revisions", s.segmentRevisions)

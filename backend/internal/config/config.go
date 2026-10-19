@@ -78,6 +78,16 @@ type Settings struct {
 	ExportTimeout           time.Duration `env:"LINGUASTACK_EXPORT_TIMEOUT" envDefault:"5m"`
 	MaxActiveExportsPerUser int           `env:"LINGUASTACK_MAX_ACTIVE_EXPORTS_PER_USER" envDefault:"3"`
 
+	// --- Telegram, дополнение §17 ---
+	// Токен — секрет развёртывания (ТЗ §9). Без токена и имени бот
+	// выключен, а api отвечает enabled: false.
+	TelegramBotToken    string `env:"LINGUASTACK_TELEGRAM_BOT_TOKEN"`
+	TelegramBotUsername string `env:"LINGUASTACK_TELEGRAM_BOT_USERNAME"`
+	TelegramAPIURL      string `env:"LINGUASTACK_TELEGRAM_API_URL" envDefault:"https://api.telegram.org"`
+	// PublicURL — адрес веб-приложения для ссылок в сообщениях бота; без
+	// него сообщения без ссылок.
+	PublicURL string `env:"LINGUASTACK_PUBLIC_URL"`
+
 	// --- сегментация и батчинг, дополнение §2 ---
 	MaxBatchSegments int `env:"LINGUASTACK_MAX_BATCH_SEGMENTS" envDefault:"20"`
 	MaxBatchChars    int `env:"LINGUASTACK_MAX_BATCH_CHARS" envDefault:"6000"`
@@ -89,6 +99,11 @@ type Settings struct {
 	// Должно быть меньше срока, который даёт оркестратор до SIGKILL
 	// (stop_grace_period в docker-compose.yml).
 	WorkerShutdownGrace time.Duration `env:"LINGUASTACK_WORKER_SHUTDOWN_GRACE" envDefault:"25s"`
+}
+
+// TelegramEnabled — бот настроен: есть токен и имя для ссылок.
+func (s Settings) TelegramEnabled() bool {
+	return s.TelegramBotToken != "" && s.TelegramBotUsername != ""
 }
 
 // Load читает настройки из окружения, подставляя значения по умолчанию.
