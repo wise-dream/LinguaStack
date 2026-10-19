@@ -68,6 +68,12 @@ func run() error {
 		return nil
 	}
 
+	if err := httpapi.CheckWebRoot(cfg.WebRoot); err != nil {
+		return err
+	}
+	if cfg.E2EFakeProvider {
+		slog.Warn("включён тестовый провайдер fake (LINGUASTACK_E2E_FAKE_PROVIDER): только для сквозных тестов")
+	}
 	fileStore, err := storage.New(cfg.StorageRoot, cfg.MaxUploadBytes)
 	if err != nil {
 		return err

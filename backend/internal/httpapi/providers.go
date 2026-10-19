@@ -30,18 +30,37 @@ func (s *server) buildOptions() providers.BuildOptions {
 	return providers.BuildOptions{
 		OllamaBaseURL: s.Cfg.OllamaBaseURL, OllamaNumCtx: s.Cfg.OllamaNumCtx,
 		Timeout: s.Cfg.ProviderTimeout, AllowPrivateURLs: s.Cfg.AllowPrivateProviderURLs,
+		Fake: s.Cfg.E2EFakeProvider, FakeDelay: s.Cfg.E2EFakeDelay,
 	}
 }
 
+// kinds — виды провайдеров этого сервера: тестовый — только с флагом.
+func (s *server) kinds() []providers.Kind {
+	kinds := providers.Kinds()
+	if s.Cfg.E2EFakeProvider {
+		kinds = append(kinds, providers.FakeKind)
+	}
+	return kinds
+}
+
+func (s *server) lookupKind(id string) (providers.Kind, bool) {
+	for _, k := range s.kinds() {
+		if k.ID == id {
+			return k, true
+		}
+	}
+	return providers.Kind{}, false
+}
+
 func (s *server) listKinds(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, providers.Kinds())
+	writeJSON(w, http.StatusOK, s.kinds())
 }
 
 // kindModels — модели вида провайдера без пользовательской конфигурации:
 // Ollama сервера и каталог Anthropic. Список OpenAI-совместимого сервиса
 // зависит от адреса и ключа — для него есть /provider-configs/{id}/models.
 func (s *server) kindModels(w http.ResponseWriter, r *http.Request) {
-	kind, ok := providers.LookupKind(r.PathValue("kind"))
+	kind, ok := s.lookupKind(r.PathValue("kind"))
 	if !ok {
 		writeError(w, http.StatusNotFound, "Не найдено")
 		return
@@ -106,7 +125,7 @@ func configResponse(c *models.ProviderConfig) providerConfigOut {
 
 // validateConfig возвращает текст ошибки для пользователя или "".
 func (s *server) validateConfig(in providerConfigIn) string {
-	kind, ok := providers.LookupKind(in.ProviderID)
+	kind, ok := s.lookupKind(in.ProviderID)
 	if !ok {
 		return "Неизвестный провайдер"
 	}

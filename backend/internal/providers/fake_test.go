@@ -157,3 +157,31 @@ func TestFakeDescribesItself(t *testing.T) {
 	require.ErrorIs(t, err, providers.ErrModelNotAvailable)
 	require.True(t, strings.HasPrefix(caps.ModelID, "fake"))
 }
+
+func TestFakeDelayRespectsContext(t *testing.T) {
+	// Задержка нужна сквозным тестам, чтобы увидеть живой прогресс; отмена
+	// вызывающим её прерывает.
+	f := providers.NewFake("prefix")
+	f.Delay = 50 * time.Millisecond
+	start := time.Now()
+	_, err := f.Complete(t.Context(), "fake-1", req("x"))
+	require.NoError(t, err)
+	require.GreaterOrEqual(t, time.Since(start), 50*time.Millisecond)
+
+	f.Delay = time.Hour
+	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Millisecond)
+	defer cancel()
+	_, err = f.Complete(ctx, "fake-1", req("x"))
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+}
+
+func TestBuildFakeOnlyWhenEnabled(t *testing.T) {
+	_, err := providers.Build("fake", "", "", providers.BuildOptions{})
+	require.ErrorIs(t, err, providers.ErrUnknownProvider)
+	p, err := providers.Build("fake", "", "", providers.BuildOptions{Fake: true, FakeDelay: time.Millisecond})
+	require.NoError(t, err)
+	res, err := p.Complete(t.Context(), "fake-1", req("<<<SEG 1>>>\nHello\n<<<END>>>"))
+	require.NoError(t, err)
+	require.Contains(t, res.Text, "RU:Hello")
+	require.False(t, providers.SendsDataExternally("fake", ""))
+}

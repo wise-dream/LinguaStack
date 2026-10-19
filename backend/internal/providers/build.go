@@ -30,6 +30,10 @@ var kinds = []Kind{
 		RequiresBaseURL: true, UserBaseURL: true},
 }
 
+// FakeKind — тестовый провайдер сквозных тестов интерфейса. Виден и
+// собирается, только если сервер запущен с LINGUASTACK_E2E_FAKE_PROVIDER.
+var FakeKind = Kind{ID: "fake", Name: "Тестовый провайдер (только для сквозных тестов)"}
+
 // Kinds — поддерживаемые виды провайдеров.
 func Kinds() []Kind { return append([]Kind(nil), kinds...) }
 
@@ -51,12 +55,23 @@ type BuildOptions struct {
 	// AllowPrivateURLs — администратор разрешил частные адреса для
 	// OpenAI-совместимых сервисов (локальный vLLM, LM Studio).
 	AllowPrivateURLs bool
+	// Fake — тестовый провайдер для сквозных тестов интерфейса
+	// (LINGUASTACK_E2E_FAKE_PROVIDER); FakeDelay — его пауза на вызов.
+	Fake      bool
+	FakeDelay time.Duration
 }
 
 // Build собирает адаптер. Ключ передаётся уже расшифрованным — он живёт
 // в памяти только на время работы адаптера.
 func Build(kind, baseURL, apiKey string, opts BuildOptions) (Provider, error) {
 	switch kind {
+	case FakeKind.ID:
+		if !opts.Fake {
+			break
+		}
+		f := NewFake("prefix")
+		f.Delay = opts.FakeDelay
+		return f, nil
 	case "ollama":
 		return NewOllama(opts.OllamaBaseURL, &http.Client{}, OllamaOptions{NumCtx: opts.OllamaNumCtx, Timeout: opts.Timeout}), nil
 	case "anthropic":
@@ -76,7 +91,10 @@ func Build(kind, baseURL, apiKey string, opts BuildOptions) (Provider, error) {
 // SendsDataExternally — уходит ли текст с сервера для провайдера этого вида
 // с этим адресом (без сетевых запросов).
 func SendsDataExternally(kind, baseURL string) bool {
-	if kind == "openai_compatible" {
+	switch kind {
+	case FakeKind.ID:
+		return false
+	case "openai_compatible":
 		return NewOpenAICompatible(baseURL, "", nil, 0).SendsDataExternally()
 	}
 	k, ok := LookupKind(kind)

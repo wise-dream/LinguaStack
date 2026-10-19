@@ -83,7 +83,9 @@ func NewServer(d Deps) http.Handler {
 	if s.Stopping == nil {
 		s.Stopping = context.Background()
 	}
-	return buildRoutes(s).mux
+	mux := buildRoutes(s).mux
+	mountWeb(mux, s.Cfg.WebRoot)
+	return mux
 }
 
 // Routes — все маршруты сервера. По ним матрица изоляции в тестах

@@ -58,7 +58,11 @@ func run() error {
 	resolver := queue.ConfigResolver(gdb, secrets, providers.BuildOptions{
 		OllamaBaseURL: cfg.OllamaBaseURL, OllamaNumCtx: cfg.OllamaNumCtx,
 		Timeout: cfg.ProviderTimeout, AllowPrivateURLs: cfg.AllowPrivateProviderURLs,
+		Fake: cfg.E2EFakeProvider, FakeDelay: cfg.E2EFakeDelay,
 	})
+	if cfg.E2EFakeProvider {
+		slog.Warn("включён тестовый провайдер fake (LINGUASTACK_E2E_FAKE_PROVIDER): только для сквозных тестов")
+	}
 	worker := queue.NewWorker(workerID(), gdb, resolver, cfg)
 	slog.Info("worker запущен", "max_tasks_per_user", cfg.MaxTasksPerUser, "lease", cfg.TaskLease)
 	err = worker.Run(ctx)

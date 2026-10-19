@@ -30,6 +30,7 @@ type Fake struct {
 	TruncateTimes  int             // первые N ответов на конверт помечены как оборванные
 	CostPerCall    float64         // стоимость каждого успешного вызова
 	TokensPerCall  int             // токенов входа и выхода у каждого успешного вызова
+	Delay          time.Duration   // пауза перед ответом (сквозные тесты видят прогресс)
 	Unavailable    bool            // всегда ErrUnavailable
 	// TimeoutOverSegments > 0 — конверт больше N сегментов «не успевает»:
 	// тайм-аут адаптера (медленная локальная модель).
@@ -89,6 +90,13 @@ func render(segs []fakeSegment) string {
 var fakeMarkerRe = regexp.MustCompile(`⟦\d+⟧`)
 
 func (f *Fake) Complete(ctx context.Context, modelID string, req CompletionRequest) (CompletionResult, error) {
+	if f.Delay > 0 {
+		select {
+		case <-time.After(f.Delay):
+		case <-ctx.Done():
+			return CompletionResult{}, fmt.Errorf("запрос к провайдеру прерван: %w", ctx.Err())
+		}
+	}
 	res, err := f.complete(ctx, modelID, req)
 	if err == nil && f.TokensPerCall > 0 {
 		res.InputTokens, res.OutputTokens = intPtr(f.TokensPerCall), intPtr(f.TokensPerCall)

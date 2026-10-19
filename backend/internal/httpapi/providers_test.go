@@ -263,3 +263,37 @@ func TestDeleteConfigInUseIs409(t *testing.T) {
 	require.Equal(t, http.StatusConflict, r.Status, "тело: %s", r.Body)
 	require.Equal(t, http.StatusOK, c.do(http.MethodGet, "/api/provider-configs/"+created.ID, nil).Status)
 }
+
+func kindIDs(t *testing.T, c *apiClient) []string {
+	t.Helper()
+	var kinds []struct {
+		ID string `json:"provider_id"`
+	}
+	c.do(http.MethodGet, "/api/providers", nil).JSON(t, &kinds)
+	var ids []string
+	for _, k := range kinds {
+		ids = append(ids, k.ID)
+	}
+	return ids
+}
+
+func TestFakeProviderHiddenByDefault(t *testing.T) {
+	// Тестовый провайдер возвращает «RU:» + текст: в рабочей системе он
+	// выдал бы мусор за перевод.
+	c := newTestEnv(t).signedIn(t, "u@example.com")
+	require.NotContains(t, kindIDs(t, c), "fake")
+	r, _ := createConfig(t, c, map[string]any{"provider_id": "fake", "name": "F"})
+	require.Equal(t, http.StatusUnprocessableEntity, r.Status)
+}
+
+func TestFakeProviderAvailableWithFlag(t *testing.T) {
+	env := newTestEnvWith(t, func(d *httpapi.Deps) { d.Cfg.E2EFakeProvider = true })
+	c := env.signedIn(t, "u@example.com")
+	require.Contains(t, kindIDs(t, c), "fake")
+	r, cfg := createConfig(t, c, map[string]any{"provider_id": "fake", "name": "F"})
+	require.Equal(t, http.StatusCreated, r.Status, "тело: %s", r.Body)
+	require.False(t, cfg.SendsDataExternally, "текст никуда не уходит")
+	models := c.do(http.MethodGet, "/api/provider-configs/"+cfg.ID+"/models", nil)
+	require.Equal(t, http.StatusOK, models.Status)
+	require.Contains(t, string(models.Body), "fake-1")
+}

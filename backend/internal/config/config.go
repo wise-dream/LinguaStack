@@ -42,6 +42,15 @@ type Settings struct {
 	// может идти минутами.
 	ProviderTimeout time.Duration `env:"LINGUASTACK_PROVIDER_TIMEOUT" envDefault:"10m"`
 	HTTPAddr        string        `env:"LINGUASTACK_HTTP_ADDR" envDefault:":8000"`
+	// Каталог собранного веб-приложения (frontend/dist). Пусто — api
+	// отдаёт только /api: для разработки фронтенд раздаёт Vite.
+	WebRoot string `env:"LINGUASTACK_WEB_ROOT"`
+
+	// Тестовый провайдер «fake» для сквозных тестов интерфейса: переводит
+	// как «RU:» + текст. В рабочей системе выдал бы мусор за перевод —
+	// поэтому выключен и включается только явно.
+	E2EFakeProvider bool          `env:"LINGUASTACK_E2E_FAKE_PROVIDER" envDefault:"false"`
+	E2EFakeDelay    time.Duration `env:"LINGUASTACK_E2E_FAKE_DELAY" envDefault:"0s"`
 
 	// Cookie сессии только по HTTPS. По умолчанию true: продакшен, где
 	// забыли переменную, не должен отдавать сессию по открытому каналу.
