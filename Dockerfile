@@ -20,7 +20,7 @@ COPY backend/go.mod backend/go.sum ./
 RUN --mount=type=cache,target=/go/pkg/mod go mod download
 COPY backend/ ./
 RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache/go-build \
-    go build -trimpath -ldflags="-s -w" -o /out/ ./cmd/api ./cmd/worker
+    go build -trimpath -ldflags="-s -w" -o /out/ ./cmd/api ./cmd/worker ./cmd/bot
 # Каталог данных создаётся заранее с владельцем nonroot: именованный том
 # Docker наследует владельца из образа, иначе запись в него запрещена.
 RUN mkdir -p /data/storage

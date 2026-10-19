@@ -10,7 +10,7 @@ GOLANGCI_LINT ?= golangci-lint
 -include ../.env
 export
 
-.PHONY: test test-live lint build run-api run-worker migrate
+.PHONY: test test-live lint build run-api run-worker run-bot migrate
 
 test:
 	$(GO) test ./...
@@ -29,6 +29,9 @@ run-api:
 
 run-worker:
 	$(GO) run ./cmd/worker
+
+run-bot:
+	$(GO) run ./cmd/bot
 
 migrate:
 	$(GO) run ./cmd/api -migrate

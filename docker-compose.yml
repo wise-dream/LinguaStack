@@ -1,5 +1,5 @@
 # Разработка: `docker compose up -d db` — только PostgreSQL.
-# Развёртывание: `docker compose up -d --build` — db, api и worker.
+# Развёртывание: `docker compose up -d --build` — db, api, worker и bot.
 # Переменные берутся из .env рядом с этим файлом (см. .env.example).
 services:
   db:
@@ -77,6 +77,21 @@ services:
     stop_grace_period: 40s
     restart: unless-stopped
     # Worker-ов может быть несколько: docker compose up -d --scale worker=3
+
+  # Telegram-бот (дополнение §17): один на развёртывание — Telegram отдаёт
+  # обновления только одному опрашивающему. Без
+  # LINGUASTACK_TELEGRAM_BOT_TOKEN в .env он выключен и просто ждёт.
+  bot:
+    image: linguastack:local
+    entrypoint: ["/app/bot"]
+    env_file: *app-env-file
+    environment: *app-env
+    depends_on:
+      db:
+        condition: service_healthy
+      api:
+        condition: service_started
+    restart: unless-stopped
 
 volumes:
   pgdata:
