@@ -1,5 +1,7 @@
 import { createRouter, createWebHistory, type RouterHistory } from 'vue-router'
 
+import ImportPage from './pages/ImportPage.vue'
+import LibraryPage from './pages/LibraryPage.vue'
 import LoginPage from './pages/LoginPage.vue'
 import PendingPage from './pages/PendingPage.vue'
 import RegisterPage from './pages/RegisterPage.vue'
@@ -22,8 +24,8 @@ export function createAppRouter(history: RouterHistory = createWebHistory()) {
     routes: [
       { path: '/login', component: LoginPage, meta: { title: 'Вход', public: true } },
       { path: '/register', component: RegisterPage, meta: { title: 'Регистрация', public: true } },
-      { path: '/', component: PendingPage, meta: { title: 'Библиотека', section: 'library' } },
-      { path: '/import', component: PendingPage, meta: { title: 'Загрузка книги', section: 'library' } },
+      { path: '/', component: LibraryPage, meta: { title: 'Библиотека', section: 'library' } },
+      { path: '/import', component: ImportPage, meta: { title: 'Загрузка книги', section: 'library' } },
       { path: '/books/:id', component: PendingPage, meta: { title: 'Книга', section: 'library' } },
       { path: '/books/:id/translate', component: PendingPage, meta: { title: 'Новый перевод', section: 'library' } },
       { path: '/translations', component: PendingPage, meta: { title: 'Переводы', section: 'translations' } },
