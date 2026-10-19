@@ -16,6 +16,7 @@ import {
 } from '../api/translations'
 import type { Project, Segment } from '../api/types'
 import ConfirmButton from '../components/ConfirmButton.vue'
+import ExportPanel from '../components/ExportPanel.vue'
 import LangPair from '../components/LangPair.vue'
 import ProgressBar from '../components/ProgressBar.vue'
 import ProjectFacts from '../components/ProjectFacts.vue'
@@ -200,6 +201,11 @@ const readerLink = (s: Segment) => ({
       >
         {{ actionError }}
       </p>
+
+      <ExportPanel
+        :book-id="project.book_id"
+        :translation-id="project.id"
+      />
 
       <section class="segments">
         <h2>Фрагменты</h2>

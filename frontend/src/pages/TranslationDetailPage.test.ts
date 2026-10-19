@@ -36,6 +36,19 @@ async function mountDetail(routes: Parameters<typeof stubApi>[0]) {
 }
 
 describe('страница перевода', () => {
+  it('панель экспорта этого перевода (ТЗ §3.2)', async () => {
+    const { w, calls } = await mountDetail({
+      'GET /api/translations/p1': { body: project() },
+      'GET /api/translations/p1/segments': { body: [] },
+      'GET /api/books/b1/exports': { body: [] },
+    })
+    const panel = w.find('section.export')
+    expect(panel.find('h2').text()).toBe('Экспорт')
+    expect(panel.find('button[type=submit]').text()).toBe('Экспортировать')
+    expect(calls.some((c) => c.path === '/api/books/b1/exports')).toBe(true)
+    expect(panel.find('[role=alert]').exists()).toBe(false)
+  })
+
   it('живой прогресс из потока событий', async () => {
     const { w, streams } = await mountDetail({
       'GET /api/translations/p1': { body: project({ status: 'running', segments_done: 10 }) },

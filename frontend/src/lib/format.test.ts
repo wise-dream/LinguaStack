@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { capitalize, formatBytes, formatDate, formatDuration, formatNumber, languageName, plural, sourceLanguageName, statusLabel } from './format'
+import { capitalize, formatBytes, formatDate, formatDuration, formatName, formatNumber, languageName, plural, sourceLanguageName, statusLabel } from './format'
 
 describe('форматирование', () => {
   it('названия языков по-русски', () => {
@@ -43,5 +43,13 @@ describe('форматирование', () => {
     expect(sourceLanguageName('en')).toBe('английский')
     expect(capitalize('английский')).toBe('Английский')
     expect(capitalize('')).toBe('')
+  })
+})
+
+describe('formatName', () => {
+  it('новые форматы импорта этапа 5', () => {
+    expect(formatName('pdf')).toBe('PDF')
+    expect(formatName('docx')).toBe('Word (DOCX)')
+    expect(formatName('html')).toBe('HTML')
   })
 })

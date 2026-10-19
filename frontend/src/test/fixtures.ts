@@ -81,3 +81,20 @@ export const options = {
   styles: ['literary', 'neutral', 'simplified', 'technical'],
   determinism: ['strict', 'balanced', 'creative'],
 }
+
+export function exportJob(overrides: Partial<import('../api/types').ExportJob> = {}): import('../api/types').ExportJob {
+  return {
+    id: 'e1',
+    book_id: 'b1',
+    translation_id: 'p1',
+    format: 'epub',
+    mode: 'translation',
+    status: 'completed',
+    file_name: 'Приключения Алисы в Стране чудес (ru).epub',
+    size_bytes: 1258291,
+    untranslated: 0,
+    created_at: '2026-10-19T10:00:00Z',
+    finished_at: '2026-10-19T10:00:02Z',
+    ...overrides,
+  }
+}

@@ -73,6 +73,9 @@ const formats: Record<string, string> = {
   markdown: 'Markdown',
   txt: 'Текст',
   zip_repo: 'Документация',
+  pdf: 'PDF',
+  docx: 'Word (DOCX)',
+  html: 'HTML',
 }
 
 export function formatName(sourceFormat: string): string {

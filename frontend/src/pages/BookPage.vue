@@ -1,15 +1,17 @@
 <script setup lang="ts">
 // Книга: метаданные, оглавление и её переводы (ТЗ §8.2).
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 
 import { getBook, getTOC } from '../api/books'
 import { errorMessage } from '../api/client'
 import { listTranslations, resumeTranslation } from '../api/translations'
-import type { Book, Project, TocEntry } from '../api/types'
+import type { Book, ExportJob, Project, TocEntry } from '../api/types'
+import ExportList from '../components/ExportList.vue'
 import LangPair from '../components/LangPair.vue'
 import StatusMark from '../components/StatusMark.vue'
 import TocTree from '../components/TocTree.vue'
+import { useExports } from '../lib/exports'
 import { formatDate, formatName, languageName } from '../lib/format'
 
 const route = useRoute()
@@ -20,6 +22,10 @@ const toc = ref<TocEntry[]>([])
 const projects = ref<Project[]>([])
 const error = ref('')
 const rowError = ref<Record<string, string>>({})
+const exports = useExports(() => id)
+const exportError = ref('')
+// Язык перевода у каждого экспорта: в истории книги их бывает несколько.
+const exportLanguages = computed(() => Object.fromEntries(projects.value.map((p) => [p.id, p.target_lang])))
 
 onMounted(async () => {
   try {
@@ -30,7 +36,26 @@ onMounted(async () => {
   } catch (e) {
     error.value = errorMessage(e)
   }
+  await exports.load()
 })
+
+async function retryExport(j: ExportJob) {
+  exportError.value = ''
+  try {
+    await exports.create({ translation_id: j.translation_id, format: j.format, mode: j.mode })
+  } catch (e) {
+    exportError.value = errorMessage(e)
+  }
+}
+
+async function removeExport(j: ExportJob) {
+  exportError.value = ''
+  try {
+    await exports.remove(j.id)
+  } catch (e) {
+    exportError.value = errorMessage(e)
+  }
+}
 
 const canResume = (p: Project) => p.status === 'paused' || p.status === 'failed'
 
@@ -155,6 +180,30 @@ async function resume(p: Project) {
           <TocTree :entries="toc" />
         </section>
       </div>
+
+      <section class="exports-history">
+        <h2>Экспорты</h2>
+        <p
+          v-if="exportError || exports.error.value"
+          role="alert"
+          class="form-error"
+        >
+          {{ exportError || exports.error.value }}
+        </p>
+        <p
+          v-if="!exports.items.value.length"
+          class="muted"
+        >
+          Экспортов ещё нет. Экспортировать перевод в EPUB, Word, Markdown, HTML или текст можно на странице перевода.
+        </p>
+        <ExportList
+          v-else
+          :items="exports.items.value"
+          :languages="exportLanguages"
+          @retry="retryExport"
+          @remove="removeExport"
+        />
+      </section>
     </template>
   </main>
 </template>
@@ -240,6 +289,11 @@ h2 {
 .project-meta {
   margin: 0;
   color: var(--muted);
+}
+
+.exports-history {
+  margin-top: var(--space-6);
+  max-width: var(--measure);
 }
 
 @media (max-width: 48rem) {

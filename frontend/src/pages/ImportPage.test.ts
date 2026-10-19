@@ -34,6 +34,13 @@ function chooseFile(w: Awaited<ReturnType<typeof mountImport>>, name = 'alice.ep
 }
 
 describe('импорт', () => {
+  it('принимает все форматы этапа 5 и называет их', async () => {
+    const w = await mountImport()
+    const accept = w.find('input[type=file]').attributes('accept')?.split(',')
+    expect(accept).toEqual(expect.arrayContaining(['.epub', '.pdf', '.docx', '.html', '.htm', '.md', '.txt', '.zip']))
+    expect(w.find('.drop-hint').text()).toContain('PDF, DOCX, HTML')
+  })
+
   it('отказ сервера показан, форма снова доступна (Review Focus №5)', async () => {
     upload.mockRejectedValueOnce(new ApiError(413, 'Файл больше 50 МБ'))
     const w = await mountImport()

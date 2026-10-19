@@ -234,3 +234,28 @@ export interface SearchResponse {
   results: SearchResult[]
   truncated: boolean
 }
+
+export type ExportFormat = 'epub' | 'markdown' | 'docx' | 'html' | 'txt'
+export type ExportMode = 'translation' | 'bilingual'
+export type ExportStatus = 'pending' | 'running' | 'completed' | 'failed'
+
+export interface ExportJob {
+  id: string
+  book_id: string
+  translation_id: string
+  format: ExportFormat
+  mode: ExportMode
+  status: ExportStatus
+  file_name: string
+  size_bytes: number
+  untranslated: number
+  error?: string
+  created_at: string
+  finished_at?: string
+}
+
+export interface ExportInput {
+  translation_id: string
+  format: ExportFormat
+  mode: ExportMode
+}

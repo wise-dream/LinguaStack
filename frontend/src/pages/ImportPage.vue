@@ -84,7 +84,7 @@ async function saveOrder() {
       @drop.prevent="onDrop"
     >
       <span class="drop-title">Перетащите файл сюда или выберите его</span>
-      <span class="drop-hint">EPUB, Markdown, TXT или ZIP-архив документации, до 50 МБ</span>
+      <span class="drop-hint">EPUB, PDF, DOCX, HTML, Markdown, TXT или ZIP-архив документации, до 50 МБ</span>
       <span
         class="button pick"
         aria-hidden="true"
@@ -92,7 +92,7 @@ async function saveOrder() {
       <input
         class="visually-hidden"
         type="file"
-        accept=".epub,.md,.markdown,.txt,.zip"
+        accept=".epub,.pdf,.docx,.html,.htm,.md,.markdown,.txt,.zip"
         :disabled="busy"
         @change="onChange"
       >
