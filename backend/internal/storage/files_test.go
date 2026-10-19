@@ -251,3 +251,46 @@ func TestOpenAssetMissing(t *testing.T) {
 	_, err := s.OpenAsset(userID, bookID, "nope.png")
 	require.ErrorIs(t, err, os.ErrNotExist)
 }
+
+var exportID = uuid.MustParse("33333333-3333-3333-3333-333333333333")
+
+func TestSaveExportAtomicAndSized(t *testing.T) {
+	s := newStore(t, 1024)
+	size, err := s.SaveExport(userID, bookID, exportID, ".epub", func(w io.Writer) error {
+		_, err := io.WriteString(w, "экспорт")
+		return err
+	})
+	require.NoError(t, err)
+	require.Equal(t, int64(len("экспорт")), size)
+	path := filepath.Join(s.BookDir(userID, bookID), "exports", exportID.String()+".epub")
+	raw, err := os.ReadFile(path)
+	require.NoError(t, err)
+	require.Equal(t, "экспорт", string(raw))
+
+	f, err := s.OpenExport(userID, bookID, exportID, ".epub")
+	require.NoError(t, err)
+	require.NoError(t, f.Close())
+
+	// Сбой сборки не оставляет полуфайла под итоговым именем.
+	_, err = s.SaveExport(userID, bookID, exportID, ".md", func(w io.Writer) error {
+		_, _ = io.WriteString(w, "половина")
+		return errors.New("сбой")
+	})
+	require.Error(t, err)
+	entries, err := os.ReadDir(filepath.Dir(path))
+	require.NoError(t, err)
+	require.Len(t, entries, 1, "только готовый .epub")
+
+	require.NoError(t, s.DeleteExport(userID, bookID, exportID, ".epub"))
+	require.NoError(t, s.DeleteExport(userID, bookID, exportID, ".epub"), "повторное удаление — не ошибка")
+	_, err = os.Stat(path)
+	require.True(t, errors.Is(err, os.ErrNotExist))
+}
+
+func TestExportExtensionAllowList(t *testing.T) {
+	s := newStore(t, 1024)
+	_, err := s.SaveExport(userID, bookID, exportID, "/../x.sh", func(io.Writer) error { return nil })
+	require.ErrorIs(t, err, storage.ErrDisallowedExtension)
+	_, err = s.OpenExport(userID, bookID, exportID, ".exe")
+	require.ErrorIs(t, err, storage.ErrDisallowedExtension)
+}

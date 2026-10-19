@@ -121,7 +121,7 @@ var (
 // appTables — таблицы приложения для очистки (служебную goose_db_version
 // не трогаем).
 const appTables = "users, user_sessions, login_attempts, books, provider_configs, " +
-	"translation_projects, translation_segments, translation_segment_revisions, translation_tasks"
+	"translation_projects, translation_segments, translation_segment_revisions, translation_tasks, export_jobs"
 
 // Committing — база, где тест коммитит по-настоящему: SKIP LOCKED и аренды
 // проверяются только на разных соединениях. У каждого пакета своя база

@@ -298,6 +298,80 @@ func (s *FileStore) copyLimited(dst io.Writer, src io.Reader) error {
 	return nil
 }
 
+// exportSuffixes — расширения файлов экспорта (дополнение §11).
+var exportSuffixes = map[string]bool{".epub": true, ".md": true, ".zip": true, ".docx": true, ".html": true, ".txt": true}
+
+func (s *FileStore) exportPath(userID, bookID, exportID uuid.UUID, ext string) (string, error) {
+	if !exportSuffixes[ext] {
+		return "", fmt.Errorf("%w: %q", ErrDisallowedExtension, ext)
+	}
+	// Путь собран из uuid.UUID и расширения из allow-list.
+	return filepath.Join(s.BookDir(userID, bookID), "exports", exportID.String()+ext), nil
+}
+
+// SaveExport записывает файл экспорта: write пишет во временный файл,
+// который переименовывается в итоговый только после успеха, — оборванная
+// сборка не оставляет полуфайла. Возвращает размер.
+func (s *FileStore) SaveExport(userID, bookID, exportID uuid.UUID, ext string, write func(io.Writer) error) (int64, error) {
+	final, err := s.exportPath(userID, bookID, exportID, ext)
+	if err != nil {
+		return 0, err
+	}
+	dir := filepath.Dir(final)
+	if err := os.MkdirAll(dir, dirPerm); err != nil {
+		return 0, fmt.Errorf("каталог экспортов: %w", err)
+	}
+	tmp, err := os.CreateTemp(dir, ".export-*")
+	if err != nil {
+		return 0, fmt.Errorf("временный файл: %w", err)
+	}
+	defer func() { _ = os.Remove(tmp.Name()) }()
+	counter := &countingWriter{w: tmp}
+	if err := write(counter); err != nil {
+		_ = tmp.Close()
+		return 0, err
+	}
+	if err := tmp.Close(); err != nil {
+		return 0, fmt.Errorf("запись экспорта: %w", err)
+	}
+	if err := os.Rename(tmp.Name(), final); err != nil {
+		return 0, fmt.Errorf("запись экспорта: %w", err)
+	}
+	return counter.n, nil
+}
+
+type countingWriter struct {
+	w io.Writer
+	n int64
+}
+
+func (c *countingWriter) Write(p []byte) (int, error) {
+	n, err := c.w.Write(p)
+	c.n += int64(n)
+	return n, err
+}
+
+// OpenExport открывает файл экспорта на чтение.
+func (s *FileStore) OpenExport(userID, bookID, exportID uuid.UUID, ext string) (*os.File, error) {
+	path, err := s.exportPath(userID, bookID, exportID, ext)
+	if err != nil {
+		return nil, err
+	}
+	return os.Open(path) //nolint:gosec // G304: путь из UUID и расширения из allow-list
+}
+
+// DeleteExport удаляет файл экспорта; отсутствие файла — не ошибка.
+func (s *FileStore) DeleteExport(userID, bookID, exportID uuid.UUID, ext string) error {
+	path, err := s.exportPath(userID, bookID, exportID, ext)
+	if err != nil {
+		return err
+	}
+	if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("удаление экспорта: %w", err)
+	}
+	return nil
+}
+
 // DeleteBook удаляет все файлы книги (ТЗ §13). Идемпотентно: отсутствие
 // каталога — не ошибка, иначе повторная чистка срывается.
 func (s *FileStore) DeleteBook(userID, bookID uuid.UUID) error {

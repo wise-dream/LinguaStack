@@ -73,6 +73,10 @@ type Settings struct {
 	PDFMaxPages int           `env:"LINGUASTACK_PDF_MAX_PAGES" envDefault:"2000"`
 	PDFTimeout  time.Duration `env:"LINGUASTACK_PDF_TIMEOUT" envDefault:"2m"`
 	PDFMemoryMB int           `env:"LINGUASTACK_PDF_MEMORY_MB" envDefault:"1024"`
+	// Экспорт (дополнение §16): время сборки файла — оно же аренда задачи;
+	// одновременно ждущих и выполняемых экспортов на пользователя.
+	ExportTimeout           time.Duration `env:"LINGUASTACK_EXPORT_TIMEOUT" envDefault:"5m"`
+	MaxActiveExportsPerUser int           `env:"LINGUASTACK_MAX_ACTIVE_EXPORTS_PER_USER" envDefault:"3"`
 
 	// --- сегментация и батчинг, дополнение §2 ---
 	MaxBatchSegments int `env:"LINGUASTACK_MAX_BATCH_SEGMENTS" envDefault:"20"`

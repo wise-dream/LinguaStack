@@ -15,7 +15,7 @@ import (
 // эндпоинт с параметром, не внесённый в матрицу, роняет тест.
 
 type foreignResources struct {
-	book, project, segment, config string
+	book, project, segment, config, export string
 }
 
 func setupForeign(t *testing.T) (*translationEnv, *apiClient, foreignResources) {
@@ -24,9 +24,11 @@ func setupForeign(t *testing.T) (*translationEnv, *apiClient, foreignResources) 
 	p := owner.project(t, owner.book(t, "# Ch\n\nOne."))
 	owner.runWorker(t)
 	seg := owner.segments(t, p.ID)[0]
+	export := owner.export(t, p, "markdown", "translation")
+	owner.runExports(t)
 	intruder := owner.signedIn(t, "intruder@example.com")
 	return owner, intruder, foreignResources{book: p.BookID, project: p.ID, segment: seg.ID,
-		config: owner.ollamaConfig(t)}
+		config: owner.ollamaConfig(t), export: export.ID}
 }
 
 func (f foreignResources) url(t *testing.T, path string) (string, bool) {
@@ -47,6 +49,8 @@ func (f foreignResources) url(t *testing.T, path string) (string, bool) {
 		return strings.Replace(path, "{id}", f.segment, 1), true
 	case strings.HasPrefix(path, "/api/provider-configs/{id}"):
 		return strings.Replace(path, "{id}", f.config, 1), true
+	case strings.HasPrefix(path, "/api/exports/{id}"):
+		return strings.Replace(path, "{id}", f.export, 1), true
 	}
 	t.Errorf("маршрут %s не внесён в матрицу изоляции — добавьте его ресурс", path)
 	return "", false

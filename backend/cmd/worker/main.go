@@ -1,4 +1,5 @@
-// Команда worker выполняет фоновые задачи перевода (ТЗ §7).
+// Команда worker выполняет фоновые задачи: перевод (ТЗ §7) и экспорт
+// (дополнение §16).
 //
 // Worker-ов может быть несколько: задачи распределяются через аренды в
 // PostgreSQL (FOR UPDATE SKIP LOCKED). По SIGTERM текущий батч дописывается,
@@ -18,10 +19,12 @@ import (
 
 	"github.com/vnovels/linguastack/internal/config"
 	"github.com/vnovels/linguastack/internal/db"
+	"github.com/vnovels/linguastack/internal/exports"
 	"github.com/vnovels/linguastack/internal/logging"
 	"github.com/vnovels/linguastack/internal/providers"
 	"github.com/vnovels/linguastack/internal/queue"
 	"github.com/vnovels/linguastack/internal/security"
+	"github.com/vnovels/linguastack/internal/storage"
 )
 
 func main() {
@@ -63,9 +66,22 @@ func run() error {
 	if cfg.E2EFakeProvider {
 		slog.Warn("включён тестовый провайдер fake (LINGUASTACK_E2E_FAKE_PROVIDER): только для сквозных тестов")
 	}
+	// Файлы экспорта пишутся в то же хранилище, откуда их отдаёт api.
+	store, err := storage.New(cfg.StorageRoot, cfg.MaxUploadBytes)
+	if err != nil {
+		return err
+	}
+	runner := exports.NewRunner(gdb, store, cfg)
+	exportsDone := make(chan error, 1)
+	go func() { exportsDone <- runner.Run(ctx) }()
+
 	worker := queue.NewWorker(workerID(), gdb, resolver, cfg)
-	slog.Info("worker запущен", "max_tasks_per_user", cfg.MaxTasksPerUser, "lease", cfg.TaskLease)
+	slog.Info("worker запущен", "max_tasks_per_user", cfg.MaxTasksPerUser, "lease", cfg.TaskLease,
+		"export_timeout", cfg.ExportTimeout)
 	err = worker.Run(ctx)
+	if exportErr := <-exportsDone; err == nil {
+		err = exportErr
+	}
 	slog.Info("worker остановлен")
 	return err
 }
