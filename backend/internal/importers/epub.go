@@ -118,9 +118,21 @@ func decodeXML(data []byte, v any) error {
 
 // --- загрузка ---
 
-type epubBook struct {
+// archiveBook — проверенные записи архива книги (EPUB, DOCX) и замечания
+// к ним, накопленные при чтении.
+type archiveBook struct {
 	files  map[string]*zip.File
 	issues []Issue
+}
+
+func newArchiveBook(a archive) *archiveBook {
+	book := &archiveBook{files: map[string]*zip.File{}, issues: a.issues}
+	for _, entry := range a.entries {
+		if _, seen := book.files[entry.name]; !seen {
+			book.files[entry.name] = entry.file
+		}
+	}
+	return book
 }
 
 func (e EPUB) Load(data []byte, filename string) (Result, error) {
@@ -140,12 +152,7 @@ func (e EPUB) Load(data []byte, filename string) (Result, error) {
 	if archive.corrupt {
 		return corrupt("")
 	}
-	book := &epubBook{files: map[string]*zip.File{}, issues: archive.issues}
-	for _, entry := range archive.entries {
-		if _, seen := book.files[entry.name]; !seen {
-			book.files[entry.name] = entry.file
-		}
-	}
+	book := newArchiveBook(archive)
 
 	var container ocfContainer
 	raw, ok, err := book.read("META-INF/container.xml")
@@ -255,7 +262,7 @@ func (e EPUB) Load(data []byte, filename string) (Result, error) {
 	return result, nil
 }
 
-func (b *epubBook) read(name string) ([]byte, bool, error) {
+func (b *archiveBook) read(name string) ([]byte, bool, error) {
 	f, ok := b.files[name]
 	if !ok {
 		return nil, false, nil
@@ -275,7 +282,7 @@ func (b *epubBook) read(name string) ([]byte, bool, error) {
 // tableOfContents: nav (EPUB 3) приоритетнее NCX; без обоих — порядок spine
 // и замечание toc_missing. Для файла берётся первое упоминание: главы,
 // заданные якорями внутри одного файла, в MVP не разделяются.
-func (b *epubBook) tableOfContents(navHref, ncxHref string) (map[string]tocLabel, error) {
+func (b *archiveBook) tableOfContents(navHref, ncxHref string) (map[string]tocLabel, error) {
 	toc := map[string]tocLabel{}
 	add := func(href, label string, depth int) {
 		if href == "" {
