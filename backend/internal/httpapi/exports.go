@@ -2,9 +2,9 @@ package httpapi
 
 import (
 	"errors"
+	"fmt"
 	"io/fs"
 	"net/http"
-	"net/url"
 	"strings"
 	"time"
 	"unicode"
@@ -84,7 +84,22 @@ func contentDisposition(name string) string {
 		}
 		return r
 	}, name)
-	return `attachment; filename="` + fallback + `"; filename*=UTF-8''` + strings.ReplaceAll(url.PathEscape(name), "+", "%2B")
+	return `attachment; filename="` + fallback + `"; filename*=UTF-8''` + rfc5987(name)
+}
+
+// rfc5987 кодирует значение по RFC 5987: как есть остаются только
+// attr-char, всё остальное — %XX по байтам UTF-8.
+func rfc5987(s string) string {
+	const attrChar = "!#$&+-.^_`|~"
+	var b strings.Builder
+	for _, c := range []byte(s) {
+		if c < utf8.RuneSelf && (unicode.IsLetter(rune(c)) || unicode.IsDigit(rune(c)) || strings.IndexByte(attrChar, c) >= 0) {
+			b.WriteByte(c)
+			continue
+		}
+		fmt.Fprintf(&b, "%%%02X", c)
+	}
+	return b.String()
 }
 
 func validExportMode(mode string) bool {

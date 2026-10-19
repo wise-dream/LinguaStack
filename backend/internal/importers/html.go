@@ -93,6 +93,10 @@ func loadHTMLFiles(files []htmlFile, fallbackTitle string, archive map[string]*z
 	if len(missing) > 0 {
 		result.Issues = append(result.Issues, missingResourceIssue(missing))
 	}
+	if res.overLimit > 0 {
+		result.Issues = append(result.Issues, Issue{Severity: Warning, Code: "too_many_images",
+			Message: fmt.Sprintf("Встроенных изображений больше %d; лишние (%d) пропущены.", MaxEmbeddedImages, res.overLimit)})
+	}
 	if res.remote > 0 {
 		result.Issues = append(result.Issues, Issue{Severity: Info, Code: "remote_images_skipped",
 			Message: fmt.Sprintf("Внешние изображения не загружаются (%d): сервер не обращается к адресам из загруженных файлов.", res.remote)})
@@ -251,6 +255,11 @@ func htmlMeta(doc, root *html.Node, fallbackTitle string) cdm.BookMeta {
 	return meta
 }
 
+// MaxEmbeddedImages — сколько картинок из data: становятся ресурсами книги:
+// столько же, сколько записей в ZIP (дополнение §10). Иначе файл в 50 МБ
+// из крошечных картинок дал бы сотни тысяч файлов в хранилище.
+const MaxEmbeddedImages = 2000
+
 // embeddedImageTypes — какие картинки из data: становятся ресурсами.
 var embeddedImageTypes = map[string]string{
 	"image/png": ".png", "image/jpeg": ".jpg", "image/gif": ".gif", "image/webp": ".webp",
@@ -267,6 +276,7 @@ type htmlResources struct {
 	embedded      []Asset
 	embeddedNames map[string]bool
 	remote        int
+	overLimit     int // картинки из data: сверх MaxEmbeddedImages
 }
 
 func (r *htmlResources) resolve(dir, raw string) (string, bool) {
@@ -290,6 +300,10 @@ func (r *htmlResources) resolve(dir, raw string) (string, bool) {
 }
 
 func (r *htmlResources) embed(raw string) string {
+	if len(r.embedded) >= MaxEmbeddedImages {
+		r.overLimit++
+		return ""
+	}
 	header, payload, ok := strings.Cut(raw[len("data:"):], ",")
 	if !ok {
 		return ""

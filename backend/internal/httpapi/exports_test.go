@@ -170,6 +170,17 @@ func TestDownloadFilenameSanitized(t *testing.T) {
 	require.Equal(t, "Книга 1 X Y (ru).txt", decoded)
 }
 
+func TestContentDispositionStrictRFC5987(t *testing.T) {
+	env := newTranslationEnv(t, nil)
+	p := env.translated(t)
+	require.NoError(t, env.db.Model(&models.Book{}).Where("id = ?", p.BookID).Update("title", "a=b@c;d,e'f").Error)
+	job := env.export(t, p, "txt", "translation")
+	env.runExports(t)
+	header := env.c.do(http.MethodGet, "/api/exports/"+job.ID+"/file", nil).Header.Get("Content-Disposition")
+	_, encoded, _ := strings.Cut(header, "filename*=UTF-8''")
+	require.Equal(t, "a%3Db%40c%3Bd%2Ce%27f%20%28ru%29.txt", encoded, "только attr-char RFC 5987 остаются как есть")
+}
+
 func TestDeleteExport(t *testing.T) {
 	env := newTranslationEnv(t, nil)
 	p := env.translated(t)

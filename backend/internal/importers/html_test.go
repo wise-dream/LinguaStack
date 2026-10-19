@@ -2,6 +2,7 @@ package importers_test
 
 import (
 	"encoding/base64"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -196,4 +197,18 @@ func TestPickHTMLByExtension(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, "html", imp.FormatID(), name)
 	}
+}
+
+func TestHTMLEmbeddedImagesCapped(t *testing.T) {
+	// Тысячи крошечных картинок в data: — тысячи файлов в хранилище.
+	var b strings.Builder
+	b.WriteString("<body><p>Текст.</p>")
+	img := `<p><img src="data:image/png;base64,` + base64.StdEncoding.EncodeToString(tinyPNG) + `"></p>`
+	for i := 0; i < importers.MaxEmbeddedImages+5; i++ {
+		b.WriteString(strings.Replace(img, "base64,", "base64,"+strings.Repeat(" ", i), 1))
+	}
+	b.WriteString("</body>")
+	res := loadHTML(t, b.String())
+	require.Len(t, res.Assets, importers.MaxEmbeddedImages)
+	require.NotNil(t, issueWith(res.Issues, "too_many_images"))
 }
