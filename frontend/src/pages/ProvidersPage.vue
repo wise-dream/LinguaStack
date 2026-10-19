@@ -188,9 +188,10 @@ async function remove(c: ProviderConfig) {
       @submit.prevent="create"
     >
       <h2>Новое подключение</h2>
-      <label class="field">
-        <span>Провайдер</span>
+      <div class="field">
+        <label for="config-provider">Провайдер</label>
         <select
+          id="config-provider"
           v-model="form.provider_id"
           name="provider_id"
         >
@@ -198,9 +199,11 @@ async function remove(c: ProviderConfig) {
             v-for="k in kinds"
             :key="k.provider_id"
             :value="k.provider_id"
-          >{{ k.name }}</option>
+          >
+            {{ k.name }}
+          </option>
         </select>
-      </label>
+      </div>
       <label class="field">
         <span>Название</span>
         <input
@@ -334,8 +337,6 @@ h1 {
   display: grid;
   gap: var(--space-4);
   margin-top: var(--space-6);
-  padding-top: var(--space-5);
-  border-top: 1px solid var(--rule);
 }
 
 .new-config h2 {

@@ -67,6 +67,9 @@ export function createSession(api: AuthApi = authApi) {
       return me.value ? true : { path: '/login', query: { next: to.fullPath } }
     })
     onUnauthorized(() => {
+      // «Сессия истекла» — только если она была: 401 от первой проверки
+      // (/api/me без входа) — обычное «не вошёл», его решает страж.
+      if (me.value === null) return
       me.value = null
       known = true
       const current = router.currentRoute.value

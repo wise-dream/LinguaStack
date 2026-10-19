@@ -10,4 +10,4 @@ export const searchBook = (bookId: string, q: string, translationId?: string) =>
 export const getPosition = (bookId: string) => request<Position | null>('GET', `${book(bookId)}/position`)
 
 export const putPosition = (bookId: string, position: Position) =>
-  request<void>('PUT', `${book(bookId)}/position`, position)
+  request<void>('PUT', `${book(bookId)}/position`, position, { keepalive: true })

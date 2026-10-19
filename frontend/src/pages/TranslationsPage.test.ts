@@ -55,7 +55,7 @@ describe('монитор переводов (ТЗ §8.4)', () => {
     expect(row).toContain('37 с замечаниями')
     expect(row).toContain('2 ч 05 мин')
     expect(row).toContain('41 запрос')
-    expect(row).toContain('120 000 / 60 000 токенов')
+    expect(row).toContain('120 000 токенов на входе, 60 000 на выходе')
     expect(w.find('[data-project="done"]').text()).toContain('$0.0123')
     expect(w.find('[data-project="fail"]').text()).toContain('провайдер недоступен')
   })

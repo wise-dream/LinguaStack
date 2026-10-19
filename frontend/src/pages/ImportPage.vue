@@ -85,7 +85,12 @@ async function saveOrder() {
     >
       <span class="drop-title">Перетащите файл сюда или выберите его</span>
       <span class="drop-hint">EPUB, Markdown, TXT или ZIP-архив документации, до 50 МБ</span>
+      <span
+        class="button pick"
+        aria-hidden="true"
+      >Выбрать файл</span>
       <input
+        class="visually-hidden"
         type="file"
         accept=".epub,.md,.markdown,.txt,.zip"
         :disabled="busy"
@@ -227,8 +232,14 @@ h1 {
   color: var(--muted);
 }
 
-.drop input {
+.pick {
+  justify-self: start;
   margin-top: var(--space-3);
+}
+
+.drop:focus-within {
+  outline: 2px solid var(--ink-original);
+  outline-offset: 2px;
 }
 
 .progress {

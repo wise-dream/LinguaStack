@@ -39,6 +39,13 @@ async function logout() {
   margin-right: var(--space-3);
 }
 
+/* На телефоне адрес почты съедает строку шапки — остаётся «Выйти». */
+@media (max-width: 40rem) {
+  .who {
+    display: none;
+  }
+}
+
 .link-button {
   background: none;
   border: none;

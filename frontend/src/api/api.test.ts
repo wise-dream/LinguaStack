@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { assetUrl, getChapter } from './books'
-import { searchBook } from './reader'
+import { putPosition, searchBook } from './reader'
 import { listSegments, listTranslations } from './translations'
 
 function capture() {
@@ -41,5 +41,15 @@ describe('адреса API', () => {
     expect(lastURL()).toBe('/api/books/b1/chapters/3')
     // Сегменты пути кодируются по одному: косая черта остаётся разделителем.
     expect(assetUrl('b1', 'OEBPS/images/обложка 1.jpg')).toBe('/api/books/b1/assets/OEBPS/images/%D0%BE%D0%B1%D0%BB%D0%BE%D0%B6%D0%BA%D0%B0%201.jpg')
+  })
+
+  it('позиция чтения уходит с keepalive: её сохраняют и при закрытии страницы', async () => {
+    const fetchMock = vi.fn(async () => new Response(null, { status: 204 }))
+    vi.stubGlobal('fetch', fetchMock)
+    await putPosition('b1', { chapter_index: 1, node_id: 'n', translation_id: null, mode: 'parallel' })
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit]
+    expect(url).toBe('/api/books/b1/position')
+    expect(init.method).toBe('PUT')
+    expect(init.keepalive).toBe(true)
   })
 })

@@ -13,7 +13,7 @@ afterEach(() => vi.unstubAllGlobals())
 function segment(overrides: Partial<Segment> = {}): Segment {
   return {
     id: 's1', node_id: 'ch0001/b0002', chapter_index: 1, ordinal: 2, block_type: 'paragraph',
-    source_text: 'Alice was beginning to get very tired.', translated_text: 'Алиса начала уставать.',
+    source_text: 'Alice was beginning to get `very` tired.', translated_text: 'Алиса начала уставать.',
     status: 'completed', severity: 'ok', findings: [], attempts: 1, updated_at: '2026-10-17T10:00:00Z',
     ...overrides,
   }
@@ -90,8 +90,11 @@ describe('страница перевода', () => {
     })
     const row = w.find('[data-segment="s1"]')
     expect(row.text()).toContain('Alice was beginning')
+    expect(row.find('.original code').text()).toBe('very')
     expect(row.text()).toContain('Алиса начала уставать.')
     expect(row.text()).toContain('Разметка «*» изменилась')
+    // Текст фрагмента — через renderInline, как в читалке.
+    expect(row.find('.original').html()).not.toContain('`')
     expect(row.find('a[href="/read/b1?t=p1&ch=1&n=ch0001/b0002"]').exists()).toBe(true)
     await row.find('button.retry').trigger('click')
     await flushPromises()
@@ -109,5 +112,24 @@ describe('страница перевода', () => {
     expect(calls.filter((c) => c.path.endsWith('/segments')).at(-1)?.url).toContain('offset=50')
     expect(w.findAll('[data-segment]')).toHaveLength(51)
     expect(w.find('button.more').exists()).toBe(false)
+  })
+
+  it('фрагменты перечитываются, когда перевод начинается и заканчивается', async () => {
+    let call = 0
+    const { streams, calls } = await mountDetail({
+      'GET /api/translations/p1': { body: project({ status: 'queued', segments_total: 0, segments_done: 0 }) },
+      'GET /api/translations/p1/segments': () => ({ body: call++ === 0 ? [] : [segment()] }),
+    })
+    const segmentLoads = () => calls.filter((c) => c.path.endsWith('/segments')).length
+    expect(segmentLoads()).toBe(1)
+    streams[0]?.emit({ ...project({ status: 'running', segments_done: 0 }) })
+    await flushPromises()
+    expect(segmentLoads()).toBe(2)
+    streams[0]?.emit({ ...project({ status: 'running', segments_done: 3 }) })
+    await flushPromises()
+    expect(segmentLoads()).toBe(2) // прогресс внутри перевода список не дёргает
+    streams[0]?.emit({ ...project({ status: 'completed', segments_done: 873 }) })
+    await flushPromises()
+    expect(segmentLoads()).toBe(3)
   })
 })

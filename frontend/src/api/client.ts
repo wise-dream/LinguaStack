@@ -48,12 +48,16 @@ function safeJSON(text: string): unknown {
   }
 }
 
-/** Запрос к API своего origin с cookie сессии. */
-export async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
+/**
+ * Запрос к API своего origin с cookie сессии. keepalive — запрос
+ * доживёт до конца, даже если страницу закрывают (позиция чтения).
+ */
+export async function request<T>(method: string, path: string, body?: unknown, opts: { keepalive?: boolean } = {}): Promise<T> {
   const isForm = body instanceof FormData
   const init: RequestInit = {
     method,
     credentials: 'same-origin',
+    ...(opts.keepalive ? { keepalive: true } : {}),
     headers: body === undefined || isForm ? {} : { 'Content-Type': 'application/json' },
     body: body === undefined ? undefined : isForm ? body : JSON.stringify(body),
   }

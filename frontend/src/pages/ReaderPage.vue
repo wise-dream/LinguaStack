@@ -10,7 +10,7 @@ import { errorMessage } from '../api/client'
 import { getPosition, putPosition } from '../api/reader'
 import { listTranslations } from '../api/translations'
 import type { Book, Chapter, Project, ReadMode, SearchResult, Segment, TocEntry } from '../api/types'
-import { languageName } from '../lib/format'
+import { languageName, sourceLanguageName } from '../lib/format'
 import { fetchChapterSegments, usePositionSaver } from '../lib/position'
 import ReaderColumns from '../reader/ReaderColumns.vue'
 import ReaderSearch from '../reader/ReaderSearch.vue'
@@ -55,7 +55,7 @@ const prev = computed(() => flatToc.value[position.value - 1])
 const next = computed(() => (position.value >= 0 ? flatToc.value[position.value + 1] : undefined))
 const chapterTitle = (index: number) => flatToc.value.find((c) => c.index === index)?.title ?? `Глава ${index + 1}`
 
-const translationLabel = (p: Project) => `${languageName(p.source_lang)} → ${languageName(p.target_lang)}`
+const translationLabel = (p: Project) => `${sourceLanguageName(p.source_lang)} → ${languageName(p.target_lang)}`
 
 const saver = usePositionSaver((p) => putPosition(bookId, p))
 
@@ -194,21 +194,29 @@ onBeforeUnmount(() => {
       >
         {{ book.title }}
       </RouterLink>
-      <label class="translation-pick">
-        <span class="visually-hidden">Языковая версия</span>
+      <div class="translation-pick">
+        <label
+          for="reader-translation"
+          class="visually-hidden"
+        >Языковая версия</label>
         <select
+          id="reader-translation"
           name="translation"
           :value="translationId"
           @change="setTranslation(($event.target as HTMLSelectElement).value)"
         >
-          <option value="">Без перевода</option>
+          <option value="">
+            Без перевода
+          </option>
           <option
             v-for="p in projects"
             :key="p.id"
             :value="p.id"
-          >{{ translationLabel(p) }}</option>
+          >
+            {{ translationLabel(p) }}
+          </option>
         </select>
-      </label>
+      </div>
       <div
         class="modes"
         role="group"
@@ -471,6 +479,10 @@ onBeforeUnmount(() => {
 @media (max-width: 64rem) {
   .body {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .toolbar {
+    position: static;
   }
 
   .toc-toggle {

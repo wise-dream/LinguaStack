@@ -18,6 +18,16 @@ export function languageName(code: string): string {
   }
 }
 
+/** Язык оригинала в тексте: при автоопределении — «исходный язык». */
+export function sourceLanguageName(code: string): string {
+  return code === 'auto' || code === '' ? 'исходный язык' : languageName(code)
+}
+
+/** Первая буква — заглавная: для пунктов списков («Английский»). */
+export function capitalize(s: string): string {
+  return s ? s[0]!.toUpperCase() + s.slice(1) : s
+}
+
 export function formatDate(iso: string): string {
   return dates.format(new Date(iso))
 }

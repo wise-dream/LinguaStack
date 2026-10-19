@@ -61,6 +61,13 @@ describe('настройка перевода', () => {
     expect(optionValues(w, 'source_lang')).toEqual(['auto', 'en', 'ru'])
   })
 
+  it('стили — от нейтрального, названия языков в списках с заглавной', async () => {
+    const { w } = await mountSetup()
+    expect(w.findAll('input[name=style]').map((i) => i.attributes('value'))).toEqual(['neutral', 'literary', 'technical', 'simplified'])
+    expect(w.findAll('select[name=target_lang] option').map((o) => o.text())).toContain('Английский')
+    expect(w.find('select[name=source_lang] option').text()).toBe('Определить автоматически')
+  })
+
   it('внешний сервис: предупреждение до запуска (ТЗ §6.4)', async () => {
     const { w } = await mountSetup()
     expect(w.find('.egress').exists()).toBe(false)

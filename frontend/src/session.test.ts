@@ -66,6 +66,34 @@ describe('сессия', () => {
     expect(router.currentRoute.value.query.next).toBe('/books/7')
   })
 
+  it('проверка сессии без входа не считается истёкшей сессией', async () => {
+    // Сквозной тест: /register уводил на /login — 401 от /api/me при
+    // первой проверке срабатывал как «сессия истекла».
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('{"error":"Требуется вход"}', {
+      status: 401, headers: { 'Content-Type': 'application/json' },
+    })))
+    const session = createSession({
+      me: () => request<User>('GET', '/api/me'),
+      login: async () => user,
+      register: async () => user,
+      logout: async () => undefined,
+    })
+    const page = { template: '<div />' }
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [
+        { path: '/', component: page, meta: { title: 'Библиотека' } },
+        { path: '/login', component: page, meta: { title: 'Вход', public: true } },
+        { path: '/register', component: page, meta: { title: 'Регистрация', public: true } },
+      ],
+    })
+    session.install(router)
+    await router.push('/register')
+    await flushPromises()
+    vi.unstubAllGlobals()
+    expect(router.currentRoute.value.path).toBe('/register')
+  })
+
   it('регистрация сразу выполняет вход: API регистрации сессию не выдаёт', async () => {
     const api = fakeApi(false)
     const session = createSession(api)

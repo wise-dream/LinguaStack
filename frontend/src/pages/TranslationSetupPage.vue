@@ -12,7 +12,7 @@ import { createTranslation, getTranslationOptions } from '../api/translations'
 import type { Book, Determinism, ModelCaps, ProviderConfig, TranslationOptions } from '../api/types'
 import GlossaryEditor from '../components/GlossaryEditor.vue'
 import { glossaryFromRows, type GlossaryRow } from '../components/glossary'
-import { languageName } from '../lib/format'
+import { capitalize, languageName } from '../lib/format'
 
 const route = useRoute()
 const router = useRouter()
@@ -49,6 +49,16 @@ const determinismText: Record<Determinism, { label: string; hint: string }> = {
   balanced: { label: 'Сбалансированно', hint: 'Немного свободы в формулировках.' },
   creative: { label: 'Свободно', hint: 'Больше вариативности, текст живее.' },
 }
+
+// Нейтральный — по умолчанию и первым; дальше от близкого к тексту к свободному.
+const styleOrder = ['neutral', 'literary', 'technical', 'simplified']
+const styles = computed(() =>
+  [...(options.value?.styles ?? [])].sort((a, b) => {
+    const ia = styleOrder.indexOf(a)
+    const ib = styleOrder.indexOf(b)
+    return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib)
+  }),
+)
 
 const config = computed(() => configs.value.find((c) => c.id === form.provider_config_id))
 const model = computed(() => models.value.find((m) => m.model_id === form.model_id))
@@ -162,9 +172,10 @@ async function submit() {
         @submit.prevent="submit"
       >
         <div class="pair">
-          <label class="field">
-            <span>Подключение</span>
+          <div class="field">
+            <label for="setup-provider_config_id">Подключение</label>
             <select
+              id="setup-provider_config_id"
               v-model="form.provider_config_id"
               name="provider_config_id"
             >
@@ -172,12 +183,15 @@ async function submit() {
                 v-for="c in configs"
                 :key="c.id"
                 :value="c.id"
-              >{{ c.name }}</option>
+              >
+                {{ c.name }}
+              </option>
             </select>
-          </label>
-          <label class="field">
-            <span>Модель</span>
+          </div>
+          <div class="field">
+            <label for="setup-model_id">Модель</label>
             <select
+              id="setup-model_id"
               v-model="form.model_id"
               name="model_id"
               :disabled="!models.length"
@@ -186,9 +200,11 @@ async function submit() {
                 v-for="m in models"
                 :key="m.model_id"
                 :value="m.model_id"
-              >{{ m.display_name || m.model_id }}</option>
+              >
+                {{ m.display_name || m.model_id }}
+              </option>
             </select>
-          </label>
+          </div>
         </div>
         <p
           v-if="modelsError"
@@ -217,23 +233,29 @@ async function submit() {
         </div>
 
         <div class="pair">
-          <label class="field">
-            <span>Язык оригинала</span>
+          <div class="field">
+            <label for="setup-source_lang">Язык оригинала</label>
             <select
+              id="setup-source_lang"
               v-model="form.source_lang"
               name="source_lang"
             >
-              <option value="auto">{{ languageName('auto') }}</option>
+              <option value="auto">
+                {{ capitalize(languageName('auto')) }}
+              </option>
               <option
                 v-for="code in languages"
                 :key="code"
                 :value="code"
-              >{{ languageName(code) }}</option>
+              >
+                {{ capitalize(languageName(code)) }}
+              </option>
             </select>
-          </label>
-          <label class="field">
-            <span>Язык перевода</span>
+          </div>
+          <div class="field">
+            <label for="setup-target_lang">Язык перевода</label>
             <select
+              id="setup-target_lang"
               v-model="form.target_lang"
               name="target_lang"
             >
@@ -241,15 +263,17 @@ async function submit() {
                 v-for="code in languages"
                 :key="code"
                 :value="code"
-              >{{ languageName(code) }}</option>
+              >
+                {{ capitalize(languageName(code)) }}
+              </option>
             </select>
-          </label>
+          </div>
         </div>
 
-        <fieldset class="choice">
+        <fieldset class="choice styles">
           <legend>Стиль</legend>
           <label
-            v-for="s in options.styles"
+            v-for="s in styles"
             :key="s"
           >
             <input
@@ -349,8 +373,12 @@ form {
   margin: 0;
   padding: 0;
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: var(--space-2) var(--space-4);
+}
+
+.choice.styles {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .choice legend {
@@ -387,7 +415,9 @@ form > .button {
 }
 
 @media (max-width: 40rem) {
-  .pair {
+  .pair,
+  .choice,
+  .choice.styles {
     grid-template-columns: 1fr;
   }
 }

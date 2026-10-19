@@ -39,6 +39,13 @@ const tag = computed(() => {
 })
 
 const editing = ref(false)
+// На телефоне наведения нет: действия появляются по касанию строки.
+const revealed = ref(false)
+
+function toggleReveal(e: MouseEvent) {
+  if ((e.target as HTMLElement).closest('a, button, textarea, form')) return
+  revealed.value = !revealed.value
+}
 const draft = ref('')
 const error = ref('')
 const busy = ref(false)
@@ -85,8 +92,9 @@ async function retry() {
 <template>
   <div
     class="row"
-    :class="[`mode-${mode}`, block.type, { span: isSpan, found }]"
+    :class="[`mode-${mode}`, block.type, { span: isSpan, found, revealed }]"
     :data-node="block.node_id"
+    @click="toggleReveal"
   >
     <template v-if="isSpan">
       <pre v-if="block.type === 'code_block' || block.type === 'raw_html'"><code>{{ block.text }}</code></pre>
@@ -295,14 +303,9 @@ blockquote.translation {
 }
 
 .row:hover .actions,
-.row:focus-within .actions {
+.row:focus-within .actions,
+.row.revealed .actions {
   opacity: 1;
-}
-
-@media (hover: none) {
-  .actions {
-    opacity: 1;
-  }
 }
 
 .link {
@@ -382,8 +385,20 @@ hr {
     row-gap: var(--space-2);
   }
 
+  /* Перевод — ближе к своему оригиналу, чем к соседней паре. */
+  .row {
+    row-gap: var(--space-1);
+    padding-block: var(--space-3);
+  }
+
+  /* Скрытые действия не должны занимать строку под абзацем. */
   .actions {
-    opacity: 1;
+    display: none;
+  }
+
+  .row.revealed .actions,
+  .row:focus-within .actions {
+    display: flex;
   }
 }
 </style>

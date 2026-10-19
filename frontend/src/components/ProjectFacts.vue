@@ -32,7 +32,8 @@ const elapsed = computed(() => {
       {{ formatNumber(project.provider_calls) }} {{ plural(project.provider_calls, ['запрос', 'запроса', 'запросов']) }}
     </span>
     <span v-if="project.input_tokens || project.output_tokens">
-      {{ formatNumber(project.input_tokens) }} / {{ formatNumber(project.output_tokens) }} токенов
+      {{ formatNumber(project.input_tokens) }} {{ plural(project.input_tokens, ['токен', 'токена', 'токенов']) }} на входе,
+      {{ formatNumber(project.output_tokens) }} на выходе
     </span>
     <span v-if="project.cost_usd > 0">{{ formatCost(project.cost_usd) }}</span>
   </p>

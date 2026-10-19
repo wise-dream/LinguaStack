@@ -20,6 +20,7 @@ import LangPair from '../components/LangPair.vue'
 import ProgressBar from '../components/ProgressBar.vue'
 import ProjectFacts from '../components/ProjectFacts.vue'
 import StatusMark from '../components/StatusMark.vue'
+import { renderInline } from '../lib/inline'
 import { useNow } from '../lib/now'
 import { isTerminal, useProgress } from '../lib/progress'
 
@@ -47,7 +48,12 @@ const filters: { id: Filter; label: string }[] = [
 ]
 
 watch(progress.event, (e) => {
-  if (e && project.value) project.value = { ...project.value, ...e }
+  if (!e || !project.value) return
+  const statusChanged = e.status !== project.value.status
+  project.value = { ...project.value, ...e }
+  // Фрагменты появляются при старте и меняются к концу — список
+  // перечитывается при смене состояния, а не на каждом шаге прогресса.
+  if (statusChanged) void loadSegments(true)
 })
 
 const canPause = computed(() => project.value?.status === 'running' || project.value?.status === 'queued')
@@ -226,15 +232,17 @@ const readerLink = (s: Segment) => ({
             :data-segment="s.id"
             :class="s.severity"
           >
-            <p class="original">
-              {{ s.source_text }}
-            </p>
+            <!-- eslint-disable vue/no-v-html -- renderInline сначала экранирует текст книги -->
+            <p
+              class="original"
+              v-html="renderInline(s.source_text)"
+            />
             <p
               v-if="s.translated_text !== null"
               class="translation"
-            >
-              {{ s.translated_text }}
-            </p>
+              v-html="renderInline(s.translated_text)"
+            />
+            <!-- eslint-enable vue/no-v-html -->
             <p
               v-else
               class="pending"
@@ -261,7 +269,7 @@ const readerLink = (s: Segment) => ({
               </RouterLink>
               <button
                 type="button"
-                class="button retry"
+                class="link retry"
                 @click="retry(s)"
               >
                 Перевести заново
@@ -392,6 +400,7 @@ h2 {
   margin: 0;
   font-family: var(--font-book);
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .original {
@@ -424,6 +433,25 @@ h2 {
   flex-wrap: wrap;
   align-items: center;
   gap: var(--space-4);
+}
+
+.link {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--muted);
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
+  cursor: pointer;
+}
+
+.link:hover,
+.segment-actions a:hover {
+  color: var(--ink-original);
+}
+
+.segment-actions a {
+  color: var(--muted);
 }
 
 .more {

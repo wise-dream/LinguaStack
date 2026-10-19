@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { formatBytes, formatDate, formatDuration, formatNumber, languageName, plural, statusLabel } from './format'
+import { capitalize, formatBytes, formatDate, formatDuration, formatNumber, languageName, plural, sourceLanguageName, statusLabel } from './format'
 
 describe('форматирование', () => {
   it('названия языков по-русски', () => {
@@ -36,5 +36,12 @@ describe('форматирование', () => {
     expect([1, 2, 5, 11, 12, 21, 22, 25, 111].map((n) => plural(n, forms))).toEqual([
       'глава', 'главы', 'глав', 'глав', 'глав', 'глава', 'главы', 'глав', 'глав',
     ])
+  })
+
+  it('язык оригинала при автоопределении — «исходный язык», в списках — с заглавной', () => {
+    expect(sourceLanguageName('auto')).toBe('исходный язык')
+    expect(sourceLanguageName('en')).toBe('английский')
+    expect(capitalize('английский')).toBe('Английский')
+    expect(capitalize('')).toBe('')
   })
 })

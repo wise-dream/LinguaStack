@@ -15,7 +15,7 @@ defineProps<{ mode: ReadMode; source: string; target?: string }>()
     <span
       v-if="mode !== 'translation'"
       class="original"
-    >Оригинал, {{ languageName(source) }}</span>
+    >{{ source && source !== 'auto' ? `Оригинал, ${languageName(source)}` : 'Оригинал' }}</span>
     <span
       v-if="mode !== 'original' && target"
       class="translation"

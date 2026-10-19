@@ -133,3 +133,7 @@ textarea:focus-visible {
   border-left: 3px solid var(--proof);
   padding-left: var(--space-3);
 }
+
+.field > label {
+  font-weight: 500;
+}
