@@ -66,3 +66,70 @@ textarea {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* Поля и кнопки — общие для всех форм. */
+.field {
+  display: grid;
+  gap: var(--space-1);
+}
+
+.field > span {
+  font-weight: 500;
+}
+
+.field small {
+  color: var(--muted);
+}
+
+input:not([type='checkbox'], [type='radio'], [type='file']),
+select,
+textarea {
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  background: var(--paper-raised);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+}
+
+input:not([type='checkbox'], [type='radio'], [type='file']):focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  border-color: var(--ink-original);
+}
+
+.button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-4);
+  border: 1px solid var(--ink-original);
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--ink-original);
+  font-weight: 500;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.button.primary {
+  background: var(--ink-original);
+  color: var(--paper-raised);
+}
+
+.button.danger {
+  border-color: var(--proof);
+  color: var(--proof);
+}
+
+.button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.form-error {
+  margin: 0;
+  color: var(--proof);
+  border-left: 3px solid var(--proof);
+  padding-left: var(--space-3);
+}

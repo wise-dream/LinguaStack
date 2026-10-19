@@ -8,5 +8,8 @@ import { createApp } from 'vue'
 
 import App from './App.vue'
 import { createAppRouter } from './router'
+import { appSession } from './session'
 
-createApp(App).use(createAppRouter()).mount('#app')
+const router = createAppRouter()
+appSession.install(router)
+createApp(App).use(router).mount('#app')

@@ -1,6 +1,8 @@
 import { createRouter, createWebHistory, type RouterHistory } from 'vue-router'
 
+import LoginPage from './pages/LoginPage.vue'
 import PendingPage from './pages/PendingPage.vue'
+import RegisterPage from './pages/RegisterPage.vue'
 
 /** Раздел навигации, к которому относится страница. */
 export type Section = 'library' | 'translations' | 'providers'
@@ -18,8 +20,8 @@ export function createAppRouter(history: RouterHistory = createWebHistory()) {
   return createRouter({
     history,
     routes: [
-      { path: '/login', component: PendingPage, meta: { title: 'Вход', public: true } },
-      { path: '/register', component: PendingPage, meta: { title: 'Регистрация', public: true } },
+      { path: '/login', component: LoginPage, meta: { title: 'Вход', public: true } },
+      { path: '/register', component: RegisterPage, meta: { title: 'Регистрация', public: true } },
       { path: '/', component: PendingPage, meta: { title: 'Библиотека', section: 'library' } },
       { path: '/import', component: PendingPage, meta: { title: 'Загрузка книги', section: 'library' } },
       { path: '/books/:id', component: PendingPage, meta: { title: 'Книга', section: 'library' } },
