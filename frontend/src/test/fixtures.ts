@@ -70,3 +70,14 @@ export function providerConfig(overrides: Partial<ProviderConfig> = {}): Provide
     ...overrides,
   }
 }
+
+export const options = {
+  languages: [
+    { code: 'de', name: 'German' },
+    { code: 'en', name: 'English' },
+    { code: 'fr', name: 'French' },
+    { code: 'ru', name: 'Russian' },
+  ],
+  styles: ['literary', 'neutral', 'simplified', 'technical'],
+  determinism: ['strict', 'balanced', 'creative'],
+}

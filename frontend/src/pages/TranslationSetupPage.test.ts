@@ -1,0 +1,123 @@
+import { flushPromises, mount } from '@vue/test-utils'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { createMemoryHistory, createRouter } from 'vue-router'
+
+import { glossaryFromRows } from '../components/glossary'
+import { stubApi } from '../test/fakeApi'
+import { book, options, project, providerConfig } from '../test/fixtures'
+import TranslationSetupPage from './TranslationSetupPage.vue'
+
+afterEach(() => vi.unstubAllGlobals())
+
+const ollama = providerConfig()
+const claude = providerConfig({ id: 'c2', provider_id: 'anthropic', name: 'Claude', sends_data_externally: true, allow_external: true })
+const claudeLocked = providerConfig({ id: 'c3', provider_id: 'anthropic', name: 'Claude без разрешения', sends_data_externally: true, allow_external: false })
+
+async function mountSetup(routes: Parameters<typeof stubApi>[0] = {}, bookOverrides = {}) {
+  const calls = stubApi({
+    'GET /api/books/b1': { body: book(bookOverrides) },
+    'GET /api/translation-options': { body: options },
+    'GET /api/provider-configs': { body: [ollama, claude, claudeLocked] },
+    'GET /api/provider-configs/c1/models': { body: [{ model_id: 'qwen3:8b', supports_temperature: true, supports_system_prompt: true }] },
+    'GET /api/provider-configs/c2/models': {
+      body: [{ model_id: 'claude-haiku-5-5', supports_temperature: false, supports_system_prompt: true, supported_languages: ['en', 'ru'] }],
+    },
+    'GET /api/provider-configs/c3/models': { body: [{ model_id: 'claude-haiku-5-5', supports_temperature: false, supports_system_prompt: true }] },
+    ...routes,
+  })
+  const router = createRouter({
+    history: createMemoryHistory(),
+    routes: [
+      { path: '/books/:id/translate', component: TranslationSetupPage, meta: { title: '' } },
+      { path: '/:p(.*)*', component: { template: '<div />' }, meta: { title: '' } },
+    ],
+  })
+  await router.push('/books/b1/translate')
+  const w = mount(TranslationSetupPage, { global: { plugins: [router] } })
+  await flushPromises()
+  return { w, calls, router }
+}
+
+const optionValues = (w: Awaited<ReturnType<typeof mountSetup>>['w'], name: string) =>
+  w.findAll(`select[name=${name}] option`).map((o) => o.attributes('value'))
+
+describe('настройка перевода', () => {
+  it('язык оригинала по умолчанию — язык книги, иначе автоопределение', async () => {
+    const { w } = await mountSetup()
+    expect((w.find('select[name=source_lang]').element as HTMLSelectElement).value).toBe('en')
+    expect((w.find('select[name=target_lang]').element as HTMLSelectElement).value).toBe('ru')
+
+    const other = await mountSetup({}, { language: undefined })
+    expect((other.w.find('select[name=source_lang]').element as HTMLSelectElement).value).toBe('auto')
+  })
+
+  it('языки ограничены возможностями модели (ТЗ §5.2)', async () => {
+    const { w } = await mountSetup()
+    // По-русски по алфавиту: английский, немецкий, русский, французский.
+    expect(optionValues(w, 'target_lang')).toEqual(['en', 'de', 'ru', 'fr'])
+    await w.find('select[name=provider_config_id]').setValue('c2')
+    await flushPromises()
+    expect(optionValues(w, 'target_lang')).toEqual(['en', 'ru'])
+    expect(optionValues(w, 'source_lang')).toEqual(['auto', 'en', 'ru'])
+  })
+
+  it('внешний сервис: предупреждение до запуска (ТЗ §6.4)', async () => {
+    const { w } = await mountSetup()
+    expect(w.find('.egress').exists()).toBe(false)
+    await w.find('select[name=provider_config_id]').setValue('c2')
+    await flushPromises()
+    expect(w.find('.egress').text()).toContain('Текст книги будет отправлен в «Claude»')
+    expect(w.find('button[type=submit]').attributes('disabled')).toBeUndefined()
+  })
+
+  it('без разрешения на отправку — объяснение, где его дать, и запуск недоступен', async () => {
+    const { w } = await mountSetup()
+    await w.find('select[name=provider_config_id]').setValue('c3')
+    await flushPromises()
+    const note = w.find('.egress.blocked')
+    expect(note.text()).toContain('не разрешает отправку текста')
+    expect(note.find('a[href="/settings/providers"]').exists()).toBe(true)
+    expect(w.find('button[type=submit]').attributes('disabled')).toBeDefined()
+  })
+
+  it('запуск отправляет выбранное и ведёт в монитор', async () => {
+    const { w, calls, router } = await mountSetup({
+      'POST /api/books/b1/translations': { status: 201, body: project({ id: 'p9', status: 'queued' }) },
+    })
+    await w.find('input[value=technical]').setValue(true)
+    await w.find('input[value=balanced]').setValue(true)
+    await w.find('form').trigger('submit')
+    await flushPromises()
+    expect(calls.find((c) => c.method === 'POST')?.body).toEqual({
+      source_lang: 'en', target_lang: 'ru', provider_config_id: 'c1', model_id: 'qwen3:8b',
+      style: 'technical', determinism: 'balanced', glossary: {},
+    })
+    expect(router.currentRoute.value.path).toBe('/translations/p9')
+  })
+
+  it('ошибка сервера показана у формы', async () => {
+    const { w } = await mountSetup({
+      'POST /api/books/b1/translations': { status: 429, body: { error: 'Не больше 20 активных переводов одновременно' } },
+    })
+    await w.find('form').trigger('submit')
+    await flushPromises()
+    expect(w.find('form [role=alert]').text()).toBe('Не больше 20 активных переводов одновременно')
+  })
+
+  it('без подключений — ведёт в настройки моделей', async () => {
+    const { w } = await mountSetup({ 'GET /api/provider-configs': { body: [] } })
+    expect(w.find('a[href="/settings/providers"]').exists()).toBe(true)
+    expect(w.find('button[type=submit]').exists()).toBe(false)
+  })
+})
+
+describe('глоссарий', () => {
+  it('пустые строки отбрасываются, пробелы обрезаются', () => {
+    expect(glossaryFromRows([
+      { source: ' lease ', target: ' аренда ' },
+      { source: '', target: 'пусто' },
+      { source: 'worker', target: '   ' },
+      { source: 'queue', target: 'очередь' },
+    ])).toEqual({ lease: 'аренда', queue: 'очередь' })
+  })
+})

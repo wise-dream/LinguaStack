@@ -1,11 +1,13 @@
 import { createRouter, createWebHistory, type RouterHistory } from 'vue-router'
 
+import BookPage from './pages/BookPage.vue'
 import ImportPage from './pages/ImportPage.vue'
 import LibraryPage from './pages/LibraryPage.vue'
 import LoginPage from './pages/LoginPage.vue'
 import PendingPage from './pages/PendingPage.vue'
 import ProvidersPage from './pages/ProvidersPage.vue'
 import RegisterPage from './pages/RegisterPage.vue'
+import TranslationSetupPage from './pages/TranslationSetupPage.vue'
 
 /** Раздел навигации, к которому относится страница. */
 export type Section = 'library' | 'translations' | 'providers'
@@ -27,8 +29,8 @@ export function createAppRouter(history: RouterHistory = createWebHistory()) {
       { path: '/register', component: RegisterPage, meta: { title: 'Регистрация', public: true } },
       { path: '/', component: LibraryPage, meta: { title: 'Библиотека', section: 'library' } },
       { path: '/import', component: ImportPage, meta: { title: 'Загрузка книги', section: 'library' } },
-      { path: '/books/:id', component: PendingPage, meta: { title: 'Книга', section: 'library' } },
-      { path: '/books/:id/translate', component: PendingPage, meta: { title: 'Новый перевод', section: 'library' } },
+      { path: '/books/:id', component: BookPage, meta: { title: 'Книга', section: 'library' } },
+      { path: '/books/:id/translate', component: TranslationSetupPage, meta: { title: 'Новый перевод', section: 'library' } },
       { path: '/translations', component: PendingPage, meta: { title: 'Переводы', section: 'translations' } },
       { path: '/translations/:id', component: PendingPage, meta: { title: 'Перевод', section: 'translations' } },
       { path: '/read/:bookId', component: PendingPage, meta: { title: 'Чтение', section: 'library' } },
