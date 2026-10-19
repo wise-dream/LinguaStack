@@ -180,6 +180,10 @@ describe('читалка (ТЗ §8.3)', () => {
     expect(router.currentRoute.value.query).toMatchObject({ ch: '1', t: 'p1' })
     expect(w.find('button[data-mode="translation"]').attributes('aria-pressed')).toBe('true')
     expect(w.find('[data-node="ch0001/b0004"]').exists()).toBe(true)
+    // Возврат к месту чтения — прокрутка, а не подсветка находки.
+    expect(router.currentRoute.value.query.n).toBeUndefined()
+    expect(w.find('[data-node="ch0001/b0004"]').classes()).not.toContain('found')
+    expect(Element.prototype.scrollIntoView).toHaveBeenCalled()
   })
 
   it('оглавление переключает главы', async () => {

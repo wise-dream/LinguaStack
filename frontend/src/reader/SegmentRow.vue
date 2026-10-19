@@ -391,14 +391,26 @@ hr {
     padding-block: var(--space-3);
   }
 
-  /* Скрытые действия не должны занимать строку под абзацем. */
+  /* Скрытые действия не занимают строку под абзацем, но остаются
+     доступны с клавиатуры: при фокусе строка их показывает. */
   .actions {
-    display: none;
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+    opacity: 1;
   }
 
   .row.revealed .actions,
   .row:focus-within .actions {
-    display: flex;
+    position: static;
+    width: auto;
+    height: auto;
+    overflow: visible;
+    clip: auto;
+    white-space: normal;
   }
 }
 </style>

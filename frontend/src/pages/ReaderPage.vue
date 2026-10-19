@@ -58,6 +58,9 @@ const chapterTitle = (index: number) => flatToc.value.find((c) => c.index === in
 const translationLabel = (p: Project) => `${sourceLanguageName(p.source_lang)} → ${languageName(p.target_lang)}`
 
 const saver = usePositionSaver((p) => putPosition(bookId, p))
+// Место, где читатель остановился: к нему прокручиваем без подсветки —
+// подсветка (n в адресе) только для явных переходов, например из поиска.
+let restoreNode = ''
 
 function remember(nodeId: string) {
   if (chapterIndex.value === null) return
@@ -86,9 +89,13 @@ async function loadChapter() {
   await nextTick()
   observeRows()
   const target = typeof route.query.n === 'string' ? route.query.n : ''
+  const restore = restoreNode
+  restoreNode = ''
   if (target) {
     found.value = target
     document.querySelector(`[data-node="${CSS.escape(target)}"]`)?.scrollIntoView({ block: 'start' })
+  } else if (restore) {
+    document.querySelector(`[data-node="${CSS.escape(restore)}"]`)?.scrollIntoView({ block: 'start' })
   } else {
     window.scrollTo?.({ top: 0 })
   }
@@ -106,7 +113,8 @@ onMounted(async () => {
     if (chapterIndex.value === null) {
       const ch = saved?.chapter_index ?? flatToc.value[0]?.index ?? 0
       const tr = translationId.value || saved?.translation_id || ''
-      await router.replace({ query: { ...route.query, ch: String(ch), ...(tr ? { t: tr } : {}), ...(saved?.node_id ? { n: saved.node_id } : {}) } })
+      restoreNode = saved?.chapter_index === ch ? saved.node_id : ''
+      await router.replace({ query: { ...route.query, ch: String(ch), ...(tr ? { t: tr } : {}) } })
       return // загрузку главы запустит watch
     }
     await loadChapter()

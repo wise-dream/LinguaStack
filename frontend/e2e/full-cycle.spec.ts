@@ -78,6 +78,13 @@ test('импорт → перевод → чтение', async ({ page }, info) 
   await shot(page, 'reader')
 
   // Правка фрагмента: Ctrl+Enter сохраняет.
+  // Действия фрагмента доступны с клавиатуры и на узком экране (масштаб
+  // 400% на компьютере даёт тот же макет).
+  const edit = alice.getByRole('button', { name: 'Править' })
+  await edit.focus()
+  await expect(edit).toBeFocused()
+  await expect(edit).toBeVisible()
+  await edit.blur()
   // Действия фрагмента появляются по касанию строки (на телефоне нет наведения).
   await alice.locator('.original').click()
   await alice.getByRole('button', { name: 'Править' }).click()
