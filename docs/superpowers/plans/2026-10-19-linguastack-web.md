@@ -81,6 +81,37 @@ typescript-eslint 8.71.1; шрифты @fontsource-variable/literata 5.3.0 и
 
 ---
 
+> **Статус: ✅ завершён** (задачи 1–12). Отклонения от плана и находки:
+>
+> - **Сквозной сценарий** (Playwright, настоящие api и worker с провайдером
+>   fake, 1440 и 390 px) нашёл то, что юнит-тесты пропускали: первая проверка
+>   сессии (`GET /api/me` → 401) срабатывала как «сессия истекла» и уводила
+>   с `/register` на `/login` — регистрация была недоступна; доступное имя
+>   `<select>`, обёрнутого в `<label>`, включало выбранный вариант
+>   («Подключение Тестовая модель») — подписи привязаны через `for`/`id`.
+> - **Визуальная вычитка** по снимкам: «определить автоматически → русский»
+>   при автоопределении языка — теперь «исходный язык → русский»; список
+>   фрагментов не обновлялся после старта перевода — перечитывается при
+>   смене состояния; фрагменты на странице перевода показывались сырым
+>   Markdown — теперь через `renderInline`; на телефоне липкая панель
+>   читалки занимала треть экрана, а «Править / Перевести заново» стояли
+>   под каждым абзацем — панель не липнет, действия появляются по касанию;
+>   английская кнопка файла «Choose File» заменена своей.
+> - **Задача 1:** `GET /api/translations?book_id=` и `book_title` — монитору
+>   не нужен запрос на каждую строку.
+> - **Задача 4:** CHECK `provider_configs_kind_check` не пускал `fake` —
+>   миграция 00008; неверный `LINGUASTACK_WEB_ROOT` останавливает старт api
+>   (`httpapi.CheckWebRoot`); сборка фронтенда в Dockerfile — в задаче 5,
+>   Dockerfile перенесён в корень (контекст — весь репозиторий).
+> - **Задача 5:** npm 10 падает на необязательной peer-связи vitest ↔
+>   `@vitest/browser-playwright` — `legacy-peer-deps` в `.npmrc`.
+> - **Задача 10:** список переводов опрашивается раз в 5 с, SSE — только на
+>   странице перевода: поток на каждую строку исчерпал бы ~6 соединений
+>   HTTP/1.1 браузера.
+> - **Задача 11:** относительные ссылки книги показываются текстом — в
+>   адресах приложения таких страниц нет; позиция чтения сохраняется с
+>   `keepalive`, чтобы запрос пережил закрытие страницы.
+
 ## Бэкенд для интерфейса
 
 ### Task 1: Параметры перевода и статистика провайдера
@@ -104,14 +135,14 @@ typescript-eslint 8.71.1; шрифты @fontsource-variable/literata 5.3.0 и
   `GET /api/translations?book_id=` (не UUID — 422) и поле проекта
   `book_title` — монитору не нужен запрос на каждую строку.
 
-- [ ] **Step 1:** Тесты: `TestTranslationOptions` (en и ru в списке, стили и
+- [x] **Step 1:** Тесты: `TestTranslationOptions` (en и ru в списке, стили и
   детерминизм ровно эти); `TestBatchUsageSummed` (Fake с токенами: сумма по
   всем вызовам, включая повторы); `TestWorkerAccumulatesUsage` (2 батча →
   `provider_calls` = 2, токены сложены); `TestTranslationResponseHasUsage`;
   `TestTranslationsFilterByBook` (чужая книга — пустой список, не 404);
   `TestTranslationHasBookTitle`.
-- [ ] **Step 2:** FAIL. **Step 3:** миграция (`ALTER TABLE translation_projects ADD input_tokens bigint NOT NULL DEFAULT 0, ADD output_tokens bigint NOT NULL DEFAULT 0, ADD provider_calls integer NOT NULL DEFAULT 0`), реализация. Fake получает поле `TokensPerCall int` (вход и выход).
-- [ ] **Step 4:** PASS, `make lint`. **Step 5:** коммит `feat: параметры перевода и статистика провайдера для интерфейса`.
+- [x] **Step 2:** FAIL. **Step 3:** миграция (`ALTER TABLE translation_projects ADD input_tokens bigint NOT NULL DEFAULT 0, ADD output_tokens bigint NOT NULL DEFAULT 0, ADD provider_calls integer NOT NULL DEFAULT 0`), реализация. Fake получает поле `TokensPerCall int` (вход и выход).
+- [x] **Step 4:** PASS, `make lint`. **Step 5:** коммит `feat: параметры перевода и статистика провайдера для интерфейса`.
 
 ### Task 2: Глава книги, ресурсы и сегменты главы
 
@@ -129,7 +160,7 @@ typescript-eslint 8.71.1; шрифты @fontsource-variable/literata 5.3.0 и
   `storage.FileStore.OpenAsset(userID, bookID uuid.UUID, member string) (*os.File, error)`.
   Клиент строит адрес картинки как `/api/books/{id}/assets/` + `block.meta.src`.
 
-- [ ] **Step 1:** Тесты: `TestChapterBlocks` (вложенная глава находится по
+- [x] **Step 1:** Тесты: `TestChapterBlocks` (вложенная глава находится по
   index; блоки родителя не включают блоки детей); `TestChapterMissing404`;
   `TestEPUBImageServedByMetaSrc` (фикстура EPUB с картинкой: `meta.src`
   блока image отдаётся по маршруту assets, `Content-Type: image/png`);
@@ -138,12 +169,12 @@ typescript-eslint 8.71.1; шрифты @fontsource-variable/literata 5.3.0 и
   `TestAssetPathTraversal404` (`../`, абсолютный путь, симлинк, расширение
   не из списка — 404); `TestSegmentsFilterByChapter`; новые маршруты — в
   матрице изоляции.
-- [ ] **Step 2:** FAIL. **Step 3:** `OpenAsset` — через `os.Root`,
+- [x] **Step 2:** FAIL. **Step 3:** `OpenAsset` — через `os.Root`,
   `ValidateMemberName` и `rejectSymlinks`; типы:
   `.png .jpg .jpeg .gif .webp .avif .svg`, остальное 404; заголовки
   `Cache-Control: private, max-age=86400`, для всех ресурсов
   `Content-Security-Policy: default-src 'none'; style-src 'unsafe-inline'; sandbox`.
-- [ ] **Step 4:** PASS, lint. **Step 5:** коммит `feat: глава книги, ресурсы и сегменты главы для читалки`.
+- [x] **Step 4:** PASS, lint. **Step 5:** коммит `feat: глава книги, ресурсы и сегменты главы для читалки`.
 
 ### Task 3: Поиск по книге и позиция чтения
 
@@ -158,14 +189,14 @@ typescript-eslint 8.71.1; шрифты @fontsource-variable/literata 5.3.0 и
   `{"results":[{"chapter_index":int,"node_id":"…","in":"original"|"translation","snippet":"…"}],"truncated":bool}`;
   `GET /api/books/{id}/position` → `{"chapter_index":int,"node_id":"…","translation_id":"…"|null,"mode":"parallel"|"original"|"translation"}` или `null`;
   `PUT /api/books/{id}/position` с тем же телом → 204.
-- [ ] **Step 1:** Тесты: `TestSearchOriginalCaseInsensitive` («АЛИСА» находит
+- [x] **Step 1:** Тесты: `TestSearchOriginalCaseInsensitive` («АЛИСА» находит
   «Алиса»); `TestSearchTranslationEscapesLike` (`%` и `_` в запросе ищутся
   буквально); `TestSearchQueryLength` (1 символ и 201 — 422);
   `TestSearchLimit50SetsTruncated`; `TestSearchForeignTranslation404`
   (чужой или от другой книги проект — 404); `TestPositionRoundTrip`;
   `TestPositionUnknownChapter422`; `TestPositionDeletedWithBook`;
   `TestPositionTranslationDeletedBecomesNull`; матрица изоляции.
-- [ ] **Step 2:** FAIL. **Step 3:** таблица `reading_positions(user_id uuid
+- [x] **Step 2:** FAIL. **Step 3:** таблица `reading_positions(user_id uuid
   REFERENCES users ON DELETE CASCADE, book_id uuid REFERENCES books ON DELETE
   CASCADE, translation_id uuid NULL REFERENCES translation_projects ON DELETE
   SET NULL, chapter_index int NOT NULL, node_id text NOT NULL DEFAULT '',
@@ -175,7 +206,7 @@ typescript-eslint 8.71.1; шрифты @fontsource-variable/literata 5.3.0 и
   (`strings.ToLower` с обеих сторон); перевод — `ILIKE ? ESCAPE '\'`;
   сниппет — ±60 символов вокруг первого совпадения; не больше 50 находок,
   порядок — глава, затем позиция.
-- [ ] **Step 4:** PASS, lint. **Step 5:** коммит `feat: поиск по книге и позиция чтения`.
+- [x] **Step 4:** PASS, lint. **Step 5:** коммит `feat: поиск по книге и позиция чтения`.
 
 ### Task 4: Раздача SPA и тестовый провайдер для сквозных тестов
 
@@ -193,21 +224,21 @@ typescript-eslint 8.71.1; шрифты @fontsource-variable/literata 5.3.0 и
   создании конфигурации только при включённом флаге;
   `providers.BuildOptions.Fake bool`, `.FakeDelay time.Duration`;
   `Fake.Delay time.Duration` (ждёт, уважая ctx).
-- [ ] **Step 1:** Тесты: `TestSPAFallbackServesIndex` (`/books/123` → index.html,
+- [x] **Step 1:** Тесты: `TestSPAFallbackServesIndex` (`/books/123` → index.html,
   `Cache-Control: no-cache`); `TestSPAAssetsImmutable` (`/assets/x.js` —
   `max-age=31536000, immutable`); `TestUnknownAPIPathIsJSON404`
   (`/api/nope` — JSON, не index.html); `TestSPASecurityHeaders` (CSP
   `default-src 'self'`, `frame-ancestors 'none'`, nosniff);
   `TestSPANoDirectoryListing`; `TestFakeProviderHiddenByDefault` и
   `TestFakeProviderAvailableWithFlag`.
-- [ ] **Step 2:** FAIL. **Step 3:** CSP для страниц:
+- [x] **Step 2:** FAIL. **Step 3:** CSP для страниц:
   `default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'`;
   файлы — через `os.Root`. Старт с включённым тестовым провайдером пишет
   `slog.Warn`. Dockerfile: этап `node:22.22.2-bookworm-slim` собирает
   `frontend/` (`npm ci && npm run build`), итоговый образ получает
   `/app/web` и `LINGUASTACK_WEB_ROOT=/app/web`; контекст сборки compose —
   корень репозитория.
-- [ ] **Step 4:** PASS, lint. **Step 5:** коммит `feat: раздача веб-приложения и тестовый провайдер`.
+- [x] **Step 4:** PASS, lint. **Step 5:** коммит `feat: раздача веб-приложения и тестовый провайдер`.
 
 ## Веб-приложение
 
@@ -224,12 +255,12 @@ typescript-eslint 8.71.1; шрифты @fontsource-variable/literata 5.3.0 и
   заглушки до своих задач): `/login`, `/register`, `/`, `/import`,
   `/books/:id`, `/books/:id/translate`, `/translations`, `/translations/:id`,
   `/read/:bookId` (query `t`, `ch`), `/settings/providers`.
-- [ ] **Step 1:** тест `App.test.ts`: оболочка показывает навигацию
+- [x] **Step 1:** тест `App.test.ts`: оболочка показывает навигацию
   «Библиотека», «Переводы», «Модели»; ссылка текущего раздела помечена
   `aria-current="page"`.
-- [ ] **Step 2:** FAIL. **Step 3:** каркас, токены из Global Constraints,
+- [x] **Step 2:** FAIL. **Step 3:** каркас, токены из Global Constraints,
   `@fontsource-variable/*` импортом в `main.ts` (только latin и cyrillic).
-- [ ] **Step 4:** `npm run lint && npm run typecheck && npm test && npm run build`. **Step 5:** коммит `feat: каркас веб-приложения`.
+- [x] **Step 4:** `npm run lint && npm run typecheck && npm test && npm run build`. **Step 5:** коммит `feat: каркас веб-приложения`.
 
 ### Task 6: Клиент API, сессия, вход и регистрация
 
@@ -250,13 +281,13 @@ Modify `frontend/src/router.ts`; Test `frontend/src/api/client.test.ts`,
   по одной на маршрут API с теми же именами, что у обработчиков Go
   (`listBooks`, `uploadBook`, `getTOC`, `putTOC`, `createTranslation`, …);
   `useSession(): {me: Ref<User|null>, load(), login(email, pw), register(email, pw), logout()}`.
-- [ ] **Step 1:** тесты: разбор ошибок трёх видов; 401 вызывает обработчик,
+- [x] **Step 1:** тесты: разбор ошибок трёх видов; 401 вызывает обработчик,
   а 401 входа — нет; страж маршрутов без сессии ведёт на
   `/login?next=/books/1` (Review Focus №2); после входа — на `next`, но не
   на внешний адрес (`next=//evil.com` → `/`); форма входа показывает текст
   ошибки сервера; регистрация входит сразу после создания (API регистрации
   сессию не выдаёт — клиент вызывает login).
-- [ ] **Step 2–4:** FAIL → реализация → PASS + lint + typecheck. **Step 5:** коммит `feat: вход, регистрация и клиент API`.
+- [x] **Step 2–4:** FAIL → реализация → PASS + lint + typecheck. **Step 5:** коммит `feat: вход, регистрация и клиент API`.
 
 ### Task 7: Библиотека и импорт
 
@@ -267,13 +298,13 @@ Modify `frontend/src/router.ts`; Test `frontend/src/api/client.test.ts`,
 **Interfaces:**
 - Consumes: `listBooks`, `listTranslations`, `deleteBook`, `uploadBook(file, onProgress: (fraction: number) => void)` (XMLHttpRequest — ради прогресса), `getTOC`, `putTOC(order: number[])`.
 - Produces: `ConfirmButton` (первое нажатие меняет подпись на «Точно удалить?», второе в течение 4 с — подтверждает; Esc отменяет) — используется в задачах 8 и 10; `TocTree` (дерево глав, режим перестановки верхнего уровня кнопками «Выше»/«Ниже»); `formatDate`, `formatDuration(ms)`, `languageName(code)`.
-- [ ] **Step 1:** тесты: строка книги — название, автор, формат, дата, пары
+- [x] **Step 1:** тесты: строка книги — название, автор, формат, дата, пары
   языков переводов («английский → русский») и состояние; пустая библиотека
   приглашает загрузить книгу; удаление только после подтверждения; импорт
   показывает причину 413/422 и снова доступен (Review Focus №5); замечания
   импорта (`issues`) видны с уровнем; перестановка отправляет перестановку
   индексов `[1,0,2]`.
-- [ ] **Step 2–4:** FAIL → реализация → PASS. **Step 5:** коммит `feat: библиотека и импорт книги`.
+- [x] **Step 2–4:** FAIL → реализация → PASS. **Step 5:** коммит `feat: библиотека и импорт книги`.
 
 ### Task 8: Модели и провайдеры
 
@@ -281,13 +312,13 @@ Modify `frontend/src/router.ts`; Test `frontend/src/api/client.test.ts`,
 
 **Interfaces:**
 - Consumes: `listKinds`, `listProviderConfigs`, `createProviderConfig`, `patchProviderConfig`, `deleteProviderConfig`, `configHealth`, `configModels`.
-- [ ] **Step 1:** тесты: поле адреса API — только у вида с `user_base_url`;
+- [x] **Step 1:** тесты: поле адреса API — только у вида с `user_base_url`;
   ключ — поле пароля, после сохранения виден только `…last4`; для вида с
   `sends_data_externally` чекбокс «Разрешить отправку текста книг этому
   сервису» с пояснением (ТЗ §6.4); 503 (нет ключа шифрования) и 409
   (конфигурация используется) — понятным текстом; «Проверить» показывает
   ответ health.
-- [ ] **Step 2–4:** FAIL → реализация → PASS. **Step 5:** коммит `feat: настройка моделей и провайдеров`.
+- [x] **Step 2–4:** FAIL → реализация → PASS. **Step 5:** коммит `feat: настройка моделей и провайдеров`.
 
 ### Task 9: Книга и настройка перевода
 
@@ -296,7 +327,7 @@ Modify `frontend/src/router.ts`; Test `frontend/src/api/client.test.ts`,
 
 **Interfaces:**
 - Consumes: `getBook`, `getTOC`, `listTranslations` (по `book_id`), `getTranslationOptions`, `listProviderConfigs`, `configModels`, `createTranslation`.
-- [ ] **Step 1:** тесты: страница книги — метаданные, оглавление и переводы
+- [x] **Step 1:** тесты: страница книги — метаданные, оглавление и переводы
   книги с действиями «Читать», «Продолжить» (для paused и failed —
   `resumeTranslation`, ТЗ §8.2) и «Новый перевод»; язык исходника по
   умолчанию — язык книги, иначе
@@ -307,7 +338,7 @@ Modify `frontend/src/router.ts`; Test `frontend/src/api/client.test.ts`,
   и кнопка недоступна; глоссарий: пустые строки отбрасываются, пробелы
   обрезаются; ответ 400/409/422 показан у формы; после запуска — переход
   на `/translations/:id`.
-- [ ] **Step 2–4:** FAIL → реализация → PASS. **Step 5:** коммит `feat: страница книги и настройка перевода`.
+- [x] **Step 2–4:** FAIL → реализация → PASS. **Step 5:** коммит `feat: страница книги и настройка перевода`.
 
 ### Task 10: Монитор переводов
 
@@ -319,7 +350,7 @@ Modify `frontend/src/router.ts`; Test `frontend/src/api/client.test.ts`,
 - Produces: `useProgress(projectId: Ref<string>): {event: Ref<ProgressEvent|null>, mode: Ref<'stream'|'polling'|'done'>}` — EventSource
   на `/api/translations/{id}/events`; терминальный статус закрывает поток;
   после трёх `error` подряд — опрос `getTranslation` каждые 10 с.
-- [ ] **Step 1:** тесты (EventSource подменяется фейком): событие обновляет
+- [x] **Step 1:** тесты (EventSource подменяется фейком): событие обновляет
   прогресс; терминальный статус — поток закрыт, `mode='done'`; три ошибки
   подряд — опрос (Review Focus №4); монитор делит переводы на «Идут»,
   «Ждут» (queued, paused), «Завершены» (completed, completed_with_warnings,
@@ -329,7 +360,7 @@ Modify `frontend/src/router.ts`; Test `frontend/src/api/client.test.ts`,
   `ConfirmButton`), сегменты с фильтрами «Все», «С ошибками»,
   «С предупреждениями» (`status=failed`, `severity=warning`), постранично,
   «Перевести заново» у сегмента; ответ 409 показан текстом сервера.
-- [ ] **Step 2–4:** FAIL → реализация → PASS. **Step 5:** коммит `feat: монитор переводов`.
+- [x] **Step 2–4:** FAIL → реализация → PASS. **Step 5:** коммит `feat: монитор переводов`.
 
 ### Task 11: Читалка
 
@@ -347,7 +378,7 @@ Test рядом
   `fetchChapterSegments(projectId, chapter): Promise<Segment[]>` —
   дочитывает страницы по 1000; `usePositionSaver(save, delayMs = 1500)` —
   сохраняет последний видимый сегмент с задержкой и при уходе со страницы.
-- [ ] **Step 1:** тесты: `renderInline` — `<script>`, `<img onerror>`,
+- [x] **Step 1:** тесты: `renderInline` — `<script>`, `<img onerror>`,
   `[x](javascript:alert(1))`, `"` в url — как текст (Review Focus №1);
   курсив и код отрисованы; `fetchChapterSegments` при 2500 сегментах делает
   3 запроса (Review Focus №3); выравнивание по `node_id`: код и картинка —
@@ -359,7 +390,7 @@ Test рядом
   раза в 1,5 с; пометки на полях — для `warning`/`error` с текстом
   `findings`; переключатель языковой версии — переводы этой книги
   (ТЗ §8.3), выбранный хранится в позиции (`translation_id`) и в query `t`.
-- [ ] **Step 2–4:** FAIL → реализация → PASS. **Step 5:** коммит `feat: читалка оригинала и перевода`.
+- [x] **Step 2–4:** FAIL → реализация → PASS. **Step 5:** коммит `feat: читалка оригинала и перевода`.
 
 ### Task 12: Сквозной сценарий, CI, документация, визуальная вычитка
 
@@ -367,22 +398,22 @@ Test рядом
 Modify `.github/workflows/ci.yml`, `docker-compose.yml`, `README.md`,
 `CLAUDE.md`, этот план (статус и отклонения)
 
-- [ ] **Step 1:** `run-stack.sh` собирает api и worker, поднимает их на
+- [x] **Step 1:** `run-stack.sh` собирает api и worker, поднимает их на
   отдельной БД `linguastack_e2e` с `LINGUASTACK_E2E_FAKE_PROVIDER=true`,
   `LINGUASTACK_E2E_FAKE_DELAY=300ms`, `LINGUASTACK_WEB_ROOT=frontend/dist`;
   Playwright `webServer` использует его.
-- [ ] **Step 2:** сценарий: регистрация → вход → конфигурация «fake» →
+- [x] **Step 2:** сценарий: регистрация → вход → конфигурация «fake» →
   загрузка Markdown-книги с кодом и ссылкой → оглавление → запуск перевода →
   монитор показывает живой прогресс до «Готово» → читалка «Рядом»
   показывает перевод, код не тронут → правка сегмента сохраняется →
   поиск находит слово перевода → перезагрузка возвращает к той же главе;
   тот же сценарий на ширине 390 px (раскладка столбцом).
-- [ ] **Step 3:** CI: задача `frontend` (`npm ci`, lint, typecheck, test,
+- [x] **Step 3:** CI: задача `frontend` (`npm ci`, lint, typecheck, test,
   build) и `e2e` (PostgreSQL, Go, браузер Playwright, `npm run e2e`);
   сборка образа с контекстом — корень репозитория.
-- [ ] **Step 4:** визуальная вычитка: скриншоты Playwright каждой страницы
+- [x] **Step 4:** визуальная вычитка: скриншоты Playwright каждой страницы
   на 1440 и 390 px, правка по замечаниям (контраст, переносы, фокус).
-- [ ] **Step 5:** README (разработка фронтенда, `npm run dev` с прокси,
+- [x] **Step 5:** README (разработка фронтенда, `npm run dev` с прокси,
   развёртывание одним образом), CLAUDE.md (команды фронтенда), план —
   статус. Коммит `feat: сквозной сценарий веб-приложения и CI`.
 

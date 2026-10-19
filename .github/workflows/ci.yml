@@ -52,6 +52,70 @@ jobs:
       - name: Сборка
         run: go build ./cmd/...
 
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - name: Линтер
+        run: npm run lint
+      - name: Типы
+        run: npm run typecheck
+      - name: Тесты
+        run: npm test
+      - name: Сборка
+        run: npm run build
+
+  e2e:
+    # Сквозной сценарий в браузере: собранное приложение, настоящие api и
+    # worker с тестовым провайдером fake (frontend/e2e/run-stack.sh).
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: linguastack
+          POSTGRES_PASSWORD: linguastack
+          POSTGRES_DB: linguastack
+        ports:
+          - 5434:5432
+        options: >-
+          --health-cmd "psql -U linguastack -d linguastack -c 'select 1'"
+          --health-interval 3s --health-timeout 3s --health-retries 20
+    env:
+      LINGUASTACK_E2E_ADMIN_URL: postgres://linguastack:linguastack@127.0.0.1:5434/linguastack?sslmode=disable
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - run: npx playwright install --with-deps chromium
+      - name: Сквозные тесты
+        run: npm run e2e
+      - uses: actions/upload-artifact@v7
+        if: failure()
+        with:
+          name: playwright-traces
+          path: frontend/test-results/
+
   image:
     runs-on: ubuntu-latest
     steps:

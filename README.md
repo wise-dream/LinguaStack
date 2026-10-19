@@ -5,12 +5,14 @@
 
 Цикл работы: **импорт → структурирование → перевод → проверка → чтение → экспорт.**
 
-Реализованы этапы 1–3 ТЗ: фундамент (пользователи, сессии, хранилище,
+Реализованы этапы 1–4 ТЗ: фундамент (пользователи, сессии, хранилище,
 изоляция данных), импорт TXT / Markdown / EPUB / репозиториев документации
-(zip, mdBook, MkDocs) и перевод через Ollama, OpenAI-совместимые API и
+(zip, mdBook, MkDocs), перевод через Ollama, OpenAI-совместимые API и
 Anthropic Claude — с очередью, паузой, отменой, восстановлением после сбоев,
-проверкой качества и ручной правкой. Веб-интерфейс, PDF/DOCX/HTML, экспорт
-и Telegram-бот — следующие этапы; пока работа идёт через HTTP API.
+проверкой качества и ручной правкой — и веб-приложение: библиотека,
+импорт с оглавлением, настройка перевода, монитор задач и читалка
+оригинала и перевода рядом. PDF/DOCX/HTML, экспорт и Telegram-бот —
+следующие этапы.
 
 ## Документы
 
@@ -22,9 +24,12 @@ Anthropic Claude — с очередью, паузой, отменой, восс
 
 ## Устройство
 
-Два процесса из одного Go-модуля (`backend/`) и PostgreSQL:
+Веб-приложение (`frontend/`, Vue 3 + TypeScript), два процесса из одного
+Go-модуля (`backend/`) и PostgreSQL:
 
-* **api** (`cmd/api`) — HTTP API, импорт книг, управление переводами;
+* **api** (`cmd/api`) — HTTP API, импорт книг, управление переводами; он же
+  раздаёт собранное веб-приложение (`LINGUASTACK_WEB_ROOT`) — один origin,
+  cookie сессии без CORS;
 * **worker** (`cmd/worker`) — фоновый перевод. Задачи раздаются через аренды
   в PostgreSQL (`FOR UPDATE SKIP LOCKED`), worker-ов может быть несколько;
   упавший worker теряет аренду, и задачу подхватывает другой.
@@ -63,6 +68,12 @@ sed -i "s|^LINGUASTACK_SECRET_KEY=.*|LINGUASTACK_SECRET_KEY=$(openssl rand -base
 cd backend
 make run-api
 make run-worker
+
+# 4. Веб-приложение с горячей перезагрузкой: http://localhost:5173
+# (Vite проксирует /api на api по :8000)
+cd frontend
+npm ci
+npm run dev
 ```
 
 Postgres публикуется на **127.0.0.1:5434** — только на localhost и не на 5432/5433,
@@ -82,12 +93,29 @@ make test-live
 Живой тест Anthropic тратит деньги и включается отдельно:
 `LINGUASTACK_LIVE_ANTHROPIC=1 ANTHROPIC_API_KEY=… go test -run LiveAnthropic ./internal/providers/`.
 
-CI (`.github/workflows/ci.yml`) запускает линтер, тесты с `-race` против
-PostgreSQL 17 и сборку образа; живые тесты в CI не выполняются.
+Веб-приложение:
+
+```bash
+cd frontend
+npm run lint && npm run typecheck && npm test   # юнит- и компонентные тесты
+npm run e2e      # сквозной сценарий в Chromium: нужны go в PATH и БД из docker compose
+```
+
+Сквозной сценарий (`frontend/e2e/run-stack.sh`) собирает приложение, поднимает
+настоящие api и worker на чистой базе `linguastack_e2e` с тестовым провайдером
+`fake` (`LINGUASTACK_E2E_FAKE_PROVIDER=true` — «перевод» вида «RU:» + текст;
+в рабочей системе не включать) и проходит цикл на ширине 1440 и 390 px.
+`SCREENSHOTS=1 npm run e2e` сохраняет снимки экранов в `test-results/screens/`.
+
+CI (`.github/workflows/ci.yml`) запускает линтеры, тесты Go с `-race` против
+PostgreSQL 17, тесты и сборку веб-приложения, сквозной сценарий и сборку
+образа; живые тесты моделей в CI не выполняются.
 
 ## Развёртывание
 
-Один образ (`backend/Dockerfile`, distroless, не от root) на оба процесса.
+Один образ (`Dockerfile` в корне, distroless, не от root) на оба процесса;
+api в нём раздаёт и веб-приложение — после запуска оно открывается по адресу
+api.
 
 ```bash
 cp .env.example .env
@@ -161,13 +189,18 @@ docker compose start api worker
 | `POST /api/books` (multipart, поле `file`) | Импорт TXT, MD, EPUB, zip-репозитория документации |
 | `GET /api/books`, `GET/DELETE /api/books/{id}` | Книги |
 | `GET/PUT /api/books/{id}/toc` | Оглавление; перестановка глав |
+| `GET /api/books/{id}/chapters/{index}` | Блоки одной главы для читалки |
+| `GET /api/books/{id}/assets/{path}` | Картинки книги (только изображения, CSP sandbox) |
+| `GET /api/books/{id}/search?q=&translation_id=` | Поиск по книге и её переводу |
+| `GET/PUT /api/books/{id}/position` | Позиция чтения: глава, фрагмент, перевод, режим |
+| `GET /api/translation-options` | Языки, стили и точность для настройки перевода |
 | `GET /api/providers`, `/api/providers/{kind}/models` | Доступные провайдеры и модели |
 | `POST/GET /api/provider-configs`, `GET/PATCH/DELETE /api/provider-configs/{id}` | Свои конфигурации провайдеров (ключ API хранится зашифрованным и не возвращается) |
 | `GET /api/provider-configs/{id}/models`, `/health` | Модели и проверка доступа |
 | `POST /api/books/{id}/translations` | Запуск перевода: языки, модель, стиль, детерминизм, глоссарий |
-| `GET /api/translations`, `/api/translations/{id}` | Проекты перевода и прогресс |
+| `GET /api/translations?book_id=`, `/api/translations/{id}` | Проекты перевода, прогресс и статистика провайдера (запросы, токены, стоимость) |
 | `POST /api/translations/{id}/pause`, `/resume`, `/cancel` | Управление |
-| `GET /api/translations/{id}/segments?offset=&limit=&status=&severity=` | Оригинал и перевод по сегментам с замечаниями проверки; `status=failed`, `severity=warning` — найти проблемные |
+| `GET /api/translations/{id}/segments?offset=&limit=&chapter=&status=&severity=` | Оригинал и перевод по сегментам с замечаниями проверки; `status=failed`, `severity=warning` — найти проблемные |
 | `GET /api/translations/{id}/events` | Прогресс в реальном времени (SSE) |
 | `PATCH /api/segments/{id}`, `POST /api/segments/{id}/retry`, `GET /api/segments/{id}/revisions` | Ручная правка, повтор, история версий |
 

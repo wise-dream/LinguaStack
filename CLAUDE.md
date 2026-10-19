@@ -26,6 +26,25 @@ go test -race -count=1 ./...
 Живой тест Anthropic (`LINGUASTACK_LIVE_ANTHROPIC=1`) тратит деньги
 пользователя — запускать только с его явного согласия.
 
+## Веб-приложение (из `frontend/`)
+
+```bash
+npm run lint && npm run typecheck && npm test
+npm run e2e      # нужен go в PATH (см. выше) и БД из docker compose
+SCREENSHOTS=1 npm run e2e   # снимки в test-results/screens/ для визуальной вычитки
+```
+
+* Vue 3 + TypeScript, без UI-библиотек; цвета, шрифты и отступы — только
+  токены из `src/styles/tokens.css`.
+* Текст книги и перевода попадает в `v-html` только через `renderInline`
+  (`src/lib/inline.ts` — сначала экранирует); правило `vue/no-v-html`
+  включено, исключения — с комментарием-обоснованием.
+* Версии npm-пакетов — точные и не моложе двух недель; `legacy-peer-deps`
+  в `.npmrc` — обход сбоя npm 10 на peer-связи vitest (все peer перечислены
+  явно).
+* Интерфейс по-русски, кнопка называет действие; новые страницы — с
+  проверкой на 390 px.
+
 ## Правила кода
 
 * Комментарии, сообщения об ошибках и коммиты — по-русски, как в
