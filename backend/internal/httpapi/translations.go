@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -289,69 +290,49 @@ func (s *server) getTranslation(w http.ResponseWriter, r *http.Request) {
 // transition переводит проект из одного из статусов from в to; иначе 409.
 // Явная таблица переходов: возобновить отменённый или поставить на паузу
 // завершённый проект нельзя.
-func (s *server) transition(w http.ResponseWriter, r *http.Request, from []string, to string, after func(tx *gorm.DB, p *models.TranslationProject) error) {
-	p, ok := loadOwned[models.TranslationProject](s, w, r, "id")
-	if !ok {
-		return
-	}
-	updates := map[string]any{"status": to, "updated_at": time.Now().UTC()}
-	switch to {
-	case models.ProjectCancelled:
-		updates["finished_at"] = time.Now().UTC()
-	case models.ProjectQueued:
-		updates["finished_at"], updates["last_error"] = nil, ""
-	}
-	err := s.DB.WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
-		res := tx.Model(&models.TranslationProject{}).Where("id = ? AND status IN ?", p.ID, from).Updates(updates)
-		if res.Error != nil {
-			return res.Error
-		}
-		if res.RowsAffected == 0 {
-			return errConflict
-		}
-		p.Status = to
-		return after(tx, p)
-	})
-	if errors.Is(err, errConflict) {
-		writeError(w, http.StatusConflict, fmt.Sprintf("Из статуса «%s» это действие недоступно", p.Status))
-		return
-	}
+// transition — пауза, возобновление или отмена (общий код с ботом —
+// queue.Pause/Resume/Cancel): чужой проект — 404, недопустимый переход — 409.
+func (s *server) transition(w http.ResponseWriter, r *http.Request,
+	action func(ctx context.Context, projectID, ownerID uuid.UUID) (*models.TranslationProject, error)) {
+	id, err := uuid.Parse(r.PathValue("id"))
 	if err != nil {
-		internalError(w, r, err)
+		writeError(w, http.StatusNotFound, "Не найдено")
 		return
 	}
-	if err := s.DB.WithContext(r.Context()).First(p, "id = ?", p.ID).Error; err != nil {
+	p, err := action(r.Context(), id, UserFromContext(r.Context()).ID)
+	var bad *queue.TransitionError
+	switch {
+	case errors.Is(err, store.ErrNotFound):
+		writeError(w, http.StatusNotFound, "Не найдено")
+		return
+	case errors.As(err, &bad):
+		writeError(w, http.StatusConflict, fmt.Sprintf("Из статуса «%s» это действие недоступно", bad.From))
+		return
+	case err != nil:
 		internalError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, s.projectFor(r, p))
 }
 
-var errConflict = errors.New("недопустимый переход статуса")
-
 // pause: выполняющуюся задачу worker завершит сам между батчами.
 func (s *server) pauseTranslation(w http.ResponseWriter, r *http.Request) {
-	s.transition(w, r, []string{models.ProjectQueued, models.ProjectRunning}, models.ProjectPaused,
-		func(tx *gorm.DB, p *models.TranslationProject) error {
-			return queue.CancelPending(r.Context(), tx, p.ID)
-		})
+	s.transition(w, r, func(ctx context.Context, id, owner uuid.UUID) (*models.TranslationProject, error) {
+		return queue.Pause(ctx, s.DB, id, owner)
+	})
 }
 
 // resume продолжает с места: и после паузы, и после сбоя провайдера.
 func (s *server) resumeTranslation(w http.ResponseWriter, r *http.Request) {
-	s.transition(w, r, []string{models.ProjectPaused, models.ProjectFailed}, models.ProjectQueued,
-		func(tx *gorm.DB, p *models.TranslationProject) error {
-			_, err := queue.Enqueue(r.Context(), tx, p, 0, s.Cfg.MaxSegmentAttempts)
-			return err
-		})
+	s.transition(w, r, func(ctx context.Context, id, owner uuid.UUID) (*models.TranslationProject, error) {
+		return queue.Resume(ctx, s.DB, id, owner, s.Cfg.MaxSegmentAttempts)
+	})
 }
 
 func (s *server) cancelTranslation(w http.ResponseWriter, r *http.Request) {
-	s.transition(w, r, []string{models.ProjectQueued, models.ProjectRunning, models.ProjectPaused, models.ProjectFailed},
-		models.ProjectCancelled,
-		func(tx *gorm.DB, p *models.TranslationProject) error {
-			return queue.CancelPending(r.Context(), tx, p.ID)
-		})
+	s.transition(w, r, func(ctx context.Context, id, owner uuid.UUID) (*models.TranslationProject, error) {
+		return queue.Cancel(ctx, s.DB, id, owner)
+	})
 }
 
 type segmentOut struct {
