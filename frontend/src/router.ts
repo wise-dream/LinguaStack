@@ -4,6 +4,7 @@ import ImportPage from './pages/ImportPage.vue'
 import LibraryPage from './pages/LibraryPage.vue'
 import LoginPage from './pages/LoginPage.vue'
 import PendingPage from './pages/PendingPage.vue'
+import ProvidersPage from './pages/ProvidersPage.vue'
 import RegisterPage from './pages/RegisterPage.vue'
 
 /** Раздел навигации, к которому относится страница. */
@@ -31,7 +32,7 @@ export function createAppRouter(history: RouterHistory = createWebHistory()) {
       { path: '/translations', component: PendingPage, meta: { title: 'Переводы', section: 'translations' } },
       { path: '/translations/:id', component: PendingPage, meta: { title: 'Перевод', section: 'translations' } },
       { path: '/read/:bookId', component: PendingPage, meta: { title: 'Чтение', section: 'library' } },
-      { path: '/settings/providers', component: PendingPage, meta: { title: 'Модели', section: 'providers' } },
+      { path: '/settings/providers', component: ProvidersPage, meta: { title: 'Модели', section: 'providers' } },
       { path: '/:pathMatch(.*)*', component: PendingPage, meta: { title: 'Страница не найдена' } },
     ],
   })

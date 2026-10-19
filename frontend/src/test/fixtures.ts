@@ -1,4 +1,4 @@
-import type { Book, Project } from '../api/types'
+import type { Book, Project, ProviderConfig, ProviderKind } from '../api/types'
 
 export function book(overrides: Partial<Book> = {}): Book {
   return {
@@ -45,6 +45,28 @@ export function project(overrides: Partial<Project> = {}): Project {
     input_tokens: 0,
     output_tokens: 0,
     provider_calls: 0,
+    ...overrides,
+  }
+}
+
+
+export const kinds: ProviderKind[] = [
+  { provider_id: 'ollama', name: 'Ollama (локальные модели)', sends_data_externally: false, requires_api_key: false, requires_base_url: false, user_base_url: false },
+  { provider_id: 'anthropic', name: 'Anthropic Claude', sends_data_externally: true, requires_api_key: true, requires_base_url: false, user_base_url: false },
+  { provider_id: 'openai_compatible', name: 'OpenAI-совместимый API', sends_data_externally: true, requires_api_key: false, requires_base_url: true, user_base_url: true },
+]
+
+export function providerConfig(overrides: Partial<ProviderConfig> = {}): ProviderConfig {
+  return {
+    id: 'c1',
+    provider_id: 'ollama',
+    name: 'Локальный Ollama',
+    has_api_key: false,
+    key_fingerprint: null,
+    key_last4: null,
+    allow_external: false,
+    sends_data_externally: false,
+    created_at: '2026-10-16T19:00:00Z',
     ...overrides,
   }
 }
