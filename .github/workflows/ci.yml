@@ -60,6 +60,6 @@ jobs:
       - name: Сборка образа
         uses: docker/build-push-action@v7
         with:
-          context: backend
+          context: .
           push: false
           tags: linguastack:ci

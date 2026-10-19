@@ -1,0 +1,37 @@
+/* Дизайн-токены LinguaStack. Идея — билингвальное издание: две краски для
+   двух текстов (оригинал и перевод) на холодной бумаге и корректорский
+   красный для замечаний на полях. */
+:root {
+  --paper: #f4f6f3;
+  --paper-raised: #fbfcfa;
+  --ink-original: #1b2440;
+  --ink-translation: #14463f;
+  --proof: #b3261e;
+  --highlight: #f3d35c;
+  --rule: #c8cec6;
+  --muted: #5e6a66;
+
+  --font-book: 'Literata Variable', 'Literata', Georgia, 'Times New Roman', serif;
+  --font-ui: 'Golos Text Variable', 'Golos Text', system-ui, -apple-system, 'Segoe UI', sans-serif;
+
+  /* Шкала 1.25 от 16 px. */
+  --step--1: 0.8rem;
+  --step-0: 1rem;
+  --step-1: 1.25rem;
+  --step-2: 1.5625rem;
+  --step-3: 1.953rem;
+  --book-size: 1.125rem;
+  --book-leading: 1.65;
+
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.5rem;
+  --space-6: 2rem;
+  --space-7: 3rem;
+
+  --radius: 6px;
+  --measure: 68ch;
+  --page-width: 72rem;
+}

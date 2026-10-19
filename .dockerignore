@@ -1,0 +1,15 @@
+.git
+.github
+.superpowers
+.remember
+**/node_modules
+frontend/dist
+frontend/playwright-report
+frontend/test-results
+backend/bin
+backend/storage
+storage
+**/*.test
+**/*.out
+**/coverage.*
+.env

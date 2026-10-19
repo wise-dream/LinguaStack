@@ -22,7 +22,7 @@ services:
     restart: unless-stopped
 
   api:
-    build: ./backend
+    build: .
     image: linguastack:local
     # Все настройки из .env (ключ шифрования, лимиты, тайм-ауты — см.
     # .env.example) передаются в контейнер; без .env действуют значения по

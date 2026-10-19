@@ -1,0 +1,9 @@
+{
+  "extends": "@vue/tsconfig/tsconfig.dom.json",
+  "compilerOptions": {
+    "types": ["node"],
+    "noUncheckedIndexedAccess": true,
+    "noEmit": true
+  },
+  "include": ["src/**/*.ts", "src/**/*.vue", "e2e/**/*.ts", "vite.config.ts", "playwright.config.ts"]
+}
