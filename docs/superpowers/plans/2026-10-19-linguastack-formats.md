@@ -69,6 +69,50 @@ wazero, без CGO), с эвристиками вёрстки в своём ко
 
 ---
 
+> **Статус: ✅ завершён** (задачи 0–10). Отклонения от плана и находки:
+>
+> - **Подглавы EPUB — отдельными файлами**, а не якорями внутри файла главы:
+>   наш импорт (и многие читалки) не делит файл по якорям; с файлами
+>   вложенное оглавление переживает обратный импорт.
+> - **Вёрстка PDF** уточнена на реальных файлах: конец абзаца — «следующее
+>   слово поместилось бы» вместо «концевая пунктуация» (рваный край);
+>   отступ первой строки — от 1 кегля и только если следующая строка
+>   возвращается влево (висячий отступ списков определений); узкий абзац
+>   по ширине — сам себе колонка; межстрочный шаг — нижний квартиль;
+>   тире — не маркер списка (реплики диалога); строки печатного
+>   оглавления с отточием пропускаются; закладки сопоставляются с
+>   заголовками без номеров разделов («Overview» ↔ «1 Overview»). Chrome
+>   печатает перенос символом U+2010 и оставляет U+00AD в тексте —
+>   `pdftext` приводит их к метке `\x02`.
+> - **HTML**: единственный заголовок верхнего уровня — название книги
+>   (Gutenberg: один h1 и главы в h2); шапка и подвал страницы не
+>   импортируются; формат книги — тот, что определил импорт (ZIP со
+>   страницей — `html`).
+> - **Чужой `translation_id`** при создании экспорта — 422 «Перевод не
+>   найден», как чужая конфигурация при создании перевода; путь (книга)
+>   по-прежнему 404.
+> - **Проверки**: EPUBCheck 5.2.1 (W3C) — 0 ошибок и 0 предупреждений на
+>   полной «Алисе» в обоих режимах; живой прогон через HTTP API — импорт
+>   LaTeX-PDF, PDF из Word с кириллицей, DOCX, HTML, скана и
+>   зашифрованного PDF, перевод «Алисы» (873/873), экспорт 5 форматов × 2
+>   режима, обратный импорт EPUB/DOCX/HTML/Markdown; в docker compose —
+>   импорт PDF в контейнере (~3 с первый, api ~300 МБ после) и экспорт
+>   через worker с общим томом.
+> - **Ревью ветки (самопроверка, без отдельного ревьюера)** нашло и
+>   исправило: worker с истёкшей арендой затирал состояние и файл того,
+>   кто подхватил задачу экспорта (запись теперь по аренде из захвата,
+>   начатый экспорт дописывается при остановке); неограниченное число
+>   картинок `data:` в HTML (теперь 2000); `filename*` не строго по
+>   RFC 5987. Живая проверка нашла «[Изображение: ]» без подписи и даты
+>   1980 года у файлов в архивах экспорта.
+> - **Отложено (minor)**: страница PDF с миллионами символов держит их все
+>   в памяти Go до сборки строк (ограничено тайм-аутом и памятью модуля);
+>   при занятых экземплярах PDFium дольше 30 с загрузка сохраняется с
+>   замечанием `extract_timeout`; внутренние ссылки и картинки внутри
+>   текста Markdown-исходника в экспорте Markdown не переписываются;
+>   название книги в ZIP-экспорте Markdown при обратном импорте берётся
+>   из имени архива.
+
 ## Задача 0: решения в дополнении к ТЗ
 
 **Files:** Modify `docs/spec/SPEC-ADDENDUM.md` (§0.3, §10, §11, новые §15 и
@@ -139,7 +183,7 @@ wazero, без CGO), с эвристиками вёрстки в своём ко
   `LINGUASTACK_EXPORT_TIMEOUT` = 5m,
   `LINGUASTACK_MAX_ACTIVE_EXPORTS_PER_USER` = 3.
 
-- [ ] **Step 1:** правки ADD и CLAUDE.md. **Step 2:** коммит
+- [x] **Step 1:** правки ADD и CLAUDE.md. **Step 2:** коммит
   `docs: решения этапа 5 — импорт PDF, DOCX, HTML и экспорт`.
 
 ## Импорт
@@ -162,7 +206,7 @@ wazero, без CGO), с эвристиками вёрстки в своём ко
   `loadHTMLFiles(files []htmlFile, fallback cdm.BookMeta, assets func(name string) bool) Result`
   — общий путь для одиночного файла и ZIP, `htmlFile{name string; data []byte}`.
 
-- [ ] **Step 1:** Тесты: `TestHTMLChaptersByHeadings` (h1 → главы, h2 →
+- [x] **Step 1:** Тесты: `TestHTMLChaptersByHeadings` (h1 → главы, h2 →
   подглавы; текст до первого заголовка — неявная глава с названием книги);
   `TestHTMLMetaFromHead` (`<title>`, `<meta name="author">`, `<html lang>`);
   `TestHTMLMainContentOnly` (`<main>` есть — шапка и подвал сайта не
@@ -179,11 +223,11 @@ wazero, без CGO), с эвристиками вёрстки в своём ко
   `TestHTMLScriptIsText` (`<script>` пропущен, `&lt;b&gt;` в тексте — текст);
   `TestRealGutenbergAliceHTML` (12 глав «CHAPTER …», первый абзац главы I
   начинается с «Alice was beginning to get very tired»).
-- [ ] **Step 2:** FAIL. **Step 3:** реализация. `data:` декодируется только
+- [x] **Step 2:** FAIL. **Step 3:** реализация. `data:` декодируется только
   для `image/png|jpeg|gif|webp|avif|svg+xml`; расширение — по типу.
   Реестр: `EPUB, DOCX (задача 2), ZipRepo, Markdown, HTML, TXT, PDF
   (задача 4)` — HTML добавляется сейчас между Markdown и TXT.
-- [ ] **Step 4:** PASS, `make lint`. **Step 5:** коммит `feat: импорт HTML`.
+- [x] **Step 4:** PASS, `make lint`. **Step 5:** коммит `feat: импорт HTML`.
 
 ### Task 2: DOCX-импорт
 
@@ -198,7 +242,7 @@ wazero, без CGO), с эвристиками вёрстки в своём ко
   (`FormatID() == "docx"`; `Sniff`: `.docx` или ZIP с `word/document.xml`);
   ресурсы — имена записей архива (`word/media/image1.png`).
 
-- [ ] **Step 1:** Тесты (`docxBuilder` пишет `[Content_Types].xml`,
+- [x] **Step 1:** Тесты (`docxBuilder` пишет `[Content_Types].xml`,
   `word/document.xml`, по желанию `styles.xml`, `numbering.xml`, rels,
   `footnotes.xml`, `docProps/core.xml`, медиа):
   `TestDOCXHeadingsFromStyles` (`Heading1`/`Heading2` и локализованный
@@ -223,13 +267,13 @@ wazero, без CGO), с эвристиками вёрстки в своём ко
   `word/document.xml` → `corrupt_file`, не ошибка); `TestDOCXArchiveLimits`
   (лимиты архива → `ErrArchiveLimits`); `TestDOCXRenamedZipSniffed` (DOCX
   с расширением `.zip` уходит в DOCX, а не в ZipRepo).
-- [ ] **Step 2:** FAIL. **Step 3:** реализация: `document.xml` читается
+- [x] **Step 2:** FAIL. **Step 3:** реализация: `document.xml` читается
   потоково — каждый элемент верхнего уровня `w:body` (`w:p`, `w:tbl`,
   `w:sdt`) декодируется в узел `xmlNode{Name xml.Name; Attr []xml.Attr; Nodes []xmlNode; Text string}`
   по отдельности, память ограничена одним абзацем или таблицей; имена
   сравниваются по локальной части (Strict OOXML с другими пространствами
   имён тоже читается).
-- [ ] **Step 4:** PASS, lint. **Step 5:** коммит `feat: импорт DOCX`.
+- [x] **Step 4:** PASS, lint. **Step 5:** коммит `feat: импорт DOCX`.
 
 ### Task 3: извлечение текста PDF (PDFium/WebAssembly)
 
@@ -256,7 +300,7 @@ wazero, без CGO), с эвристиками вёрстки в своём ко
   — пул создаётся при первом вызове, не при старте процесса;
   `config.Settings.PDFMaxPages`, `PDFTimeout`, `PDFMemoryMB`.
 
-- [ ] **Step 1:** Фикстуры: `generate.sh` печатает каждый `*.html` через
+- [x] **Step 1:** Фикстуры: `generate.sh` печатает каждый `*.html` через
   `google-chrome --headless=new --no-pdf-header-footer --print-to-pdf`
   (`--generate-pdf-document-outline` — для `outline.pdf`); исходники:
   `outline.html` (две главы h1 с разрывом страницы, раздел h2,
@@ -268,7 +312,7 @@ wazero, без CGO), с эвристиками вёрстки в своём ко
   утилитой `pdfcpu encrypt -upw x` (запуск из временного модуля, в
   `go.mod` проекта pdfcpu не попадает); как получен — в
   `testdata/pdf/README.md`.
-- [ ] **Step 2:** Тесты: `TestPDFiumOutlineAndMeta` (закладки «Глава
+- [x] **Step 2:** Тесты: `TestPDFiumOutlineAndMeta` (закладки «Глава
   первая» → p1 c дочерней «Раздел 1.1», `Title` из `<title>`);
   `TestPDFiumLinesAndSpans` (строка заголовка — один Span с `Bold` и
   размером больше абзацного; моноширинная строка — `Mono`; символов
@@ -285,7 +329,7 @@ wazero, без CGO), с эвристиками вёрстки в своём ко
   монтирований, предел памяти = `MemoryLimitMB*16` страниц);
   `TestPDFiumConcurrentExtract` (два вызова параллельно при `Instances: 1`
   — оба успешны, `-race` чист).
-- [ ] **Step 3:** FAIL. **Step 4:** реализация. Конфигурация wazero:
+- [x] **Step 3:** FAIL. **Step 4:** реализация. Конфигурация wazero:
   `wazero.NewRuntimeConfig().WithCoreFeatures(api.CoreFeaturesV2|experimental.CoreFeaturesExceptionHandling).WithMemoryLimitPages(n).WithCloseOnContextDone(true)`,
   `FSConfig: wazero.NewFSConfig()`, `Stdout/Stderr: io.Discard`.
   Тайм-аут: извлечение в горутине; по истечении — `instance.Kill()`, ответ
@@ -296,7 +340,7 @@ wazero, без CGO), с эвристиками вёрстки в своём ко
   `0x40` или `Italic|Oblique`; `Mono` — флаг `0x1` или `Mono|Courier|Consol|Code`.
   Недопустимые символы XML (кроме `\x02`) вырезаются здесь же. Изображения
   страницы — число объектов `FPDF_PAGEOBJ_IMAGE`.
-- [ ] **Step 5:** PASS (в т. ч. `go test -race ./internal/pdftext/`), lint.
+- [x] **Step 5:** PASS (в т. ч. `go test -race ./internal/pdftext/`), lint.
   **Step 6:** коммит `feat: извлечение текста PDF через PDFium в WebAssembly`.
 
 ### Task 4: PDF-импорт: вёрстка → CDM
@@ -319,7 +363,7 @@ wazero, без CGO), с эвристиками вёрстки в своём ко
   `scanned_pdf` (error), `scanned_pages` (warning), `pdf_images_skipped`
   (info: «изображения из PDF не переносятся»).
 
-- [ ] **Step 1:** Тесты вёрстки на синтетических страницах (фальшивый
+- [x] **Step 1:** Тесты вёрстки на синтетических страницах (фальшивый
   `Extractor`): `TestPDFLinesJoinIntoParagraph` (три строки одного кегля
   без зазора → один абзац, строки через пробел); `TestPDFSoftHyphenJoins`
   («implemen\x02» + «tations» → «implementations»);
@@ -346,9 +390,9 @@ wazero, без CGO), с эвристиками вёрстки в своём ко
   `TestPDFImportPlainFixture` (те же главы по заголовкам);
   `TestPDFImportEncrypted` → `encrypted`; `TestPDFTooManyPagesRefused`
   (через HTTP: 413).
-- [ ] **Step 2:** FAIL. **Step 3:** реализация по §15.1 дополнения.
+- [x] **Step 2:** FAIL. **Step 3:** реализация по §15.1 дополнения.
   Реестр: PDF — последним (узнаётся и по содержимому).
-- [ ] **Step 4:** PASS, lint. **Step 5:** коммит `feat: импорт PDF`.
+- [x] **Step 4:** PASS, lint. **Step 5:** коммит `feat: импорт PDF`.
 
 ## Экспорт
 
@@ -379,7 +423,7 @@ wazero, без CGO), с эвристиками вёрстки в своём ко
   `inlinePlain(text string, hardBreaks bool) string`, `parseInline(text string) (ast.Node, []byte)`,
   `xmlSafe(s string) string`, `bookImages(b *Book) []string`.
 
-- [ ] **Step 1:** Тесты: `TestAssembleTranslationMode` (переводимые блоки
+- [x] **Step 1:** Тесты: `TestAssembleTranslationMode` (переводимые блоки
   — перевод, код и картинки — как есть, `untranslated` = блоки без
   `translated_text`); `TestAssembleChapterTitleFromHeading` (первый
   заголовок совпадает с названием → название переведено; не совпадает
@@ -408,13 +452,13 @@ wazero, без CGO), с эвристиками вёрстки в своём ко
   `TestHTMLExportReimports` (импорт HTML задачи 1 видит те же главы);
   `TestTXTExport` (заголовки, списки «- »/«1. », таблица «a | b»,
   картинка «[Изображение: alt]»; LF, UTF-8 без BOM).
-- [ ] **Step 2:** FAIL. **Step 3:** реализация. Встроенная разметка —
+- [x] **Step 2:** FAIL. **Step 3:** реализация. Встроенная разметка —
   goldmark с одним парсером абзацев (`parser.WithBlockParsers` только
   `NewParagraphParser`) и стандартными встроенными парсерами; ссылки и
   картинки переписываются обходом AST до рендера; блок `raw_html` в
   HTML/EPUB/DOCX/TXT — его текстовое содержимое (`x/net/html`), в
   Markdown — как есть.
-- [ ] **Step 4:** PASS, lint. **Step 5:** коммит `feat: экспорт в Markdown, HTML и TXT`.
+- [x] **Step 4:** PASS, lint. **Step 5:** коммит `feat: экспорт в Markdown, HTML и TXT`.
 
 ### Task 6: экспорт EPUB
 
@@ -425,7 +469,7 @@ wazero, без CGO), с эвристиками вёрстки в своём ко
 - Consumes: `exporters.Book`, помощники задачи 5.
 - Produces: `Exporter` формата `epub` (`.epub`, `application/epub+zip`).
 
-- [ ] **Step 1:** Тесты: `TestEPUBStructure` (первая запись — несжатый
+- [x] **Step 1:** Тесты: `TestEPUBStructure` (первая запись — несжатый
   `mimetype`; `META-INF/container.xml` указывает на `OEBPS/content.opf`;
   в OPF — `dc:identifier`, `dc:title`, `dc:language` = язык перевода,
   `dcterms:modified`, manifest со всеми файлами, spine по главам верхнего
@@ -437,12 +481,12 @@ wazero, без CGO), с эвристиками вёрстки в своём ко
   текстом); `TestEPUBBilingual` (абзацы оригинала с `lang` исходного языка
   и классом `original`); `TestEPUBRoundTrip` (импорт EPUB этапа 2: те же
   главы, названия и тексты блоков, подглавы — в оглавлении).
-- [ ] **Step 2:** FAIL. **Step 3:** реализация на `archive/zip` +
+- [x] **Step 2:** FAIL. **Step 3:** реализация на `archive/zip` +
   `encoding/xml`-экранировании: файл XHTML на главу верхнего уровня
   (`text/ch0001.xhtml`), подглавы — внутри с якорями `c{index}`;
   `style.css` — простая типографика; идентификатор — `urn:uuid:` задачи
   экспорта (поле `Book.ID string`).
-- [ ] **Step 4:** PASS, lint. **Step 5:** коммит `feat: экспорт EPUB`.
+- [x] **Step 4:** PASS, lint. **Step 5:** коммит `feat: экспорт EPUB`.
 
 ### Task 7: экспорт DOCX
 
@@ -454,7 +498,7 @@ wazero, без CGO), с эвристиками вёрстки в своём ко
 - Produces: `Exporter` формата `docx` (`.docx`,
   `application/vnd.openxmlformats-officedocument.wordprocessingml.document`).
 
-- [ ] **Step 1:** Тесты: `TestDOCXExportParts` (`[Content_Types].xml`,
+- [x] **Step 1:** Тесты: `TestDOCXExportParts` (`[Content_Types].xml`,
   `_rels/.rels`, `docProps/core.xml` с title/creator/language,
   `word/document.xml`, `styles.xml` со стилями `Heading1`…`Heading6`
   (`outlineLvl`), `Quote`, `Caption`, `SourceCode`, `Original`;
@@ -467,7 +511,7 @@ wazero, без CGO), с эвристиками вёрстки в своём ко
   текстом); `TestDOCXExportRoundTrip` (импорт DOCX задачи 2: те же главы,
   уровни заголовков, списки с глубиной и нумерацией, ячейки таблиц, код,
   картинки).
-- [ ] **Step 2:** FAIL. **Step 3:** реализация. **Step 4:** PASS, lint.
+- [x] **Step 2:** FAIL. **Step 3:** реализация. **Step 4:** PASS, lint.
   **Step 5:** коммит `feat: экспорт DOCX`.
 
 ### Task 8: задача экспорта: миграция, worker, API
@@ -501,7 +545,7 @@ wazero, без CGO), с эвристиками вёрстки в своём ко
   `{"id","book_id","translation_id","format","mode","status","file_name","size_bytes","untranslated","error","created_at","finished_at"}`;
   `config.Settings.ExportTimeout`, `MaxActiveExportsPerUser`.
 
-- [ ] **Step 1:** Тесты: `TestCreateExportQueued` (202, `pending`);
+- [x] **Step 1:** Тесты: `TestCreateExportQueued` (202, `pending`);
   `TestCreateExportValidation` (формат/режим не из списка — 422; перевод
   другой книги пользователя — 422; чужой перевод — 404);
   `TestCreateExportLimit` (четвёртый активный — 429);
@@ -520,12 +564,12 @@ wazero, без CGO), с эвристиками вёрстки в своём ко
   выполняющийся — 409); `TestBookDeleteRemovesExports` (каскад и файлы);
   `TestListBookExports`; матрица изоляции — ресурс `exports`
   (`{id}` → чужой экспорт), публичные маршруты не меняются.
-- [ ] **Step 2:** FAIL. **Step 3:** реализация. Захват:
+- [x] **Step 2:** FAIL. **Step 3:** реализация. Захват:
   `UPDATE export_jobs SET status='running', locked_until=now()+$lease … WHERE id = (SELECT id FROM export_jobs WHERE status='pending' OR (status='running' AND locked_until < now()) ORDER BY created_at FOR UPDATE SKIP LOCKED LIMIT 1) RETURNING *`;
   рендер с `context.WithTimeout(ExportTimeout)`; запись результата —
   условием `status='running' AND id=?` (строки нет — книга удалена:
   файл убирается). Worker запускает `Runner.Run` рядом с переводчиками.
-- [ ] **Step 4:** PASS, lint. **Step 5:** коммит `feat: задача экспорта, скачивание и история экспортов`.
+- [x] **Step 4:** PASS, lint. **Step 5:** коммит `feat: задача экспорта, скачивание и история экспортов`.
 
 ## Интерфейс и проверка
 
@@ -545,7 +589,7 @@ wazero, без CGO), с эвристиками вёрстки в своём ко
   `listBookExports(bookId)`, `getExport(id)`, `deleteExport(id)`,
   `exportFileUrl(id)` (`/api/exports/{id}/file`).
 
-- [ ] **Step 1:** Тесты: `ExportPanel` — форматы «EPUB», «Markdown», «Word
+- [x] **Step 1:** Тесты: `ExportPanel` — форматы «EPUB», «Markdown», «Word
   (DOCX)», «HTML», «Текст (TXT)», режимы «Только перевод» и «Оригинал и
   перевод»; кнопка «Экспортировать»; опрос раз в секунду до `completed`
   или `failed`; готово — ссылка «Скачать» с размером («1,2 МБ»);
@@ -557,7 +601,7 @@ wazero, без CGO), с эвристиками вёрстки в своём ко
   перечисляет форматы. Сквозной сценарий: после перевода — экспорт
   Markdown и EPUB, `page.waitForEvent('download')`, имя файла и
   содержимое Markdown содержат перевод («RU:»); импорт HTML-книги.
-- [ ] **Step 2:** FAIL. **Step 3:** реализация на токенах
+- [x] **Step 2:** FAIL. **Step 3:** реализация на токенах
   `tokens.css`, проверка на 390 px. **Step 4:** `npm run lint &&
   npm run typecheck && npm test`, `npm run e2e`. **Step 5:** коммит
   `feat: экспорт и новые форматы импорта в веб-приложении`.
@@ -568,16 +612,16 @@ wazero, без CGO), с эвристиками вёрстки в своём ко
 `docs/spec/SPEC-ADDENDUM.md` (трассируемость: №3 и №12 закрыты),
 этот план (статус и отклонения).
 
-- [ ] **Step 1:** Живая проверка на реальных файлах этой машины (в
+- [x] **Step 1:** Живая проверка на реальных файлах этой машины (в
   репозиторий не попадают): PDF из LaTeX (`petsc4py.pdf`), PDF из Word с
   кириллицей, DOCX из Word, HTML Алисы, — импорт через API, просмотр
   оглавления и блоков; перевод Алисы провайдером fake → экспорт во все
   пять форматов в обоих режимах → EPUB и DOCX снова импортируются;
   `docker compose up -d --build`: импорт PDF в контейнере (wasm без
   доступа к ФС) и экспорт через worker с томом `storage`.
-- [ ] **Step 2:** Полный прогон: `make lint`, `go test -race ./...`,
+- [x] **Step 2:** Полный прогон: `make lint`, `go test -race ./...`,
   `npm run lint && npm run typecheck && npm test`, `npm run e2e`.
-- [ ] **Step 3:** Ревью всей ветки (Review Focus выше), исправления с
+- [x] **Step 3:** Ревью всей ветки (Review Focus выше), исправления с
   тестами. **Step 4:** коммит `docs: этап 5 — форматы импорта и экспорта`,
   слияние в main.
 
