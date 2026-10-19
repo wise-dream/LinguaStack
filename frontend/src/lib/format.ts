@@ -77,3 +77,8 @@ export function plural(n: number, forms: readonly [string, string, string]): str
   if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return forms[1]
   return forms[2]
 }
+
+/** Стоимость в долларах: меньше доллара — с четырьмя знаками (запросы к моделям стоят центы). */
+export function formatCost(usd: number): string {
+  return `$${usd < 1 ? usd.toFixed(4) : usd.toFixed(2)}`
+}
