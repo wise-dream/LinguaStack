@@ -13,6 +13,7 @@ import (
 
 	"github.com/vnovels/linguastack/internal/config"
 	"github.com/vnovels/linguastack/internal/db/models"
+	"github.com/vnovels/linguastack/internal/notify"
 	"github.com/vnovels/linguastack/internal/providers"
 	"github.com/vnovels/linguastack/internal/translation"
 )
@@ -185,9 +186,24 @@ func ignoreLeaseLost(err error) error {
 }
 
 func (w *Worker) failProject(ctx context.Context, projectID uuid.UUID, cause error) error {
-	return w.db.WithContext(ctx).Exec(`
+	res := w.db.WithContext(ctx).Exec(`
 UPDATE translation_projects SET status = 'failed', last_error = ?, finished_at = now(), updated_at = now()
- WHERE id = ? AND status IN ('queued', 'running')`, clip(cause.Error()), projectID).Error
+ WHERE id = ? AND status IN ('queued', 'running')`, clip(cause.Error()), projectID)
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected > 0 {
+		w.notify("ошибка", notify.Failed(ctx, w.db, projectID))
+	}
+	return nil
+}
+
+// notify — уведомление Telegram (дополнение §17). Сбой записи уведомления
+// не должен останавливать перевод: только в журнал.
+func (w *Worker) notify(kind string, err error) {
+	if err != nil {
+		slog.Warn("worker: уведомление не записано", "worker", w.id, "kind", kind, "error", err)
+	}
 }
 
 // process переводит книгу проекта батч за батчем. Возвращает статус
@@ -349,7 +365,7 @@ func (w *Worker) failOversized(ctx context.Context, projectID uuid.UUID, oversiz
 // разойтись с данными. Статус проекта здесь не меняется: запись после
 // отмены не «воскрешает» проект (Review Focus №5).
 func (w *Worker) persist(ctx context.Context, projectID uuid.UUID, outcome translation.BatchOutcome) error {
-	return w.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	err := w.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		for nodeID, r := range outcome.Results {
 			findings := r.Findings
 			if findings == nil {
@@ -388,6 +404,15 @@ UPDATE translation_segments
 			Calls: outcome.ProviderCalls,
 		})
 	})
+	if err != nil {
+		return err
+	}
+	nodes := make([]string, 0, len(outcome.Results))
+	for nodeID := range outcome.Results {
+		nodes = append(nodes, nodeID)
+	}
+	w.notify("глава", notify.ChaptersDone(ctx, w.db, projectID, nodes))
+	return nil
 }
 
 // Usage — расход на провайдера, который добавляется к проекту: стоимость,
@@ -417,9 +442,16 @@ UPDATE translation_projects p
 }
 
 // finalize ставит итоговый статус (дополнение §5), только если проект всё
-// ещё выполняется: приостановленный или отменённый остаётся таким.
+// ещё выполняется: приостановленный или отменённый остаётся таким. Итог —
+// уведомление «готово» или «остановлен» (упавшие сегменты); ручная правка
+// через SettleStatus уведомлений не шлёт.
 func (w *Worker) finalize(ctx context.Context, projectID uuid.UUID) error {
-	return SettleStatus(ctx, w.db, projectID, models.ProjectRunning)
+	if err := SettleStatus(ctx, w.db, projectID, models.ProjectRunning); err != nil {
+		return err
+	}
+	w.notify("готово", notify.Completed(ctx, w.db, projectID))
+	w.notify("ошибка", notify.Failed(ctx, w.db, projectID))
+	return nil
 }
 
 // SettleStatus ставит итоговый статус по счётчикам, если текущий статус —

@@ -133,3 +133,15 @@ func TestTelegramIsPerUser(t *testing.T) {
 	require.Equal(t, http.StatusNoContent, other.do(http.MethodDelete, "/api/telegram", nil).Status)
 	require.True(t, getTelegram(t, owner).Linked, "и не удаляется чужим запросом")
 }
+
+func TestManualSegmentEditSendsNoNotification(t *testing.T) {
+	env := newTranslationEnv(t, nil)
+	p := env.translated(t)
+	bindTelegram(t, env.testEnv, "u@example.com")
+	seg := env.segments(t, p.ID)[0]
+	r := env.c.do(http.MethodPatch, "/api/segments/"+seg.ID, map[string]any{"translated_text": "Правка."})
+	require.Equal(t, http.StatusOK, r.Status, "тело: %s", r.Body)
+	var n int64
+	require.NoError(t, env.db.Model(&models.TelegramNotification{}).Count(&n).Error)
+	require.Zero(t, n, "уведомления — только из worker, не от каждой правки")
+}

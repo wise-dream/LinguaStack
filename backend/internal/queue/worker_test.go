@@ -530,3 +530,50 @@ func TestPartialBatchResultsSavedOnInfraFailure(t *testing.T) {
 	require.NoError(t, e.db.First(&task, "project_id = ?", project.ID).Error)
 	require.Equal(t, models.TaskPending, task.Status)
 }
+
+func (e *workerEnv) bindTelegram(project *models.TranslationProject) {
+	e.t.Helper()
+	require.NoError(e.t, e.db.Create(&models.TelegramBinding{UserID: project.OwnerID, TelegramUserID: int64(project.OwnerID.ID()),
+		ChatID: 1, NotifyChapters: true, NotifyCompleted: true, NotifyErrors: true}).Error)
+}
+
+func (e *workerEnv) notifications(project *models.TranslationProject) []string {
+	e.t.Helper()
+	var rows []models.TelegramNotification
+	require.NoError(e.t, e.db.Where("project_id = ?", project.ID).Order("created_at, chapter_index").Find(&rows).Error)
+	out := make([]string, len(rows))
+	for i, r := range rows {
+		out[i] = r.Kind
+		if r.ChapterIndex != nil {
+			out[i] += fmt.Sprintf(":%d", *r.ChapterIndex)
+		}
+	}
+	return out
+}
+
+func TestWorkerEnqueuesChapterAndCompleted(t *testing.T) {
+	e := newWorkerEnv(t)
+	project := e.projectFromMarkdown("# One\n\nA.\n\nB.\n\nC.\n\n# Two\n\nD.")
+	e.bindTelegram(project)
+	e.runUntilIdle(e.worker("w"))
+	require.Equal(t, models.ProjectCompleted, e.reload(project).Status)
+	require.Equal(t, []string{"chapter:0", "chapter:1", "completed"}, e.notifications(project))
+}
+
+func TestWorkerEnqueuesFailed(t *testing.T) {
+	e := newWorkerEnv(t)
+	project := e.projectFromMarkdown("# Ch\n\nOne.")
+	e.bindTelegram(project)
+	w := queue.NewWorker("w", e.db, func(context.Context, *models.TranslationProject) (providers.Provider, error) {
+		return nil, fmt.Errorf("%w: ключ отозван", providers.ErrAuth)
+	}, e.cfg)
+	e.runUntilIdle(w)
+	require.Equal(t, []string{"failed"}, e.notifications(project))
+}
+
+func TestWorkerWithoutBindingEnqueuesNothing(t *testing.T) {
+	e := newWorkerEnv(t)
+	project := e.projectFromMarkdown("# One\n\nA.")
+	e.runUntilIdle(e.worker("w"))
+	require.Empty(t, e.notifications(project))
+}
