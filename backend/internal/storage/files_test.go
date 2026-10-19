@@ -211,3 +211,43 @@ func TestFilesNotWorldReadable(t *testing.T) {
 	require.NoError(t, err)
 	require.Zero(t, info.Mode().Perm()&0o007, "права %v", info.Mode().Perm())
 }
+
+func TestOpenAssetReadsSavedAsset(t *testing.T) {
+	s := newStore(t, 1024)
+	_, err := s.SaveAsset(userID, bookID, "img/d.png", strings.NewReader("PNG"))
+	require.NoError(t, err)
+	f, err := s.OpenAsset(userID, bookID, "img/d.png")
+	require.NoError(t, err)
+	defer func() { _ = f.Close() }()
+	raw, err := io.ReadAll(f)
+	require.NoError(t, err)
+	require.Equal(t, "PNG", string(raw))
+}
+
+func TestOpenAssetRejectsTraversal(t *testing.T) {
+	s := newStore(t, 1024)
+	_, err := s.SaveOriginal(userID, bookID, ".md", strings.NewReader("# secret"))
+	require.NoError(t, err)
+	for _, name := range []string{"../original.md", "/etc/passwd", "img/../../original.md", ""} {
+		_, err := s.OpenAsset(userID, bookID, name)
+		require.ErrorIs(t, err, storage.ErrUnsafePath, name)
+	}
+}
+
+func TestOpenAssetRejectsSymlink(t *testing.T) {
+	// Ресурсы создаём только мы, и ссылок не кладём: ссылка — подмена.
+	s := newStore(t, 1024)
+	_, err := s.SaveAsset(userID, bookID, "seed.png", strings.NewReader("x"))
+	require.NoError(t, err)
+	secret := filepath.Join(t.TempDir(), "secret")
+	require.NoError(t, os.WriteFile(secret, []byte("secret"), 0o600))
+	require.NoError(t, os.Symlink(secret, filepath.Join(s.BookDir(userID, bookID), "assets", "link.png")))
+	_, err = s.OpenAsset(userID, bookID, "link.png")
+	require.ErrorIs(t, err, storage.ErrUnsafePath)
+}
+
+func TestOpenAssetMissing(t *testing.T) {
+	s := newStore(t, 1024)
+	_, err := s.OpenAsset(userID, bookID, "nope.png")
+	require.ErrorIs(t, err, os.ErrNotExist)
+}

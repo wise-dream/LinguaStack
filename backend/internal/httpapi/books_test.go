@@ -3,6 +3,7 @@ package httpapi_test
 import (
 	"archive/zip"
 	"bytes"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -298,4 +299,143 @@ func TestOriginalFileUnchangedOnDisk(t *testing.T) {
 		}
 	}
 	require.Equal(t, content, string(stored), "байт в байт, включая BOM и CRLF")
+}
+
+type chapterBody struct {
+	Index  int    `json:"index"`
+	Title  string `json:"title"`
+	Blocks []struct {
+		NodeID string            `json:"node_id"`
+		Type   string            `json:"type"`
+		Text   string            `json:"text"`
+		Meta   map[string]string `json:"meta"`
+	} `json:"blocks"`
+}
+
+func getChapter(t *testing.T, c *apiClient, bookID string, index int) chapterBody {
+	t.Helper()
+	r := c.do(http.MethodGet, fmt.Sprintf("/api/books/%s/chapters/%d", bookID, index), nil)
+	require.Equal(t, http.StatusOK, r.Status, "тело: %s", r.Body)
+	var ch chapterBody
+	r.JSON(t, &ch)
+	return ch
+}
+
+func chapterTexts(ch chapterBody) []string {
+	var out []string
+	for _, b := range ch.Blocks {
+		out = append(out, b.Text)
+	}
+	return out
+}
+
+func TestChapterBlocks(t *testing.T) {
+	// Читалка грузит книгу по главам (ТЗ §8.3); вложенная глава находится
+	// по index, а блоки родителя не включают блоки детей.
+	env := newTestEnv(t)
+	c := env.signedIn(t, "r@example.com")
+	b := uploadBook(t, c, "book.md", "# A\n\nOne.\n\n## A1\n\nNested.\n\n# B\n\nTwo.")
+	var toc struct {
+		Chapters []struct {
+			Index    int `json:"index"`
+			Children []struct {
+				Index int `json:"index"`
+			} `json:"children"`
+		} `json:"chapters"`
+	}
+	c.do(http.MethodGet, "/api/books/"+b.ID+"/toc", nil).JSON(t, &toc)
+
+	parent := getChapter(t, c, b.ID, toc.Chapters[0].Index)
+	require.Equal(t, "A", parent.Title)
+	require.Contains(t, chapterTexts(parent), "One.")
+	require.NotContains(t, chapterTexts(parent), "Nested.")
+
+	nested := getChapter(t, c, b.ID, toc.Chapters[0].Children[0].Index)
+	require.Equal(t, "A1", nested.Title)
+	require.Contains(t, chapterTexts(nested), "Nested.")
+	require.NotEmpty(t, nested.Blocks[0].NodeID)
+}
+
+func TestChapterMissing404(t *testing.T) {
+	env := newTestEnv(t)
+	c := env.signedIn(t, "r@example.com")
+	b := uploadBook(t, c, "book.md", "# A\n\nOne.")
+	for _, index := range []string{"999", "-1", "abc"} {
+		require.Equal(t, http.StatusNotFound, c.do(http.MethodGet, "/api/books/"+b.ID+"/chapters/"+index, nil).Status, index)
+	}
+}
+
+func TestEPUBImageServedByMetaSrc(t *testing.T) {
+	// Адрес картинки клиент строит из meta.src блока image: он должен
+	// совпадать с именем сохранённого ресурса.
+	env := newTestEnv(t)
+	c := env.signedIn(t, "r@example.com")
+	raw, err := os.ReadFile("../importers/testdata/real/alice.epub")
+	require.NoError(t, err)
+	b := uploadBook(t, c, "alice.epub", string(raw))
+	src := ""
+	for i := 0; i < b.Chapters && src == ""; i++ {
+		r := c.do(http.MethodGet, fmt.Sprintf("/api/books/%s/chapters/%d", b.ID, i), nil)
+		if r.Status != http.StatusOK {
+			continue
+		}
+		var ch chapterBody
+		r.JSON(t, &ch)
+		for _, blk := range ch.Blocks {
+			if blk.Type == "image" {
+				src = blk.Meta["src"]
+				break
+			}
+		}
+	}
+	require.NotEmpty(t, src, "в «Алисе» есть обложка")
+	r := c.do(http.MethodGet, "/api/books/"+b.ID+"/assets/"+src, nil)
+	require.Equal(t, http.StatusOK, r.Status, "src=%s", src)
+	require.Equal(t, "image/jpeg", r.Header.Get("Content-Type"))
+	require.True(t, bytes.HasPrefix(r.Body, []byte{0xFF, 0xD8}), "это JPEG")
+	require.Equal(t, "nosniff", r.Header.Get("X-Content-Type-Options"))
+	require.Equal(t, "private, max-age=86400", r.Header.Get("Cache-Control"))
+}
+
+func TestSVGAssetIsSandboxed(t *testing.T) {
+	// SVG может нести скрипт: отданный с нашего origin, он выполнился бы с
+	// сессией пользователя. CSP sandbox запрещает скрипты.
+	env := newTestEnv(t)
+	c := env.signedIn(t, "r@example.com")
+	b := uploadBook(t, c, "repo.zip", string(zipBytes(t, map[string]string{
+		"ch.md":     "# Глава\n\n![схема](img/a.svg)\n",
+		"img/a.svg": `<svg xmlns="http://www.w3.org/2000/svg"><script>alert(document.cookie)</script></svg>`,
+	})))
+	r := c.do(http.MethodGet, "/api/books/"+b.ID+"/assets/img/a.svg", nil)
+	require.Equal(t, http.StatusOK, r.Status)
+	require.Equal(t, "image/svg+xml", r.Header.Get("Content-Type"))
+	csp := r.Header.Get("Content-Security-Policy")
+	require.Contains(t, csp, "sandbox")
+	require.Contains(t, csp, "default-src 'none'")
+	require.Equal(t, "nosniff", r.Header.Get("X-Content-Type-Options"))
+}
+
+func TestAssetPathTraversal404(t *testing.T) {
+	env := newTestEnv(t)
+	c := env.signedIn(t, "r@example.com")
+	b := uploadBook(t, c, "repo.zip", string(zipBytes(t, map[string]string{
+		"ch.md":     "# Глава\n\n![схема](img/d.png)\n",
+		"img/d.png": "\x89PNG\r\n\x1a\n",
+	})))
+	var bookDir string
+	for _, f := range filesUnder(t, env.storage) {
+		if strings.Contains(f, b.ID) && strings.Contains(f, "original") {
+			bookDir = filepath.Join(env.storage, filepath.Dir(f))
+		}
+	}
+	require.NotEmpty(t, bookDir)
+	// Подложенные напрямую файлы: тип не из списка и ссылка на оригинал.
+	require.NoError(t, os.WriteFile(filepath.Join(bookDir, "assets", "evil.html"), []byte("<script>x</script>"), 0o600))
+	require.NoError(t, os.Symlink(filepath.Join(bookDir, "original.zip"), filepath.Join(bookDir, "assets", "link.png")))
+
+	for _, p := range []string{"../original.zip", "%2e%2e/original.zip", "img/..%2f..%2foriginal.zip", "evil.html", "link.png", "nope.png"} {
+		r := c.do(http.MethodGet, "/api/books/"+b.ID+"/assets/"+p, nil)
+		require.Equal(t, http.StatusNotFound, r.Status, "%s: %s", p, r.Body)
+	}
+	require.Equal(t, http.StatusOK, c.do(http.MethodGet, "/api/books/"+b.ID+"/assets/img/d.png", nil).Status)
 }

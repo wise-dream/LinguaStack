@@ -419,6 +419,14 @@ func (s *server) listSegments(w http.ResponseWriter, r *http.Request) {
 		}
 		q = q.Where("status = ?", status)
 	}
+	if raw := r.URL.Query().Get("chapter"); raw != "" {
+		chapter, err := strconv.Atoi(raw)
+		if err != nil || chapter < 0 {
+			writeError(w, http.StatusUnprocessableEntity, "chapter — номер главы, 0 и больше")
+			return
+		}
+		q = q.Where("chapter_index = ?", chapter)
+	}
 	if severity := r.URL.Query().Get("severity"); severity != "" {
 		if !slices.Contains(segmentSeverities, severity) {
 			writeError(w, http.StatusUnprocessableEntity, "severity: "+strings.Join(segmentSeverities, ", "))

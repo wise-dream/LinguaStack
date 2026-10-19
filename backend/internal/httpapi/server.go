@@ -106,6 +106,8 @@ func buildRoutes(s *server) *router {
 	rt.protected("GET /api/books/{id}", s.getBook)
 	rt.protected("DELETE /api/books/{id}", s.deleteBook)
 	rt.protected("GET /api/books/{id}/toc", s.getTOC)
+	rt.protected("GET /api/books/{id}/chapters/{index}", s.getChapter)
+	rt.protected("GET /api/books/{id}/assets/{path...}", s.getAsset)
 	rt.protected("PUT /api/books/{id}/toc", s.putTOC)
 	rt.protected("POST /api/books/{id}/translations", s.createTranslation)
 

@@ -31,6 +31,9 @@ func setupForeign(t *testing.T) (*translationEnv, *apiClient, foreignResources) 
 
 func (f foreignResources) url(t *testing.T, path string) (string, bool) {
 	t.Helper()
+	// Вторичные параметры — правдоподобными значениями: иначе маршрут мог
+	// бы отвечать 404 из-за них, а не из-за чужого владельца.
+	path = strings.NewReplacer("{index}", "0", "{path...}", "img/d.png").Replace(path)
 	switch {
 	case !strings.Contains(path, "{"):
 		return path, true

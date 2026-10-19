@@ -383,6 +383,23 @@ func TestSegmentsListIsPaged(t *testing.T) {
 		e.c.do(http.MethodGet, "/api/translations/"+p.ID+"/segments?limit=99999", nil).Status)
 }
 
+func TestSegmentsFilterByChapter(t *testing.T) {
+	// Читалка грузит сегменты главы, а не всей книги.
+	e := newTranslationEnv(t, nil)
+	p := e.project(t, e.book(t, "# A\n\nOne.\n\n# B\n\nTwo.\n\nThree."))
+	e.runWorker(t)
+	var first, second []segmentBody
+	e.c.do(http.MethodGet, "/api/translations/"+p.ID+"/segments?chapter=0", nil).JSON(t, &first)
+	e.c.do(http.MethodGet, "/api/translations/"+p.ID+"/segments?chapter=1", nil).JSON(t, &second)
+	require.Len(t, first, 2, "заголовок и абзац главы A")
+	require.Equal(t, "One.", first[1].SourceText)
+	require.Len(t, second, 3)
+	for _, bad := range []string{"chapter=-1", "chapter=abc"} {
+		require.Equal(t, http.StatusUnprocessableEntity,
+			e.c.do(http.MethodGet, "/api/translations/"+p.ID+"/segments?"+bad, nil).Status, bad)
+	}
+}
+
 func TestSegmentsFilterByStatusAndSeverity(t *testing.T) {
 	// ТЗ §5.3: не прошедший проверку результат должен находиться и
 	// обрабатываться повторно — среди сотен сегментов книги, а не перебором.

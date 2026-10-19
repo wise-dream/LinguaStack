@@ -236,6 +236,33 @@ func (s *FileStore) SaveAsset(userID, bookID uuid.UUID, member string, r io.Read
 	return filepath.Join(assets, filepath.FromSlash(name)), nil
 }
 
+// OpenAsset открывает ресурс книги на чтение. Имя проверяется так же, как
+// при записи; символическая ссылка в пути — подмена (ErrUnsafePath), а
+// os.Root не выпускает за каталог ресурсов даже при гонке.
+func (s *FileStore) OpenAsset(userID, bookID uuid.UUID, member string) (*os.File, error) {
+	name, err := ValidateMemberName(member)
+	if err != nil {
+		return nil, err
+	}
+	root, err := os.OpenRoot(filepath.Join(s.BookDir(userID, bookID), "assets"))
+	if err != nil {
+		return nil, err // нет каталога — нет и ресурса (fs.ErrNotExist)
+	}
+	defer func() { _ = root.Close() }()
+	if err := rejectSymlinks(root, name); err != nil {
+		return nil, err
+	}
+	f, err := root.Open(name)
+	if err != nil {
+		return nil, err
+	}
+	if info, err := f.Stat(); err != nil || !info.Mode().IsRegular() {
+		_ = f.Close()
+		return nil, fmt.Errorf("%w: %q не файл", fs.ErrNotExist, name)
+	}
+	return f, nil
+}
+
 // rejectSymlinks отвергает путь, если любой его существующий компонент —
 // символическая ссылка. Каталог ресурсов создаём только мы и ссылок туда
 // не кладём, поэтому ссылка означает подмену. os.Root остаётся второй

@@ -4,9 +4,12 @@ import (
 	"bytes"
 	"errors"
 	"io"
+	"io/fs"
+	"log/slog"
 	"net/http"
 	"path"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -347,4 +350,91 @@ func (s *server) deleteBook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+type chapterOut struct {
+	Index  int         `json:"index"`
+	Title  string      `json:"title"`
+	Blocks []cdm.Block `json:"blocks"`
+}
+
+// findChapter ищет главу по index во всём дереве оглавления.
+func findChapter(chapters []cdm.Chapter, index int) (*cdm.Chapter, bool) {
+	for i := range chapters {
+		if chapters[i].Index == index {
+			return &chapters[i], true
+		}
+		if ch, ok := findChapter(chapters[i].Children, index); ok {
+			return ch, true
+		}
+	}
+	return nil, false
+}
+
+// getChapter — блоки одной главы для читалки (ТЗ §8.3): книга грузится по
+// главам, а не целиком. Блоки вложенных глав сюда не входят — у них свой
+// index в оглавлении.
+func (s *server) getChapter(w http.ResponseWriter, r *http.Request) {
+	book, ok := loadOwned[models.Book](s, w, r, "id")
+	if !ok {
+		return
+	}
+	index, err := strconv.Atoi(r.PathValue("index"))
+	ch, found := findChapter(book.CDM.Data.Chapters, index)
+	if err != nil || !found {
+		writeError(w, http.StatusNotFound, "Глава не найдена")
+		return
+	}
+	blocks := ch.Blocks
+	if blocks == nil {
+		blocks = []cdm.Block{}
+	}
+	writeJSON(w, http.StatusOK, chapterOut{Index: ch.Index, Title: ch.Title, Blocks: blocks})
+}
+
+// assetTypes — какие ресурсы книги отдаются и с каким типом. Остальное —
+// 404: тип по содержимому не угадывается (nosniff), а HTML с нашего origin
+// выполнился бы с сессией пользователя.
+var assetTypes = map[string]string{
+	".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif",
+	".webp": "image/webp", ".avif": "image/avif", ".svg": "image/svg+xml",
+}
+
+// assetCSP — даже SVG со скриптом не выполнит его: sandbox и запрет всего,
+// кроме встроенных стилей картинки.
+const assetCSP = "default-src 'none'; style-src 'unsafe-inline'; sandbox"
+
+// getAsset — ресурс книги (картинка из EPUB или ZIP) по имени из meta.src
+// блока image.
+func (s *server) getAsset(w http.ResponseWriter, r *http.Request) {
+	book, ok := loadOwned[models.Book](s, w, r, "id")
+	if !ok {
+		return
+	}
+	name := r.PathValue("path")
+	contentType, allowed := assetTypes[strings.ToLower(path.Ext(name))]
+	if !allowed {
+		writeError(w, http.StatusNotFound, "Не найдено")
+		return
+	}
+	f, err := s.Store.OpenAsset(book.OwnerID, book.ID, name)
+	if err != nil {
+		if !errors.Is(err, fs.ErrNotExist) && !errors.Is(err, storage.ErrUnsafePath) {
+			slog.Warn("ресурс книги не открылся", "book", book.ID, "error", err)
+		}
+		writeError(w, http.StatusNotFound, "Не найдено")
+		return
+	}
+	defer func() { _ = f.Close() }()
+	info, err := f.Stat()
+	if err != nil {
+		internalError(w, r, err)
+		return
+	}
+	h := w.Header()
+	h.Set("Content-Type", contentType)
+	h.Set("X-Content-Type-Options", "nosniff")
+	h.Set("Content-Security-Policy", assetCSP)
+	h.Set("Cache-Control", "private, max-age=86400")
+	http.ServeContent(w, r, "", info.ModTime(), f)
 }
