@@ -61,20 +61,25 @@ func (r *htmlRenderer) paragraphs(blk Block, tag, class string) string {
 
 // chapter — глава секцией с якорем c{index}; подглавы — вложенными
 // секциями.
-func (r *htmlRenderer) chapter(b *strings.Builder, ch *Chapter, depth int, withHeading bool) {
+func (r *htmlRenderer) chapter(b *strings.Builder, ch *Chapter, depth int) {
 	b.WriteString(`<section id="c` + strconv.Itoa(ch.Index) + `">` + "\n")
-	blocks := ch.Blocks
-	if withHeading {
-		blocks = displayBlocks(ch, depth)
-	}
-	for _, group := range groupBlocks(blocks) {
-		b.WriteString(r.group(group))
-		b.WriteString("\n")
-	}
+	b.WriteString(r.blocks(displayBlocks(ch, depth)))
 	for i := range ch.Children {
-		r.chapter(b, &ch.Children[i], depth+1, withHeading)
+		r.chapter(b, &ch.Children[i], depth+1)
 	}
 	b.WriteString("</section>\n")
+}
+
+// blocks — блоки подряд, списки и таблицы — группами.
+func (r *htmlRenderer) blocks(blocks []Block) string {
+	var b strings.Builder
+	for _, group := range groupBlocks(blocks) {
+		if out := r.group(group); out != "" {
+			b.WriteString(out)
+			b.WriteString("\n")
+		}
+	}
+	return b.String()
 }
 
 func (r *htmlRenderer) group(blocks []Block) string {
@@ -295,7 +300,7 @@ func (htmlExporter) Write(w io.Writer, b *Book) error {
 	page.WriteString("<style>\n" + bookCSS + "</style>\n</head>\n<body>\n")
 	page.WriteString(`<nav class="toc">` + tocList(b.Chapters, func(ch *Chapter) string { return "#c" + strconv.Itoa(ch.Index) }) + "</nav>\n<main>\n")
 	for i := range b.Chapters {
-		r.chapter(&page, &b.Chapters[i], 1, true)
+		r.chapter(&page, &b.Chapters[i], 1)
 	}
 	page.WriteString("</main>\n</body>\n</html>\n")
 	_, err := io.WriteString(w, page.String())
