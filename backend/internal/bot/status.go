@@ -11,8 +11,6 @@ import (
 	"unicode/utf8"
 
 	"github.com/google/uuid"
-	"golang.org/x/text/language"
-	"golang.org/x/text/language/display"
 
 	"github.com/vnovels/linguastack/internal/db/models"
 	"github.com/vnovels/linguastack/internal/queue"
@@ -27,18 +25,6 @@ var statusLabels = map[string]string{
 	models.ProjectPaused: "Приостановлен", models.ProjectCompleted: "Готово",
 	models.ProjectCompletedWithWarnings: "Готово, есть замечания", models.ProjectFailed: "Ошибка",
 	models.ProjectCancelled: "Отменён",
-}
-
-// LanguageName — название языка по-русски: «английский».
-func LanguageName(code string) string {
-	tag, err := language.Parse(code)
-	if err != nil {
-		return code
-	}
-	if name := display.Russian.Languages().Name(tag); name != "" {
-		return name
-	}
-	return code
 }
 
 func (b *Bot) status(ctx context.Context, m *telegram.IncomingMessage) error {
@@ -87,12 +73,12 @@ func (b *Bot) statusView(ctx context.Context, bnd *models.TelegramBinding) (stri
 	for i, p := range projects {
 		n := strconv.Itoa(i + 1)
 		fmt.Fprintf(&text, "\n%s. <b>%s</b> → %s\n%s", n, html.EscapeString(titles[p.BookID]),
-			html.EscapeString(LanguageName(p.TargetLang)), progressLine(&p))
+			html.EscapeString(telegram.LanguageName(p.TargetLang)), progressLine(&p))
 		if p.Status == models.ProjectFailed && p.LastError != "" {
 			text.WriteString("\n" + html.EscapeString(clip(p.LastError, 200)))
 		}
 		if url := b.page("/translations/" + p.ID.String()); url != "" {
-			text.WriteString("\n" + link(url, "Открыть"))
+			text.WriteString("\n" + telegram.Link(url, "Открыть"))
 		}
 		text.WriteString("\n")
 		switch p.Status {

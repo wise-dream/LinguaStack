@@ -6,7 +6,6 @@ package bot
 import (
 	"context"
 	"errors"
-	"html"
 	"log/slog"
 	"strings"
 	"time"
@@ -135,13 +134,9 @@ func (b *Bot) page(path string) string {
 func (b *Bot) settingsHint() string {
 	hint := "на сайте LinguaStack откройте «Настройки» и нажмите «Привязать Telegram»"
 	if url := b.page("/settings"); url != "" {
-		hint += ": " + link(url, "открыть настройки")
+		hint += ": " + telegram.Link(url, "открыть настройки")
 	}
 	return hint + "."
-}
-
-func link(url, text string) string {
-	return `<a href="` + html.EscapeString(url) + `">` + html.EscapeString(text) + "</a>"
 }
 
 func (b *Bot) helpText() string {
