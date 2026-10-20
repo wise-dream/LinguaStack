@@ -47,7 +47,8 @@ function move(position: number, delta: number) {
           <NButton
             class="move"
             size="small"
-            quaternary
+            secondary
+            circle
             :aria-label="`Переместить «${entry.title}» выше`"
             :disabled="position === 0"
             @click="move(position, -1)"
@@ -55,7 +56,8 @@ function move(position: number, delta: number) {
           <NButton
             class="move"
             size="small"
-            quaternary
+            secondary
+            circle
             :aria-label="`Переместить «${entry.title}» ниже`"
             :disabled="position === top.length - 1"
             @click="move(position, 1)"

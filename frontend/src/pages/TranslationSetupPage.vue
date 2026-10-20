@@ -2,7 +2,7 @@
 // Настройка перевода (ТЗ §8.1 п.5): подключение и модель, языки по
 // возможностям модели (§5.2), стиль, точность, глоссарий и
 // предупреждение о передаче текста наружу (§6.4).
-import { NButton } from 'naive-ui'
+import { NAlert, NButton, NRadio, NRadioGroup } from 'naive-ui'
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
@@ -11,8 +11,10 @@ import { errorMessage } from '../api/client'
 import { configModels, listProviderConfigs } from '../api/providers'
 import { createTranslation, getTranslationOptions } from '../api/translations'
 import type { Book, Determinism, ModelCaps, ProviderConfig, TranslationOptions } from '../api/types'
+import ErrorAlert from '../components/ErrorAlert.vue'
 import GlossaryEditor from '../components/GlossaryEditor.vue'
 import LinkButton from '../components/LinkButton.vue'
+import SelectField from '../components/SelectField.vue'
 import { glossaryFromRows, type GlossaryRow } from '../components/glossary'
 import { capitalize, languageName } from '../lib/format'
 
@@ -72,6 +74,12 @@ const languages = computed(() => {
   const allowed = supported?.length ? all.filter((c) => supported.includes(c)) : all
   return [...allowed].sort((a, b) => languageName(a).localeCompare(languageName(b), 'ru'))
 })
+
+const langOption = (code: string) => ({ label: capitalize(languageName(code)), value: code })
+const configOptions = computed(() => configs.value.map((c) => ({ label: c.name, value: c.id })))
+const modelOptions = computed(() => models.value.map((m) => ({ label: m.display_name || m.model_id, value: m.model_id })))
+const sourceOptions = computed(() => [langOption('auto'), ...languages.value.map(langOption)])
+const targetOptions = computed(() => languages.value.map(langOption))
 
 const egress = computed(() => {
   if (!config.value?.sends_data_externally) return null
@@ -141,13 +149,7 @@ async function submit() {
 
 <template>
   <main class="page setup">
-    <p
-      v-if="loadError"
-      role="alert"
-      class="form-error"
-    >
-      {{ loadError }}
-    </p>
+    <ErrorAlert :message="loadError" />
     <template v-if="book && options">
       <p class="crumb">
         <RouterLink :to="`/books/${book.id}`">
@@ -175,151 +177,93 @@ async function submit() {
         @submit.prevent="submit"
       >
         <div class="pair">
-          <div class="field">
-            <label for="setup-provider_config_id">Подключение</label>
-            <select
-              id="setup-provider_config_id"
-              v-model="form.provider_config_id"
-              name="provider_config_id"
-            >
-              <option
-                v-for="c in configs"
-                :key="c.id"
-                :value="c.id"
-              >
-                {{ c.name }}
-              </option>
-            </select>
-          </div>
-          <div class="field">
-            <label for="setup-model_id">Модель</label>
-            <select
-              id="setup-model_id"
-              v-model="form.model_id"
-              name="model_id"
-              :disabled="!models.length"
-            >
-              <option
-                v-for="m in models"
-                :key="m.model_id"
-                :value="m.model_id"
-              >
-                {{ m.display_name || m.model_id }}
-              </option>
-            </select>
-          </div>
+          <SelectField
+            v-model="form.provider_config_id"
+            label="Подключение"
+            name="provider_config_id"
+            :options="configOptions"
+          />
+          <SelectField
+            v-model="form.model_id"
+            label="Модель"
+            name="model_id"
+            :options="modelOptions"
+            :disabled="!models.length"
+            filterable
+          />
         </div>
-        <p
-          v-if="modelsError"
-          role="alert"
-          class="form-error"
-        >
-          {{ modelsError }}
-        </p>
-
-        <div
+        <ErrorAlert :message="modelsError" />
+        <NAlert
           v-if="egress === 'allowed'"
           class="egress"
-          role="note"
+          type="warning"
         >
           Текст книги будет отправлен в «{{ config?.name }}» и покинет этот сервер.
-        </div>
-        <div
+        </NAlert>
+        <NAlert
           v-else-if="egress === 'blocked'"
           class="egress blocked"
-          role="note"
+          type="error"
         >
           Подключение «{{ config?.name }}» не разрешает отправку текста книг наружу. Разрешите её в разделе
           <RouterLink to="/settings/providers">
             «Модели»
           </RouterLink> или выберите локальную модель.
-        </div>
-
+        </NAlert>
         <div class="pair">
-          <div class="field">
-            <label for="setup-source_lang">Язык оригинала</label>
-            <select
-              id="setup-source_lang"
-              v-model="form.source_lang"
-              name="source_lang"
-            >
-              <option value="auto">
-                {{ capitalize(languageName('auto')) }}
-              </option>
-              <option
-                v-for="code in languages"
-                :key="code"
-                :value="code"
-              >
-                {{ capitalize(languageName(code)) }}
-              </option>
-            </select>
-          </div>
-          <div class="field">
-            <label for="setup-target_lang">Язык перевода</label>
-            <select
-              id="setup-target_lang"
-              v-model="form.target_lang"
-              name="target_lang"
-            >
-              <option
-                v-for="code in languages"
-                :key="code"
-                :value="code"
-              >
-                {{ capitalize(languageName(code)) }}
-              </option>
-            </select>
-          </div>
+          <SelectField
+            v-model="form.source_lang"
+            label="Язык оригинала"
+            name="source_lang"
+            :options="sourceOptions"
+            filterable
+          />
+          <SelectField
+            v-model="form.target_lang"
+            label="Язык перевода"
+            name="target_lang"
+            :options="targetOptions"
+            filterable
+          />
         </div>
-
-        <fieldset class="choice styles">
+        <fieldset class="choice-set">
           <legend>Стиль</legend>
-          <label
-            v-for="s in styles"
-            :key="s"
+          <NRadioGroup
+            v-model:value="form.style"
+            name="style"
+            class="choice styles"
           >
-            <input
-              v-model="form.style"
-              type="radio"
-              name="style"
+            <NRadio
+              v-for="s in styles"
+              :key="s"
               :value="s"
+              class="tile"
             >
-            <span>
               <strong>{{ styleText[s]?.label ?? s }}</strong>
               <small>{{ styleText[s]?.hint }}</small>
-            </span>
-          </label>
+            </NRadio>
+          </NRadioGroup>
         </fieldset>
-
-        <fieldset class="choice">
+        <fieldset class="choice-set">
           <legend>Точность</legend>
-          <label
-            v-for="d in options.determinism"
-            :key="d"
+          <NRadioGroup
+            v-model:value="form.determinism"
+            name="determinism"
+            class="choice"
           >
-            <input
-              v-model="form.determinism"
-              type="radio"
-              name="determinism"
+            <NRadio
+              v-for="d in options.determinism"
+              :key="d"
               :value="d"
+              class="tile"
             >
-            <span>
               <strong>{{ determinismText[d]?.label ?? d }}</strong>
               <small>{{ determinismText[d]?.hint }}</small>
-            </span>
-          </label>
+            </NRadio>
+          </NRadioGroup>
         </fieldset>
-
         <GlossaryEditor v-model="glossary" />
-
-        <p
-          v-if="submitError"
-          role="alert"
-          class="form-error"
-        >
-          {{ submitError }}
-        </p>
+        <ErrorAlert :message="submitError" />
         <NButton
           attr-type="submit"
           type="primary"
@@ -355,24 +299,20 @@ form {
   gap: var(--space-4);
 }
 
-.egress {
-  padding: var(--space-3) var(--space-4);
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--highlight) 18%, var(--surface));
-  border: 1px solid color-mix(in srgb, var(--highlight) 55%, var(--surface));
-}
-
-.egress.blocked {
-  color: var(--proof);
-  background: color-mix(in srgb, var(--proof) 7%, var(--surface));
-  border-color: color-mix(in srgb, var(--proof) 25%, var(--surface));
-}
-
 /* Варианты стиля и точности — плитки: выбранная обведена краской оригинала. */
-.choice {
+.choice-set {
   border: none;
   margin: 0;
   padding: 0;
+}
+
+.choice-set legend {
+  font-weight: 500;
+  padding: 0;
+  margin-bottom: var(--space-2);
+}
+
+.choice {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: var(--space-2);
@@ -382,44 +322,32 @@ form {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
-.choice legend {
-  font-weight: 500;
-  padding: 0;
-  margin-bottom: var(--space-2);
-}
-
-.choice label {
+.tile {
   display: flex;
-  gap: var(--space-2);
   align-items: flex-start;
+  margin: 0;
   padding: var(--space-3);
   border: 1px solid var(--rule-soft);
   border-radius: 8px;
   background: var(--surface);
-  cursor: pointer;
   transition: border-color 0.2s, background-color 0.2s;
 }
 
-.choice label:hover {
+.tile:hover {
   border-color: var(--rule);
 }
 
-.choice label:has(input:checked) {
+.tile.n-radio--checked {
   border-color: var(--ink-original);
   background: color-mix(in srgb, var(--ink-original) 4%, var(--surface));
 }
 
-.choice input {
-  margin-top: 0.2em;
-  flex: none;
-}
-
-.choice span {
+.tile :deep(.n-radio__label) {
   display: grid;
   gap: 2px;
 }
 
-.choice small {
+.tile small {
   color: var(--muted);
 }
 

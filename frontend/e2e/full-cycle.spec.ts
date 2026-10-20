@@ -1,6 +1,6 @@
 import { readFile } from 'node:fs/promises'
 
-import { expect, test, type Page } from '@playwright/test'
+import { expect, test, type Locator, type Page } from '@playwright/test'
 
 // Полный цикл в браузере (ТЗ §17 через интерфейс): регистрация →
 // подключение модели → загрузка книги → оглавление → перевод с живым
@@ -27,7 +27,19 @@ const BOOK = [
 const shots = process.env.SCREENSHOTS === '1'
 
 async function shot(page: Page, name: string) {
-  if (shots) await page.screenshot({ path: `test-results/screens/${test.info().project.name}-${name}.png`, fullPage: true })
+  // Переходы цвета у компонентов Naive — без них снимок не ловит полусостояние.
+  if (shots) await page.screenshot({ path: `test-results/screens/${test.info().project.name}-${name}.png`, fullPage: true, animations: 'disabled' })
+}
+
+// Список выбора Naive UI: поле — по подписи, вариант — в выпадающем меню.
+function selectField(scope: Page | Locator, label: string) {
+  // Текст поля начинается с подписи, за ней — выбранное значение.
+  return scope.locator('.select-field').filter({ hasText: new RegExp(`^${label}`) })
+}
+
+async function pick(page: Page, scope: Page | Locator, label: string, option: string) {
+  await selectField(scope, label).locator('.n-base-selection').click()
+  await page.locator('.n-base-select-menu').getByText(option, { exact: true }).click()
 }
 
 async function register(page: Page, email: string) {
@@ -45,7 +57,7 @@ test('импорт → перевод → экспорт → чтение', asyn
 
   // Подключение тестовой модели.
   await page.getByRole('link', { name: 'Модели' }).click()
-  await page.getByLabel('Провайдер').selectOption('fake')
+  await pick(page, page, 'Провайдер', 'Тестовый провайдер (только для сквозных тестов)')
   await page.getByLabel('Название').fill('Тестовая модель')
   await page.getByRole('button', { name: 'Добавить подключение' }).click()
   await expect(page.getByText('Тестовая модель', { exact: true })).toBeVisible()
@@ -61,8 +73,8 @@ test('импорт → перевод → экспорт → чтение', asyn
 
   // Настройка и запуск перевода.
   await page.getByRole('link', { name: 'Настроить перевод' }).click()
-  await expect(page.getByLabel('Модель')).toHaveValue('fake-1')
-  await expect(page.getByLabel('Язык перевода')).toHaveValue('ru')
+  await expect(selectField(page, 'Модель')).toContainText('Fake')
+  await expect(selectField(page, 'Язык перевода')).toContainText('Русский')
   await shot(page, 'setup')
   await page.getByRole('button', { name: 'Начать перевод' }).click()
   await expect(page).toHaveURL(/\/translations\/[0-9a-f-]+$/)
@@ -74,7 +86,7 @@ test('импорт → перевод → экспорт → чтение', asyn
 
   // Экспорт: файл собирает worker, панель ждёт его и даёт скачать.
   const exportPanel = page.locator('section.export')
-  await exportPanel.getByLabel('Формат файла').selectOption('markdown')
+  await pick(page, exportPanel, 'Формат файла', 'Markdown')
   await exportPanel.getByRole('button', { name: 'Экспортировать' }).click()
   const md = exportPanel.locator('[data-export]').first()
   await expect(md.getByRole('link', { name: 'Скачать' })).toBeVisible({ timeout: 30_000 })
@@ -84,8 +96,8 @@ test('импорт → перевод → экспорт → чтение', asyn
   expect(mdText).toContain('RU:Alice was beginning to get very tired.')
   expect(mdText).toContain('fmt.Println("not translated")')
 
-  await exportPanel.getByLabel('Формат файла').selectOption('epub')
-  await exportPanel.getByLabel('Оригинал и перевод').check()
+  await pick(page, exportPanel, 'Формат файла', 'EPUB')
+  await exportPanel.getByText('Оригинал и перевод', { exact: true }).click()
   await exportPanel.getByRole('button', { name: 'Экспортировать' }).click()
   const epub = exportPanel.locator('[data-export]').first()
   await expect(epub).toContainText('EPUB')

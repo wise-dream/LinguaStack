@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // Перевод книги: живой прогресс, управление и сегменты с фильтрами по
 // ошибкам и замечаниям — чтобы найти и повторить проблемные (ТЗ §5.3).
-import { NButton } from 'naive-ui'
+import { NButton, NEmpty } from 'naive-ui'
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 
@@ -17,6 +17,7 @@ import {
 } from '../api/translations'
 import type { Project, Segment } from '../api/types'
 import ConfirmButton from '../components/ConfirmButton.vue'
+import ErrorAlert from '../components/ErrorAlert.vue'
 import ExportPanel from '../components/ExportPanel.vue'
 import LangPair from '../components/LangPair.vue'
 import LinkButton from '../components/LinkButton.vue'
@@ -124,13 +125,7 @@ const readerLink = (s: Segment) => ({
 
 <template>
   <main class="page detail">
-    <p
-      v-if="error"
-      role="alert"
-      class="form-error"
-    >
-      {{ error }}
-    </p>
+    <ErrorAlert :message="error" />
     <template v-if="project">
       <section class="summary card">
         <p class="crumb">
@@ -197,13 +192,7 @@ const readerLink = (s: Segment) => ({
             @confirm="act(cancelTranslation)"
           />
         </div>
-        <p
-          v-if="actionError"
-          role="alert"
-          class="form-error"
-        >
-          {{ actionError }}
-        </p>
+        <ErrorAlert :message="actionError" />
       </section>
 
       <ExportPanel
@@ -231,12 +220,11 @@ const readerLink = (s: Segment) => ({
             {{ f.label }}
           </NButton>
         </div>
-        <p
+        <NEmpty
           v-if="!segments.length"
-          class="muted"
-        >
-          {{ filter === 'all' ? 'Фрагменты появятся, когда перевод начнётся.' : 'Таких фрагментов нет.' }}
-        </p>
+          size="small"
+          :description="filter === 'all' ? 'Фрагменты появятся, когда перевод начнётся.' : 'Таких фрагментов нет.'"
+        />
         <ol class="segment-list">
           <li
             v-for="s in segments"
@@ -292,13 +280,10 @@ const readerLink = (s: Segment) => ({
                 Перевести заново
               </NButton>
             </div>
-            <p
-              v-if="segmentError[s.id]"
-              role="alert"
-              class="form-error"
-            >
-              {{ segmentError[s.id] }}
-            </p>
+            <ErrorAlert
+              :message="segmentError[s.id]"
+              size="small"
+            />
           </li>
         </ol>
         <NButton
@@ -428,7 +413,7 @@ h2 {
 
 .findings,
 .segment-actions,
-.segment-list .form-error {
+.segment-list .error-alert {
   grid-column: 1 / -1;
 }
 

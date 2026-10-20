@@ -13,7 +13,9 @@ import { listTranslations } from '../api/translations'
 import type { Book, Chapter, Project, ReadMode, SearchResult, Segment, TocEntry } from '../api/types'
 import { languageName, sourceLanguageName } from '../lib/format'
 import { fetchChapterSegments, usePositionSaver } from '../lib/position'
+import ErrorAlert from '../components/ErrorAlert.vue'
 import LinkButton from '../components/LinkButton.vue'
+import SelectField from '../components/SelectField.vue'
 import ReaderColumns from '../reader/ReaderColumns.vue'
 import ReaderSearch from '../reader/ReaderSearch.vue'
 import SegmentRow from '../reader/SegmentRow.vue'
@@ -58,6 +60,10 @@ const next = computed(() => (position.value >= 0 ? flatToc.value[position.value 
 const chapterTitle = (index: number) => flatToc.value.find((c) => c.index === index)?.title ?? `Глава ${index + 1}`
 
 const translationLabel = (p: Project) => `${sourceLanguageName(p.source_lang)} → ${languageName(p.target_lang)}`
+const translationOptions = computed(() => [
+  { label: 'Без перевода', value: '' },
+  ...projects.value.map((p) => ({ label: translationLabel(p), value: p.id })),
+])
 
 const saver = usePositionSaver((p) => putPosition(bookId, p))
 // Место, где читатель остановился: к нему прокручиваем без подсветки —
@@ -215,32 +221,17 @@ onBeforeUnmount(() => {
       >
         Перевести книгу
       </LinkButton>
-      <div
+      <SelectField
         v-else
+        :model-value="translationId"
         class="translation-pick"
-      >
-        <label
-          for="reader-translation"
-          class="visually-hidden"
-        >Языковая версия</label>
-        <select
-          id="reader-translation"
-          name="translation"
-          :value="translationId"
-          @change="setTranslation(($event.target as HTMLSelectElement).value)"
-        >
-          <option value="">
-            Без перевода
-          </option>
-          <option
-            v-for="p in projects"
-            :key="p.id"
-            :value="p.id"
-          >
-            {{ translationLabel(p) }}
-          </option>
-        </select>
-      </div>
+        label="Языковая версия"
+        name="translation"
+        :options="translationOptions"
+        size="small"
+        hide-label
+        @update:model-value="setTranslation"
+      />
       <NButtonGroup
         class="modes"
         size="small"
@@ -296,13 +287,7 @@ onBeforeUnmount(() => {
         <h1 class="visually-hidden">
           {{ book?.title }}
         </h1>
-        <p
-          v-if="error"
-          role="alert"
-          class="form-error"
-        >
-          {{ error }}
-        </p>
+        <ErrorAlert :message="error" />
         <template v-if="chapter && book">
           <ReaderColumns
             :mode="effectiveMode"
@@ -380,10 +365,8 @@ onBeforeUnmount(() => {
   white-space: nowrap;
 }
 
-.translation-pick select {
-  width: auto;
-  min-height: 30px;
-  padding-block: var(--space-1);
+.translation-pick {
+  min-width: 13rem;
 }
 
 .reader-search {

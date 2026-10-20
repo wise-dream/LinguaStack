@@ -2,6 +2,7 @@
 // Глоссарий перевода: термин → как его переводить всегда.
 import { NButton } from 'naive-ui'
 
+import TextField from './TextField.vue'
 import type { GlossaryRow } from './glossary'
 
 const rows = defineModel<GlossaryRow[]>({ required: true })
@@ -26,21 +27,19 @@ function remove(i: number) {
       :key="i"
       class="row"
     >
-      <label>
-        <span class="visually-hidden">Термин {{ i + 1 }}</span>
-        <input
-          v-model="row.source"
-          placeholder="Термин"
-        >
-      </label>
+      <TextField
+        v-model="row.source"
+        :label="`Термин ${i + 1}`"
+        placeholder="Термин"
+        hide-label
+      />
       <span aria-hidden="true">→</span>
-      <label>
-        <span class="visually-hidden">Перевод термина {{ i + 1 }}</span>
-        <input
-          v-model="row.target"
-          placeholder="Перевод"
-        >
-      </label>
+      <TextField
+        v-model="row.target"
+        :label="`Перевод термина ${i + 1}`"
+        placeholder="Перевод"
+        hide-label
+      />
       <NButton
         class="remove"
         quaternary

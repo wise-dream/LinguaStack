@@ -2,6 +2,7 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { stubApi } from '../test/fakeApi'
+import { choose } from '../test/select'
 import { kinds, providerConfig } from '../test/fixtures'
 import ProvidersPage from './ProvidersPage.vue'
 
@@ -17,10 +18,9 @@ async function mountPage(routes: Parameters<typeof stubApi>[0]) {
 describe('модели и провайдеры', () => {
   it('адрес API — только у OpenAI-совместимого вида', async () => {
     const { w } = await mountPage({ 'GET /api/provider-configs': { body: [] } })
-    const kind = w.find('select[name=provider_id]')
-    await kind.setValue('ollama')
+    await choose(w, 'provider_id', 'ollama')
     expect(w.find('input[name=base_url]').exists()).toBe(false)
-    await kind.setValue('openai_compatible')
+    await choose(w, 'provider_id', 'openai_compatible')
     expect(w.find('input[name=base_url]').exists()).toBe(true)
   })
 
@@ -31,11 +31,11 @@ describe('модели и провайдеры', () => {
       'GET /api/provider-configs': { body: [] },
       'POST /api/provider-configs': { status: 201, body: created },
     })
-    await w.find('select[name=provider_id]').setValue('anthropic')
+    await choose(w, 'provider_id', 'anthropic')
     expect(w.find('input[name=api_key]').attributes('type')).toBe('password')
     await w.find('input[name=name]').setValue('Claude')
     await w.find('input[name=api_key]').setValue('sk-ant-secret-a1b2')
-    await w.find('input[name=allow_external]').setValue(true)
+    await w.find('.consent [role=checkbox]').trigger('click')
     await w.find('form.new-config').trigger('submit')
     await flushPromises()
 
@@ -49,12 +49,12 @@ describe('модели и провайдеры', () => {
 
   it('внешний сервис требует явного разрешения отправлять текст (ТЗ §6.4)', async () => {
     const { w } = await mountPage({ 'GET /api/provider-configs': { body: [] } })
-    await w.find('select[name=provider_id]').setValue('anthropic')
-    const consent = w.find('label.consent')
+    await choose(w, 'provider_id', 'anthropic')
+    const consent = w.find('.consent')
     expect(consent.text()).toContain('Разрешить отправку текста книг этому сервису')
     expect(consent.text()).toContain('покинет этот сервер')
-    await w.find('select[name=provider_id]').setValue('ollama')
-    expect(w.find('label.consent').exists()).toBe(false)
+    await choose(w, 'provider_id', 'ollama')
+    expect(w.find('.consent').exists()).toBe(false)
   })
 
   it('503 без ключа шифрования и 409 при удалении — понятным текстом', async () => {
@@ -63,7 +63,7 @@ describe('модели и провайдеры', () => {
       'POST /api/provider-configs': { status: 503, body: { error: 'Сервер не может хранить ключи: не задан LINGUASTACK_SECRET_KEY. Обратитесь к администратору.' } },
       'DELETE /api/provider-configs/c1': { status: 409, body: { error: 'Конфигурацией пользуются проекты перевода — сначала удалите их или смените провайдера' } },
     })
-    await w.find('select[name=provider_id]').setValue('anthropic')
+    await choose(w, 'provider_id', 'anthropic')
     await w.find('input[name=api_key]').setValue('sk-ant-x')
     await w.find('form.new-config').trigger('submit')
     await flushPromises()
@@ -93,7 +93,7 @@ describe('модели и провайдеры', () => {
       'GET /api/provider-configs': { body: [external] },
       'PATCH /api/provider-configs/c3': { body: { ...external, allow_external: false } },
     })
-    await w.find('[data-config="c3"] input[type=checkbox]').setValue(false)
+    await w.find('[data-config="c3"] [role=switch]').trigger('click')
     await flushPromises()
     expect(calls.find((c) => c.method === 'PATCH')?.body).toEqual({ allow_external: false })
   })

@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ExportJob } from '../api/types'
 import { stubApi } from '../test/fakeApi'
 import { exportJob } from '../test/fixtures'
+import { choose, optionLabels } from '../test/select'
 import ExportPanel from './ExportPanel.vue'
 
 beforeEach(() => vi.useFakeTimers())
@@ -30,12 +31,11 @@ describe('панель экспорта', () => {
       },
       'POST /api/books/b1/exports': { status: 202, body: exportJob({ status: 'pending', file_name: '', size_bytes: 0 }) },
     })
-    const options = w.findAll('select[name=format] option').map((o) => o.text())
-    expect(options).toEqual(['EPUB', 'Markdown', 'Word (DOCX)', 'HTML', 'Текст (TXT)'])
+    expect(optionLabels(w, 'format')).toEqual(['EPUB', 'Markdown', 'Word (DOCX)', 'HTML', 'Текст (TXT)'])
     expect(w.findAll('input[name=mode]').map((r) => r.element.closest('label')?.textContent?.trim()))
       .toEqual(['Только перевод', 'Оригинал и перевод'])
 
-    await w.find('select[name=format]').setValue('markdown')
+    await choose(w, 'format', 'markdown')
     await w.find('input[value=bilingual]').setValue(true)
     await w.find('form').trigger('submit')
     await flushPromises()

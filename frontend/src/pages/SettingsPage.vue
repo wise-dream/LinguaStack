@@ -2,7 +2,7 @@
 // Настройки аккаунта и Telegram (ТЗ §2.1, §8.1 №11, §9): смена пароля и
 // почты, привязка Telegram по одноразовой ссылке на бота и выбор
 // уведомлений.
-import { NButton } from 'naive-ui'
+import { NButton, NSwitch } from 'naive-ui'
 import { onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 
 import { changeEmail, changePassword } from '../api/auth'
@@ -10,6 +10,7 @@ import { errorMessage } from '../api/client'
 import { getTelegram, linkTelegram, patchTelegram, unlinkTelegram } from '../api/telegram'
 import type { TelegramLink, TelegramSettings, TelegramState } from '../api/types'
 import ConfirmButton from '../components/ConfirmButton.vue'
+import ErrorAlert from '../components/ErrorAlert.vue'
 import TextField from '../components/TextField.vue'
 import { formatDate } from '../lib/format'
 import { useSession } from '../session'
@@ -182,13 +183,7 @@ async function unlink() {
           hint="Не короче 12 символов. Остальные устройства выйдут из аккаунта."
           required
         />
-        <p
-          v-if="password.error"
-          role="alert"
-          class="form-error"
-        >
-          {{ password.error }}
-        </p>
+        <ErrorAlert :message="password.error" />
         <p
           v-if="password.done"
           role="status"
@@ -234,13 +229,7 @@ async function unlink() {
           autocomplete="current-password"
           required
         />
-        <p
-          v-if="email.error"
-          role="alert"
-          class="form-error"
-        >
-          {{ email.error }}
-        </p>
+        <ErrorAlert :message="email.error" />
         <p
           v-if="email.done"
           role="status"
@@ -265,13 +254,7 @@ async function unlink() {
       <h2 id="telegram-title">
         Telegram
       </h2>
-      <p
-        v-if="error"
-        role="alert"
-        class="form-error"
-      >
-        {{ error }}
-      </p>
+      <ErrorAlert :message="error" />
       <p
         v-if="done"
         role="status"
@@ -296,18 +279,19 @@ async function unlink() {
             <legend class="visually-hidden">
               Уведомления
             </legend>
-            <label
+            <div
               v-for="n in notifications"
               :key="n.key"
+              class="toggle"
+              :data-toggle="n.key"
             >
-              <input
-                type="checkbox"
-                :name="n.key"
-                :checked="telegram[n.key]"
-                @change="toggle(n.key, ($event.target as HTMLInputElement).checked)"
-              >
-              {{ n.label }}
-            </label>
+              <NSwitch
+                :value="telegram[n.key]"
+                :aria-labelledby="`toggle-${n.key}`"
+                @update:value="(v: boolean) => toggle(n.key, v)"
+              />
+              <span :id="`toggle-${n.key}`">{{ n.label }}</span>
+            </div>
           </fieldset>
           <p class="muted">
             В Telegram команда /status показывает ход переводов и ставит их на паузу.
@@ -405,11 +389,10 @@ p {
   gap: var(--space-2);
 }
 
-.toggles label {
+.toggle {
   display: flex;
-  gap: var(--space-2);
+  gap: var(--space-3);
   align-items: center;
-  cursor: pointer;
 }
 
 form {

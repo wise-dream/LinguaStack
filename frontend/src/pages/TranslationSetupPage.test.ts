@@ -5,6 +5,7 @@ import { createMemoryHistory, createRouter } from 'vue-router'
 import { glossaryFromRows } from '../components/glossary'
 import { stubApi } from '../test/fakeApi'
 import { book, options, project, providerConfig } from '../test/fixtures'
+import { choose, optionLabels, optionValues, selected } from '../test/select'
 import TranslationSetupPage from './TranslationSetupPage.vue'
 
 afterEach(() => vi.unstubAllGlobals())
@@ -38,24 +39,21 @@ async function mountSetup(routes: Parameters<typeof stubApi>[0] = {}, bookOverri
   return { w, calls, router }
 }
 
-const optionValues = (w: Awaited<ReturnType<typeof mountSetup>>['w'], name: string) =>
-  w.findAll(`select[name=${name}] option`).map((o) => o.attributes('value'))
-
 describe('настройка перевода', () => {
   it('язык оригинала по умолчанию — язык книги, иначе автоопределение', async () => {
     const { w } = await mountSetup()
-    expect((w.find('select[name=source_lang]').element as HTMLSelectElement).value).toBe('en')
-    expect((w.find('select[name=target_lang]').element as HTMLSelectElement).value).toBe('ru')
+    expect(selected(w, 'source_lang')).toBe('en')
+    expect(selected(w, 'target_lang')).toBe('ru')
 
     const other = await mountSetup({}, { language: undefined })
-    expect((other.w.find('select[name=source_lang]').element as HTMLSelectElement).value).toBe('auto')
+    expect(selected(other.w, 'source_lang')).toBe('auto')
   })
 
   it('языки ограничены возможностями модели (ТЗ §5.2)', async () => {
     const { w } = await mountSetup()
     // По-русски по алфавиту: английский, немецкий, русский, французский.
     expect(optionValues(w, 'target_lang')).toEqual(['en', 'de', 'ru', 'fr'])
-    await w.find('select[name=provider_config_id]').setValue('c2')
+    await choose(w, 'provider_config_id', 'c2')
     await flushPromises()
     expect(optionValues(w, 'target_lang')).toEqual(['en', 'ru'])
     expect(optionValues(w, 'source_lang')).toEqual(['auto', 'en', 'ru'])
@@ -64,14 +62,14 @@ describe('настройка перевода', () => {
   it('стили — от нейтрального, названия языков в списках с заглавной', async () => {
     const { w } = await mountSetup()
     expect(w.findAll('input[name=style]').map((i) => i.attributes('value'))).toEqual(['neutral', 'literary', 'technical', 'simplified'])
-    expect(w.findAll('select[name=target_lang] option').map((o) => o.text())).toContain('Английский')
-    expect(w.find('select[name=source_lang] option').text()).toBe('Определить автоматически')
+    expect(optionLabels(w, 'target_lang')).toContain('Английский')
+    expect(optionLabels(w, 'source_lang')[0]).toBe('Определить автоматически')
   })
 
   it('внешний сервис: предупреждение до запуска (ТЗ §6.4)', async () => {
     const { w } = await mountSetup()
     expect(w.find('.egress').exists()).toBe(false)
-    await w.find('select[name=provider_config_id]').setValue('c2')
+    await choose(w, 'provider_config_id', 'c2')
     await flushPromises()
     expect(w.find('.egress').text()).toContain('Текст книги будет отправлен в «Claude»')
     expect(w.find('button[type=submit]').attributes('disabled')).toBeUndefined()
@@ -79,7 +77,7 @@ describe('настройка перевода', () => {
 
   it('без разрешения на отправку — объяснение, где его дать, и запуск недоступен', async () => {
     const { w } = await mountSetup()
-    await w.find('select[name=provider_config_id]').setValue('c3')
+    await choose(w, 'provider_config_id', 'c3')
     await flushPromises()
     const note = w.find('.egress.blocked')
     expect(note.text()).toContain('не разрешает отправку текста')

@@ -2,13 +2,15 @@
 // Администрирование (ТЗ §2.1, §8.1 №12; дополнение §18): обзор системы и
 // пользователи. Только метаданные и счётчики — ни названий книг, ни
 // текстов: к содержимому администратор доступа не имеет.
-import { NButton } from 'naive-ui'
+import { NButton, NEmpty, NInput, NInputGroup, NStatistic, NTable, NTag } from 'naive-ui'
 import { computed, onMounted, reactive, ref } from 'vue'
 
 import { getOverview, issueResetLink, listUsers, patchUser } from '../api/admin'
 import { ApiError, errorMessage } from '../api/client'
 import type { AdminOverview, AdminUser, AdminUserPatch, QuotaDefaults, ResetLink } from '../api/types'
 import ConfirmButton from '../components/ConfirmButton.vue'
+import ErrorAlert from '../components/ErrorAlert.vue'
+import TextField from '../components/TextField.vue'
 import { formatBytes, formatCost, formatDate, formatNumber, plural } from '../lib/format'
 import { useSession } from '../session'
 
@@ -149,6 +151,20 @@ async function resetLink(u: AdminUser) {
   }
 }
 
+// Копирование ссылки — по нажатию: буфер обмена доступен только по жесту
+// пользователя и только по HTTPS.
+const copied = ref<string | null>(null)
+async function copyLink(id: string) {
+  const link = resetLinks.value[id]
+  if (!link) return
+  try {
+    await navigator.clipboard.writeText(link.url)
+    copied.value = id
+  } catch {
+    error.value = 'Не удалось скопировать — выделите ссылку и скопируйте вручную.'
+  }
+}
+
 const until = (iso: string) => new Date(iso).toLocaleTimeString('ru', { hour: '2-digit', minute: '2-digit' })
 </script>
 
@@ -165,13 +181,7 @@ const until = (iso: string) => new Date(iso).toLocaleTimeString('ru', { hour: '2
     class="page admin"
   >
     <h1>Администрирование</h1>
-    <p
-      v-if="error"
-      role="alert"
-      class="form-error"
-    >
-      {{ error }}
-    </p>
+    <ErrorAlert :message="error" />
 
     <section
       v-if="overview"
@@ -181,26 +191,23 @@ const until = (iso: string) => new Date(iso).toLocaleTimeString('ru', { hour: '2
       <h2 id="overview-title">
         Обзор
       </h2>
-      <dl class="headline">
-        <div>
-          <dt>Пользователей</dt>
-          <dd>{{ formatNumber(overview.metrics.users) }}</dd>
-        </div>
-        <div>
-          <dt>Книг</dt>
-          <dd>{{ formatNumber(overview.metrics.books) }}</dd>
-        </div>
-        <div>
-          <dt>Расход внешних моделей</dt>
-          <dd>{{ formatCost(overview.metrics.cost_usd) }}</dd>
-        </div>
-        <div>
-          <dt>Токенов: запрос / ответ</dt>
-          <dd class="tokens">
-            {{ formatNumber(overview.metrics.input_tokens) }} / {{ formatNumber(overview.metrics.output_tokens) }}
-          </dd>
-        </div>
-      </dl>
+      <div class="headline">
+        <NStatistic label="Пользователей">
+          {{ formatNumber(overview.metrics.users) }}
+        </NStatistic>
+        <NStatistic label="Книг">
+          {{ formatNumber(overview.metrics.books) }}
+        </NStatistic>
+        <NStatistic label="Расход внешних моделей">
+          {{ formatCost(overview.metrics.cost_usd) }}
+        </NStatistic>
+        <NStatistic
+          class="tokens"
+          label="Токенов: запрос / ответ"
+        >
+          {{ formatNumber(overview.metrics.input_tokens) }} / {{ formatNumber(overview.metrics.output_tokens) }}
+        </NStatistic>
+      </div>
       <div class="groups">
         <dl
           v-for="g in figures"
@@ -255,25 +262,27 @@ const until = (iso: string) => new Date(iso).toLocaleTimeString('ru', { hour: '2
         role="search"
         @submit.prevent="search"
       >
-        <label class="field">
-          <span class="visually-hidden">Адрес содержит</span>
-          <input
-            v-model="query"
-            type="search"
-            placeholder="Поиск по адресу"
-          >
-        </label>
+        <TextField
+          v-model="query"
+          label="Адрес содержит"
+          type="search"
+          placeholder="Поиск по адресу"
+          hide-label
+        />
         <NButton attr-type="submit">
           Найти
         </NButton>
       </form>
-      <p
+      <NEmpty
         v-if="!users.length"
-        class="muted"
+        description="Никого не нашлось."
+      />
+      <NTable
+        v-else
+        class="users-table"
+        :bordered="false"
+        :single-line="true"
       >
-        Никого не нашлось.
-      </p>
-      <table v-else>
         <thead>
           <tr>
             <th scope="col">
@@ -303,12 +312,27 @@ const until = (iso: string) => new Date(iso).toLocaleTimeString('ru', { hour: '2
             <td class="account">
               <span class="email">{{ u.email }}</span>
               <span class="tags">
-                <span v-if="u.role === 'admin'">администратор</span>
-                <span v-if="isSelf(u)">это вы</span>
-                <span
+                <NTag
+                  v-if="u.role === 'admin'"
+                  size="small"
+                  round
+                  :bordered="false"
+                  type="info"
+                >администратор</NTag>
+                <NTag
+                  v-if="isSelf(u)"
+                  size="small"
+                  round
+                  :bordered="false"
+                >это вы</NTag>
+                <NTag
                   v-if="!u.is_active"
                   class="off"
-                >отключён</span>
+                  size="small"
+                  round
+                  :bordered="false"
+                  type="error"
+                >отключён</NTag>
               </span>
             </td>
             <td data-label="Данные">
@@ -376,34 +400,28 @@ const until = (iso: string) => new Date(iso).toLocaleTimeString('ru', { hour: '2
                 class="quota-form"
                 @submit.prevent="saveQuota(u)"
               >
-                <label class="field">
-                  <span>Активных переводов</span>
-                  <input
-                    v-model="quota.max_active_projects"
-                    name="max_active_projects"
-                    inputmode="numeric"
-                    :placeholder="String(defaults.max_active_projects)"
-                  >
-                </label>
-                <label class="field">
-                  <span>Одновременных задач</span>
-                  <input
-                    v-model="quota.max_concurrent_tasks"
-                    name="max_concurrent_tasks"
-                    inputmode="numeric"
-                    :placeholder="String(defaults.max_concurrent_tasks)"
-                  >
-                </label>
-                <label class="field">
-                  <span>Хранилище, ГБ</span>
-                  <input
-                    v-model="quota.storage_quota_gb"
-                    name="storage_quota_gb"
-                    inputmode="decimal"
-                    :placeholder="String(defaults.storage_quota_bytes / GB).replace('.', ',')"
-                  >
-                  <small>0 — без предела</small>
-                </label>
+                <TextField
+                  v-model="quota.max_active_projects"
+                  label="Активных переводов"
+                  name="max_active_projects"
+                  inputmode="numeric"
+                  :placeholder="String(defaults.max_active_projects)"
+                />
+                <TextField
+                  v-model="quota.max_concurrent_tasks"
+                  label="Одновременных задач"
+                  name="max_concurrent_tasks"
+                  inputmode="numeric"
+                  :placeholder="String(defaults.max_concurrent_tasks)"
+                />
+                <TextField
+                  v-model="quota.storage_quota_gb"
+                  label="Хранилище, ГБ"
+                  name="storage_quota_gb"
+                  inputmode="decimal"
+                  :placeholder="String(defaults.storage_quota_bytes / GB).replace('.', ',')"
+                  hint="0 — без предела"
+                />
                 <p class="hint">
                   Пустое поле — значение сервера по умолчанию (подсказка в поле).
                 </p>
@@ -425,12 +443,17 @@ const until = (iso: string) => new Date(iso).toLocaleTimeString('ru', { hour: '2
               <div class="reset-box">
                 <label class="field">
                   <span>Ссылка для сброса пароля</span>
-                  <input
-                    class="reset-link"
-                    readonly
-                    :value="resetLinks[u.id]!.url"
-                    @focus="($event.target as HTMLInputElement).select()"
-                  >
+                  <NInputGroup>
+                    <NInput
+                      class="reset-link"
+                      readonly
+                      :value="resetLinks[u.id]!.url"
+                      @focus="(e: FocusEvent) => (e.target as HTMLInputElement).select()"
+                    />
+                    <NButton @click="copyLink(u.id)">
+                      {{ copied === u.id ? 'Скопировано' : 'Скопировать' }}
+                    </NButton>
+                  </NInputGroup>
                   <small>
                     Действует до {{ until(resetLinks[u.id]!.expires_at) }} и сработает один раз. Передайте её
                     владельцу аккаунта сами — прежняя ссылка больше не работает.
@@ -440,7 +463,7 @@ const until = (iso: string) => new Date(iso).toLocaleTimeString('ru', { hour: '2
             </td>
           </tr>
         </tbody>
-      </table>
+      </NTable>
     </section>
   </main>
 </template>
@@ -473,26 +496,28 @@ p {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
   gap: var(--space-4);
-  margin: 0;
 }
 
-.headline dt,
-.figure dt,
-.group-title {
+.headline :deep(.n-statistic__label) {
   color: var(--muted);
   font-size: var(--step--1);
 }
 
-.headline dd {
-  margin: 0;
+.headline :deep(.n-statistic-value) {
   font-family: var(--font-book);
   font-size: var(--step-3);
   line-height: 1.1;
   font-variant-numeric: tabular-nums;
 }
 
-.headline dd.tokens {
+.headline .tokens :deep(.n-statistic-value) {
   font-size: var(--step-1);
+}
+
+.group-title,
+.figure dt {
+  color: var(--muted);
+  font-size: var(--step--1);
 }
 
 .groups {
@@ -596,6 +621,12 @@ tbody {
   border-bottom: 1px solid var(--rule-soft);
 }
 
+/* Линия — под строкой пользователя целиком (tbody), не под каждой ячейкой
+   NTable: квоты и ссылка сброса раскрываются внутри той же строки. */
+.users-table td {
+  border-bottom: none;
+}
+
 .account {
   display: grid;
   gap: var(--space-1);
@@ -609,13 +640,11 @@ tbody {
 .tags {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--space-2);
-  color: var(--muted);
-  font-size: var(--step--1);
+  gap: var(--space-1);
 }
 
-.tags .off {
-  color: var(--proof);
+.tags:empty {
+  display: none;
 }
 
 .inactive .email {

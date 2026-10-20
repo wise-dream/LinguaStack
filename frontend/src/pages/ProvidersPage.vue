@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // Подключения к моделям (ТЗ §8.1 п.8, §6.4): локальная Ollama и внешние
 // сервисы. Ключ API уходит на сервер один раз и больше не показывается.
-import { NButton } from 'naive-ui'
+import { NButton, NCheckbox, NList, NListItem, NSwitch, NTag } from 'naive-ui'
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 
 import { errorMessage } from '../api/client'
@@ -15,6 +15,8 @@ import {
 } from '../api/providers'
 import type { ProviderConfig, ProviderKind } from '../api/types'
 import ConfirmButton from '../components/ConfirmButton.vue'
+import ErrorAlert from '../components/ErrorAlert.vue'
+import SelectField from '../components/SelectField.vue'
 import TextField from '../components/TextField.vue'
 
 const kinds = ref<ProviderKind[]>([])
@@ -31,6 +33,9 @@ const rowError = reactive<Record<string, string>>({})
 
 const kind = computed(() => kinds.value.find((k) => k.provider_id === form.provider_id))
 const kindName = (id: string) => kinds.value.find((k) => k.provider_id === id)?.name ?? id
+const kindOptions = computed(() => kinds.value.map((k) => ({ label: k.name, value: k.provider_id })))
+const healthType = (text: string) =>
+  text.startsWith('Доступен') ? 'success' : text.startsWith('Недоступен') ? 'error' : 'default'
 
 watch(
   () => form.provider_id,
@@ -116,19 +121,13 @@ async function remove(c: ProviderConfig) {
       и после сохранения не показываются.
     </p>
 
-    <p
-      v-if="loadError"
-      role="alert"
-      class="form-error"
-    >
-      {{ loadError }}
-    </p>
+    <ErrorAlert :message="loadError" />
 
-    <ul
+    <NList
       v-if="configs.length"
       class="configs card"
     >
-      <li
+      <NListItem
         v-for="c in configs"
         :key="c.id"
         :data-config="c.id"
@@ -141,17 +140,17 @@ async function remove(c: ProviderConfig) {
             class="key"
           >ключ …{{ c.key_last4 }}</span>
         </div>
-        <label
+        <div
           v-if="c.sends_data_externally"
           class="inline-check"
         >
-          <input
-            type="checkbox"
-            :checked="c.allow_external"
-            @change="setExternal(c, ($event.target as HTMLInputElement).checked)"
-          >
-          Разрешить отправку текста книг этому сервису
-        </label>
+          <NSwitch
+            :value="c.allow_external"
+            :aria-label="`Разрешить отправку текста книг в «${c.name}»`"
+            @update:value="(v: boolean) => setExternal(c, v)"
+          />
+          <span>Разрешить отправку текста книг этому сервису</span>
+        </div>
         <div class="row-actions">
           <NButton
             class="check"
@@ -165,21 +164,24 @@ async function remove(c: ProviderConfig) {
             size="small"
             @confirm="remove(c)"
           />
-          <span
+          <NTag
             v-if="health[c.id]"
             role="status"
             class="health"
-          >{{ health[c.id] }}</span>
+            size="small"
+            round
+            :bordered="false"
+            :type="healthType(health[c.id]!)"
+          >
+            {{ health[c.id] }}
+          </NTag>
         </div>
-        <p
-          v-if="rowError[c.id]"
-          role="alert"
-          class="form-error"
-        >
-          {{ rowError[c.id] }}
-        </p>
-      </li>
-    </ul>
+        <ErrorAlert
+          :message="rowError[c.id]"
+          size="small"
+        />
+      </NListItem>
+    </NList>
     <p
       v-else-if="!loadError"
       class="muted empty"
@@ -192,22 +194,12 @@ async function remove(c: ProviderConfig) {
       @submit.prevent="create"
     >
       <h2>Новое подключение</h2>
-      <div class="field">
-        <label for="config-provider">Провайдер</label>
-        <select
-          id="config-provider"
-          v-model="form.provider_id"
-          name="provider_id"
-        >
-          <option
-            v-for="k in kinds"
-            :key="k.provider_id"
-            :value="k.provider_id"
-          >
-            {{ k.name }}
-          </option>
-        </select>
-      </div>
+      <SelectField
+        v-model="form.provider_id"
+        label="Провайдер"
+        name="provider_id"
+        :options="kindOptions"
+      />
       <TextField
         v-model="form.name"
         label="Название"
@@ -233,28 +225,17 @@ async function remove(c: ProviderConfig) {
         autocomplete="off"
         :spellcheck="false"
       />
-      <label
+      <div
         v-if="kind?.sends_data_externally"
         class="consent"
       >
-        <input
-          v-model="form.allow_external"
-          name="allow_external"
-          type="checkbox"
-        >
-        <span>
+        <NCheckbox v-model:checked="form.allow_external">
           <strong>Разрешить отправку текста книг этому сервису.</strong>
           Текст переводимых книг покинет этот сервер и уйдёт к «{{ kind.name }}». Без разрешения перевод через
           это подключение не запустится.
-        </span>
-      </label>
-      <p
-        v-if="formError"
-        role="alert"
-        class="form-error"
-      >
-        {{ formError }}
-      </p>
+        </NCheckbox>
+      </div>
+      <ErrorAlert :message="formError" />
       <NButton
         attr-type="submit"
         type="primary"
@@ -293,18 +274,11 @@ async function remove(c: ProviderConfig) {
 .configs {
   margin: 0 0 var(--space-5);
   padding-block: var(--space-2);
-  list-style: none;
 }
 
-.configs > li {
+.configs :deep(.n-list-item__main) {
   display: grid;
   gap: var(--space-2);
-  padding-block: var(--space-4);
-  border-bottom: 1px solid var(--rule-soft);
-}
-
-.configs > li:last-child {
-  border-bottom: none;
 }
 
 .config-head {
@@ -332,11 +306,6 @@ async function remove(c: ProviderConfig) {
   gap: var(--space-2);
 }
 
-.health {
-  color: var(--muted);
-  font-size: var(--step--1);
-}
-
 .inline-check {
   display: flex;
   gap: var(--space-2);
@@ -357,17 +326,13 @@ async function remove(c: ProviderConfig) {
 }
 
 .consent {
-  display: flex;
-  gap: var(--space-3);
-  align-items: flex-start;
   padding: var(--space-3);
   border-radius: 8px;
   background: color-mix(in srgb, var(--highlight) 18%, var(--surface));
   border: 1px solid color-mix(in srgb, var(--highlight) 55%, var(--surface));
 }
 
-.consent input {
-  margin-top: 0.25em;
-  flex: none;
+.consent :deep(.n-checkbox) {
+  align-items: flex-start;
 }
 </style>

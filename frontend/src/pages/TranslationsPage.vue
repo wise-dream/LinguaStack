@@ -3,11 +3,13 @@
 // прогрессом, ошибками, временем работы и статистикой провайдера.
 // Список опрашивается раз в 5 с, пока есть активные переводы: по SSE на
 // строку браузер исчерпал бы соединения с сервером.
+import { NEmpty, NList, NListItem } from 'naive-ui'
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 
 import { errorMessage } from '../api/client'
 import { listTranslations } from '../api/translations'
 import type { Project, ProjectStatus } from '../api/types'
+import ErrorAlert from '../components/ErrorAlert.vue'
 import LangPair from '../components/LangPair.vue'
 import LinkButton from '../components/LinkButton.vue'
 import ProgressBar from '../components/ProgressBar.vue'
@@ -54,22 +56,19 @@ onBeforeUnmount(() => clearTimeout(timer))
 <template>
   <main class="page">
     <h1>Переводы</h1>
-    <p
-      v-if="error"
-      role="alert"
-      class="form-error"
-    >
-      {{ error }}
-    </p>
+    <ErrorAlert :message="error" />
 
     <section
       v-if="projects && !projects.length"
       class="empty card"
     >
-      <p>Переводов пока нет. Откройте книгу в библиотеке и начните перевод.</p>
-      <LinkButton to="/">
-        В библиотеку
-      </LinkButton>
+      <NEmpty description="Переводов пока нет. Откройте книгу в библиотеке и начните перевод.">
+        <template #extra>
+          <LinkButton to="/">
+            В библиотеку
+          </LinkButton>
+        </template>
+      </NEmpty>
     </section>
 
     <section
@@ -79,8 +78,8 @@ onBeforeUnmount(() => clearTimeout(timer))
       class="group card"
     >
       <h2>{{ g.title }} <span class="count">{{ g.items.length }}</span></h2>
-      <ul class="rows">
-        <li
+      <NList class="rows">
+        <NListItem
           v-for="p in g.items"
           :key="p.id"
           :data-project="p.id"
@@ -115,8 +114,8 @@ onBeforeUnmount(() => clearTimeout(timer))
           >
             {{ p.last_error }}
           </p>
-        </li>
-      </ul>
+        </NListItem>
+      </NList>
     </section>
   </main>
 </template>
@@ -141,21 +140,12 @@ h2 {
 }
 
 .rows {
-  margin: 0;
-  padding: 0;
-  list-style: none;
+  background: transparent;
 }
 
-.rows > li {
+.rows :deep(.n-list-item__main) {
   display: grid;
   gap: var(--space-2);
-  padding-block: var(--space-4);
-  border-bottom: 1px solid var(--rule-soft);
-}
-
-.rows > li:last-child {
-  border-bottom: none;
-  padding-bottom: 0;
 }
 
 .row-head {
@@ -192,13 +182,6 @@ h2 {
 }
 
 .empty {
-  display: grid;
-  gap: var(--space-3);
-  justify-items: start;
-}
-
-.empty p {
-  margin: 0;
-  color: var(--muted);
+  padding-block: var(--space-6);
 }
 </style>

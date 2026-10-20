@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // Книга: метаданные, оглавление и её переводы (ТЗ §8.2).
-import { NButton } from 'naive-ui'
+import { NButton, NDescriptions, NDescriptionsItem, NEmpty, NList, NListItem } from 'naive-ui'
 import { computed, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 
@@ -8,6 +8,7 @@ import { getBook, getTOC } from '../api/books'
 import { errorMessage } from '../api/client'
 import { listTranslations, resumeTranslation } from '../api/translations'
 import type { Book, ExportJob, Project, TocEntry } from '../api/types'
+import ErrorAlert from '../components/ErrorAlert.vue'
 import ExportList from '../components/ExportList.vue'
 import LangPair from '../components/LangPair.vue'
 import LinkButton from '../components/LinkButton.vue'
@@ -74,13 +75,7 @@ async function resume(p: Project) {
 
 <template>
   <main class="page">
-    <p
-      v-if="error"
-      role="alert"
-      class="form-error"
-    >
-      {{ error }}
-    </p>
+    <ErrorAlert :message="error" />
     <template v-if="book">
       <header class="book-head card">
         <h1>{{ book.title }}</h1>
@@ -90,20 +85,25 @@ async function resume(p: Project) {
         >
           {{ book.author }}
         </p>
-        <dl class="facts">
-          <div>
-            <dt>Формат</dt>
-            <dd>{{ formatName(book.source_format) }}</dd>
-          </div>
-          <div v-if="book.language">
-            <dt>Язык</dt>
-            <dd>{{ languageName(book.language) }}</dd>
-          </div>
-          <div>
-            <dt>Добавлена</dt>
-            <dd>{{ formatDate(book.created_at) }}</dd>
-          </div>
-        </dl>
+        <NDescriptions
+          class="facts"
+          label-placement="top"
+          :column="3"
+          size="small"
+        >
+          <NDescriptionsItem label="Формат">
+            {{ formatName(book.source_format) }}
+          </NDescriptionsItem>
+          <NDescriptionsItem
+            v-if="book.language"
+            label="Язык"
+          >
+            {{ languageName(book.language) }}
+          </NDescriptionsItem>
+          <NDescriptionsItem label="Добавлена">
+            {{ formatDate(book.created_at) }}
+          </NDescriptionsItem>
+        </NDescriptions>
         <div class="actions">
           <LinkButton
             :to="`/books/${book.id}/translate`"
@@ -120,17 +120,16 @@ async function resume(p: Project) {
       <div class="columns">
         <section class="card">
           <h2>Переводы</h2>
-          <p
+          <NEmpty
             v-if="!projects.length"
-            class="muted"
-          >
-            Переводов ещё нет.
-          </p>
-          <ul
+            size="small"
+            description="Переводов ещё нет."
+          />
+          <NList
             v-else
             class="projects"
           >
-            <li
+            <NListItem
               v-for="p in projects"
               :key="p.id"
               :data-project="p.id"
@@ -166,15 +165,12 @@ async function resume(p: Project) {
                   Продолжить
                 </NButton>
               </div>
-              <p
-                v-if="rowError[p.id]"
-                role="alert"
-                class="form-error"
-              >
-                {{ rowError[p.id] }}
-              </p>
-            </li>
-          </ul>
+              <ErrorAlert
+                :message="rowError[p.id]"
+                size="small"
+              />
+            </NListItem>
+          </NList>
         </section>
         <section class="card">
           <h2>Оглавление</h2>
@@ -184,19 +180,12 @@ async function resume(p: Project) {
 
       <section class="exports-history card">
         <h2>Экспорты</h2>
-        <p
-          v-if="exportError || exports.error.value"
-          role="alert"
-          class="form-error"
-        >
-          {{ exportError || exports.error.value }}
-        </p>
-        <p
+        <ErrorAlert :message="exportError || exports.error.value" />
+        <NEmpty
           v-if="!exports.items.value.length"
-          class="muted"
-        >
-          Экспортов ещё нет. Экспортировать перевод в EPUB, Word, Markdown, HTML или текст можно на странице перевода.
-        </p>
+          size="small"
+          description="Экспортов ещё нет. Экспортировать перевод в EPUB, Word, Markdown, HTML или текст можно на странице перевода."
+        />
         <ExportList
           v-else
           :items="exports.items.value"
@@ -231,19 +220,8 @@ h1 {
 }
 
 .facts {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-2) var(--space-6);
+  width: min(100%, 32rem);
   margin: var(--space-2) 0;
-}
-
-.facts dt {
-  color: var(--muted);
-  font-size: var(--step--1);
-}
-
-.facts dd {
-  margin: 0;
 }
 
 .actions,
@@ -270,26 +248,9 @@ h2 {
   margin: 0;
 }
 
-.projects {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.projects > li {
+.projects :deep(.n-list-item__main) {
   display: grid;
   gap: var(--space-2);
-  padding-block: var(--space-3);
-  border-bottom: 1px solid var(--rule-soft);
-}
-
-.projects > li:first-child {
-  padding-top: 0;
-}
-
-.projects > li:last-child {
-  border-bottom: none;
-  padding-bottom: 0;
 }
 
 .project-head {

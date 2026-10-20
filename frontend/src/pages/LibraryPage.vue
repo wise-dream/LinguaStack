@@ -1,5 +1,6 @@
 <script setup lang="ts">
 // Библиотека (ТЗ §8.2): опись книг пользователя с переводами каждой.
+import { NEmpty, NSpin, NTable } from 'naive-ui'
 import { computed, onMounted, ref } from 'vue'
 
 import { deleteBook, listBooks } from '../api/books'
@@ -7,6 +8,7 @@ import { errorMessage } from '../api/client'
 import { listTranslations } from '../api/translations'
 import type { Book, Project } from '../api/types'
 import ConfirmButton from '../components/ConfirmButton.vue'
+import ErrorAlert from '../components/ErrorAlert.vue'
 import LangPair from '../components/LangPair.vue'
 import LinkButton from '../components/LinkButton.vue'
 import StatusMark from '../components/StatusMark.vue'
@@ -58,40 +60,47 @@ async function remove(book: Book) {
       </LinkButton>
     </div>
 
-    <p
-      v-if="error"
-      role="alert"
-      class="form-error"
-    >
-      {{ error }}
-    </p>
+    <ErrorAlert :message="error" />
 
-    <p
+    <div
       v-if="books === null && !error"
-      class="muted"
+      class="loading"
     >
-      Загружаю библиотеку…
-    </p>
+      <NSpin size="small" />
+      <span class="muted">Загружаю библиотеку…</span>
+    </div>
 
     <section
       v-else-if="books?.length === 0"
       class="empty card"
     >
-      <h2>Загрузите первую книгу</h2>
-      <p>Подойдут EPUB, PDF, Word, HTML, Markdown, обычный текст и ZIP-архив документации (mdBook, MkDocs).</p>
-      <LinkButton
-        to="/import"
-        type="primary"
-      >
-        Загрузить книгу
-      </LinkButton>
+      <NEmpty size="large">
+        <h2 class="empty-title">
+          Загрузите первую книгу
+        </h2>
+        <template #extra>
+          <p class="muted">
+            Подойдут EPUB, PDF, Word, HTML, Markdown, обычный текст и ZIP-архив документации (mdBook, MkDocs).
+          </p>
+          <LinkButton
+            to="/import"
+            type="primary"
+          >
+            Загрузить книгу
+          </LinkButton>
+        </template>
+      </NEmpty>
     </section>
 
     <div
       v-else-if="books"
       class="card table-card"
     >
-      <table class="ledger">
+      <NTable
+        class="ledger"
+        :bordered="false"
+        :single-line="true"
+      >
         <thead>
           <tr>
             <th scope="col">
@@ -175,29 +184,39 @@ async function remove(book: Book) {
             </td>
           </tr>
         </tbody>
-      </table>
+      </NTable>
     </div>
   </main>
 </template>
 
 <style scoped>
-.empty {
-  max-width: var(--measure);
-  display: grid;
+.loading {
+  display: flex;
+  align-items: center;
   gap: var(--space-3);
-  justify-items: start;
-  padding: var(--space-6);
 }
 
-.empty h2 {
+.empty {
+  padding: var(--space-7) var(--space-5);
+}
+
+.empty-title {
   font-family: var(--font-book);
   font-size: var(--step-2);
   font-weight: 600;
+  color: var(--ink-original);
+}
+
+.empty :deep(.n-empty__extra) {
+  display: grid;
+  gap: var(--space-4);
+  justify-items: center;
+  text-align: center;
 }
 
 .empty p {
-  margin: 0 0 var(--space-2);
-  color: var(--muted);
+  margin: 0;
+  max-width: var(--measure);
 }
 
 .table-card {

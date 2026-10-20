@@ -8,6 +8,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { confirmPasswordReset } from '../api/auth'
 import { ApiError, errorMessage } from '../api/client'
 import AuthCard from '../components/AuthCard.vue'
+import ErrorAlert from '../components/ErrorAlert.vue'
 import TextField from '../components/TextField.vue'
 
 const route = useRoute()
@@ -57,13 +58,7 @@ async function submit() {
         hint="Не короче 12 символов. После сохранения на всех устройствах нужно войти заново."
         required
       />
-      <p
-        v-if="error"
-        role="alert"
-        class="form-error"
-      >
-        {{ error }}
-      </p>
+      <ErrorAlert :message="error" />
       <RouterLink
         v-if="expired"
         to="/forgot-password"

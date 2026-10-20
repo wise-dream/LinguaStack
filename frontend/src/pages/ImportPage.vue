@@ -1,12 +1,13 @@
 <script setup lang="ts">
 // Импорт книги (ТЗ §4): загрузка с прогрессом, замечания импорта и
 // предварительный просмотр оглавления с перестановкой глав.
-import { NButton, NProgress } from 'naive-ui'
+import { NAlert, NButton, NProgress, NUpload, NUploadDragger, type UploadFileInfo } from 'naive-ui'
 import { computed, ref } from 'vue'
 
 import { getTOC, putTOC, uploadBook } from '../api/books'
 import { errorMessage } from '../api/client'
 import type { Book, ImportIssue, TocEntry } from '../api/types'
+import ErrorAlert from '../components/ErrorAlert.vue'
 import LinkButton from '../components/LinkButton.vue'
 import TocTree from '../components/TocTree.vue'
 import { formatNumber, plural } from '../lib/format'
@@ -17,8 +18,6 @@ const progress = ref<number | null>(null)
 const error = ref('')
 const pendingOrder = ref<number[] | null>(null)
 const orderSaved = ref(false)
-const dragging = ref(false)
-
 const busy = computed(() => progress.value !== null)
 
 const severityLabel: Record<ImportIssue['severity'], string> = {
@@ -45,15 +44,10 @@ async function start(file: File | undefined) {
   }
 }
 
-function onChange(e: Event) {
-  const input = e.target as HTMLInputElement
-  void start(input.files?.[0])
-  input.value = ''
-}
-
-function onDrop(e: DragEvent) {
-  dragging.value = false
-  void start(e.dataTransfer?.files?.[0])
+// Выбор и перетаскивание файла обрабатывает NUpload; отправляем сами —
+// со своим прогрессом и разбором ответа.
+function onUploadChange({ file }: { file: UploadFileInfo }) {
+  void start(file.file ?? undefined)
 }
 
 function onReorder(order: number[]) {
@@ -78,27 +72,33 @@ async function saveOrder() {
   <main class="page import">
     <h1>Загрузка книги</h1>
 
-    <label
+    <NUpload
       class="drop"
-      :class="{ dragging, busy }"
-      @dragover.prevent="dragging = true"
-      @dragleave="dragging = false"
-      @drop.prevent="onDrop"
+      :class="{ busy }"
+      :default-upload="false"
+      :show-file-list="false"
+      :file-list="[]"
+      accept=".epub,.pdf,.docx,.html,.htm,.md,.markdown,.txt,.zip"
+      :disabled="busy"
+      @change="onUploadChange"
     >
-      <span class="drop-title">Перетащите файл сюда или выберите его</span>
-      <span class="drop-hint">EPUB, PDF, DOCX, HTML, Markdown, TXT или ZIP-архив документации, до 50 МБ</span>
-      <span
-        class="button pick"
-        aria-hidden="true"
-      >Выбрать файл</span>
-      <input
-        class="visually-hidden"
-        type="file"
-        accept=".epub,.pdf,.docx,.html,.htm,.md,.markdown,.txt,.zip"
-        :disabled="busy"
-        @change="onChange"
-      >
-    </label>
+      <NUploadDragger>
+        <p class="drop-title">
+          Перетащите файл сюда или выберите его
+        </p>
+        <p class="drop-hint">
+          EPUB, PDF, DOCX, HTML, Markdown, TXT или ZIP-архив документации, до 50 МБ
+        </p>
+        <NButton
+          class="pick"
+          tag="span"
+          aria-hidden="true"
+          tabindex="-1"
+        >
+          Выбрать файл
+        </NButton>
+      </NUploadDragger>
+    </NUpload>
 
     <div
       v-if="progress !== null"
@@ -114,13 +114,7 @@ async function saveOrder() {
       <span>{{ progress < 1 ? `Отправлено ${Math.round(progress * 100)}%` : 'Разбираю книгу…' }}</span>
     </div>
 
-    <p
-      v-if="error"
-      role="alert"
-      class="form-error"
-    >
-      {{ error }}
-    </p>
+    <ErrorAlert :message="error" />
 
     <section
       v-if="book"
@@ -140,18 +134,19 @@ async function saveOrder() {
         {{ formatNumber(book.translatable) }} {{ plural(book.translatable, ['фрагмент', 'фрагмента', 'фрагментов']) }} для перевода
       </p>
 
-      <ul
+      <div
         v-if="book.issues.length"
         class="issues"
       >
-        <li
+        <NAlert
           v-for="(issue, i) in book.issues"
           :key="i"
-          :class="issue.severity"
+          :type="issue.severity"
+          :title="severityLabel[issue.severity]"
         >
-          <strong>{{ severityLabel[issue.severity] }}.</strong> {{ issue.message }}
-        </li>
-      </ul>
+          {{ issue.message }}
+        </NAlert>
+      </div>
 
       <h3>Оглавление</h3>
       <p class="hint">
@@ -162,7 +157,10 @@ async function saveOrder() {
         reorderable
         @reorder="onReorder"
       />
-      <p class="order-actions">
+      <p
+        v-if="pendingOrder || orderSaved"
+        class="order-actions"
+      >
         <NButton
           v-if="pendingOrder"
           class="save-order"
@@ -199,27 +197,13 @@ async function saveOrder() {
   max-width: 48rem;
 }
 
-.drop {
-  position: relative;
+.drop :deep(.n-upload-dragger) {
   display: grid;
   gap: var(--space-1);
   justify-items: center;
-  text-align: center;
   padding: var(--space-7) var(--space-5);
-  border: 1.5px dashed var(--rule);
   border-radius: var(--radius-card);
   background: var(--surface);
-  cursor: pointer;
-  transition: border-color 0.2s, background-color 0.2s;
-}
-
-.drop:hover {
-  border-color: var(--ink-original);
-}
-
-.drop.dragging {
-  border-color: var(--ink-original);
-  background: color-mix(in srgb, var(--highlight) 20%, var(--surface));
 }
 
 .drop.busy {
@@ -228,21 +212,18 @@ async function saveOrder() {
 }
 
 .drop-title {
+  margin: 0;
   font-weight: 500;
   font-size: var(--step-1);
 }
 
 .drop-hint {
+  margin: 0;
   color: var(--muted);
 }
 
 .pick {
   margin-top: var(--space-3);
-}
-
-.drop:focus-within {
-  outline: 2px solid var(--ink-original);
-  outline-offset: 2px;
 }
 
 .progress {
@@ -261,9 +242,6 @@ async function saveOrder() {
   white-space: nowrap;
 }
 
-.form-error {
-  margin-top: var(--space-4);
-}
 
 .result {
   margin-top: var(--space-5);
@@ -286,28 +264,8 @@ async function saveOrder() {
 
 .issues {
   margin: 0 0 var(--space-5);
-  padding: 0;
-  list-style: none;
   display: grid;
   gap: var(--space-2);
-}
-
-.issues li {
-  padding: var(--space-2) var(--space-3);
-  border-radius: 8px;
-  background: var(--paper-raised);
-  border: 1px solid var(--rule-soft);
-}
-
-.issues li.warning {
-  background: color-mix(in srgb, var(--highlight) 18%, var(--surface));
-  border-color: color-mix(in srgb, var(--highlight) 55%, var(--surface));
-}
-
-.issues li.error {
-  color: var(--proof);
-  background: color-mix(in srgb, var(--proof) 7%, var(--surface));
-  border-color: color-mix(in srgb, var(--proof) 25%, var(--surface));
 }
 
 h3 {
@@ -324,7 +282,7 @@ h3 {
   display: flex;
   align-items: center;
   gap: var(--space-3);
-  min-height: 2.5rem;
+  margin: var(--space-3) 0 0;
 }
 
 .next {

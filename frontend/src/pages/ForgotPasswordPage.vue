@@ -7,6 +7,7 @@ import { ref } from 'vue'
 import { requestPasswordReset } from '../api/auth'
 import { errorMessage } from '../api/client'
 import AuthCard from '../components/AuthCard.vue'
+import ErrorAlert from '../components/ErrorAlert.vue'
 import TextField from '../components/TextField.vue'
 
 const email = ref('')
@@ -52,13 +53,7 @@ async function submit() {
         autocomplete="email"
         required
       />
-      <p
-        v-if="error"
-        role="alert"
-        class="form-error"
-      >
-        {{ error }}
-      </p>
+      <ErrorAlert :message="error" />
       <NButton
         attr-type="submit"
         type="primary"

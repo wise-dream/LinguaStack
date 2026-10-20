@@ -140,7 +140,7 @@ describe('админ-панель', () => {
     })
     await w.find('[data-user="u1"] button.reset').trigger('click')
     await flushPromises()
-    const link = w.find('[data-user="u1"] input.reset-link')
+    const link = w.find('[data-user="u1"] .reset-link input')
     expect((link.element as HTMLInputElement).value).toBe(`${window.location.origin}/reset-password?token=abc`)
     expect(w.find('[data-user="u1"]').text()).toContain('сработает один раз')
   })

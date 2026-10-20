@@ -1,10 +1,12 @@
 <script setup lang="ts">
 // Поиск по книге и выбранному переводу (ТЗ §8.3).
+import { NInput } from 'naive-ui'
 import { ref } from 'vue'
 
 import { errorMessage } from '../api/client'
 import { searchBook } from '../api/reader'
 import type { SearchResult } from '../api/types'
+import ErrorAlert from '../components/ErrorAlert.vue'
 
 const props = defineProps<{ bookId: string; translationId: string; chapterTitle: (index: number) => string }>()
 const emit = defineEmits<{ go: [result: SearchResult] }>()
@@ -42,25 +44,22 @@ function go(r: SearchResult) {
       role="search"
       @submit.prevent="search"
     >
-      <label class="visually-hidden">Поиск по книге</label>
-      <input
-        v-model="q"
-        type="search"
+      <NInput
+        v-model:value="q"
         placeholder="Поиск по книге"
+        clearable
+        :input-props="{ type: 'search', 'aria-label': 'Поиск по книге' }"
         @keydown.esc="results = null"
-      >
+      />
     </form>
     <div
       v-if="results || error"
       class="search-results"
     >
-      <p
+      <ErrorAlert
         v-if="error"
-        role="alert"
-        class="form-error"
-      >
-        {{ error }}
-      </p>
+        :message="error"
+      />
       <p
         v-else-if="!results?.length"
         class="muted"
@@ -99,7 +98,7 @@ function go(r: SearchResult) {
   position: relative;
 }
 
-.search input {
+.search {
   width: 16rem;
   max-width: 100%;
 }

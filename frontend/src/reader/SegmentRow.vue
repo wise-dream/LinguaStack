@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // Строка читалки: блок оригинала и его перевод, на полях — пометки и
 // правка. Код, формулы и картинки не переводятся и идут во всю ширину.
-import { NButton } from 'naive-ui'
+import { NButton, NInput } from 'naive-ui'
 import { computed, nextTick, ref } from 'vue'
 
 import { assetUrl } from '../api/books'
@@ -9,6 +9,7 @@ import { errorMessage } from '../api/client'
 import { patchSegment, retrySegment } from '../api/translations'
 import type { Block, ReadMode, Segment } from '../api/types'
 import { renderInline } from '../lib/inline'
+import ErrorAlert from '../components/ErrorAlert.vue'
 import ProofMark from './ProofMark.vue'
 
 const props = defineProps<{
@@ -50,7 +51,7 @@ function toggleReveal(e: MouseEvent) {
 const draft = ref('')
 const error = ref('')
 const busy = ref(false)
-const area = ref<HTMLTextAreaElement | null>(null)
+const area = ref<InstanceType<typeof NInput> | null>(null)
 
 async function startEdit() {
   draft.value = props.segment?.translated_text ?? ''
@@ -132,11 +133,13 @@ async function retry() {
           class="editor"
           @submit.prevent="save"
         >
-          <label class="visually-hidden">Перевод фрагмента</label>
-          <textarea
+          <NInput
             ref="area"
-            v-model="draft"
-            rows="4"
+            v-model:value="draft"
+            type="textarea"
+            :autosize="{ minRows: 4 }"
+            :input-props="{ 'aria-label': 'Перевод фрагмента' }"
+            placeholder=""
             @keydown.esc.prevent="cancel"
             @keydown.enter.ctrl.prevent="save"
             @keydown.enter.meta.prevent="save"
@@ -201,13 +204,10 @@ async function retry() {
             Перевести заново
           </NButton>
         </div>
-        <p
-          v-if="error"
-          role="alert"
-          class="row-error"
-        >
-          {{ error }}
-        </p>
+        <ErrorAlert
+          :message="error"
+          size="small"
+        />
       </div>
     </template>
   </div>
@@ -312,18 +312,12 @@ blockquote.translation {
   opacity: 1;
 }
 
-.row-error {
-  margin: 0;
-  font-size: var(--step--1);
-  color: var(--proof);
-}
-
 .editor {
   display: grid;
   gap: var(--space-2);
 }
 
-.editor textarea {
+.editor :deep(textarea) {
   font-family: var(--font-book);
   font-size: var(--book-size);
   line-height: var(--book-leading);

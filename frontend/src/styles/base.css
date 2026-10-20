@@ -163,16 +163,6 @@ input[type='radio'] {
   cursor: not-allowed;
 }
 
-/* Ошибка у формы — в тоне предупреждения Naive UI. */
-.form-error {
-  margin: 0;
-  padding: var(--space-2) var(--space-3);
-  color: var(--proof);
-  background: color-mix(in srgb, var(--proof) 7%, var(--surface));
-  border: 1px solid color-mix(in srgb, var(--proof) 25%, var(--surface));
-  border-radius: 8px;
-}
-
 /* Сообщение «готово» рядом с действием. */
 .notice {
   margin: 0;

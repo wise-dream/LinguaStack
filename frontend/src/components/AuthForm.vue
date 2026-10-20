@@ -5,6 +5,7 @@ import { ref } from 'vue'
 
 import { errorMessage } from '../api/client'
 import AuthCard from './AuthCard.vue'
+import ErrorAlert from './ErrorAlert.vue'
 import TextField from './TextField.vue'
 
 const props = defineProps<{
@@ -55,13 +56,7 @@ async function onSubmit() {
         :hint="passwordHint"
         required
       />
-      <p
-        v-if="error"
-        role="alert"
-        class="form-error"
-      >
-        {{ error }}
-      </p>
+      <ErrorAlert :message="error" />
       <NButton
         attr-type="submit"
         type="primary"

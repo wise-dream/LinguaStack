@@ -94,9 +94,9 @@ describe('настройки', () => {
       'PATCH /api/telegram': (call) => ({ body: state({ linked: true, username: 'kamil', ...(call.body as object) }) }),
       'DELETE /api/telegram': { status: 204 },
     })
-    const labels = w.findAll('section.telegram input[type=checkbox]').map((i) => i.element.closest('label')?.textContent?.trim())
+    const labels = w.findAll('section.telegram .toggle').map((t) => t.text())
     expect(labels).toEqual(['Глава переведена', 'Книга переведена', 'Перевод остановлен из-за ошибки'])
-    await w.find('input[name=notify_chapters]').setValue(false)
+    await w.find('[data-toggle=notify_chapters] [role=switch]').trigger('click')
     await flushPromises()
     expect(calls.find((c) => c.method === 'PATCH')?.body).toEqual({ notify_chapters: false })
 
