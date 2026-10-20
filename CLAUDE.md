@@ -26,6 +26,15 @@ go test -race -count=1 ./...
 Живой тест Anthropic (`LINGUASTACK_LIVE_ANTHROPIC=1`) тратит деньги
 пользователя — запускать только с его явного согласия.
 
+Telegram: бот — отдельный процесс (`make run-bot`, без
+`LINGUASTACK_TELEGRAM_BOT_TOKEN` выключен). Тесты бота и доставки идут
+против поддельного Bot API `internal/telegram/telegramtest`, в Telegram
+ничего не уходит.
+
+Гейт коммита — цепочка через `&&` без `;`; если в ней есть `|`, то с
+`set -o pipefail`: иначе код возврата даёт `grep`/`tail`, и коммит проходит
+мимо упавших тестов.
+
 PDF-фикстуры (`internal/importers/testdata/pdf/`) печатает headless Chrome:
 `./generate.sh` в этом каталоге; результат коммитится, тестам Chrome не
 нужен. Пул PDFium (wasm) общий на процесс и компилируется при первом PDF —

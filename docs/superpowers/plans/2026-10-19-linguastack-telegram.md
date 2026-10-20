@@ -59,12 +59,30 @@
 
 ---
 
+> **Статус: ✅ завершён** (задачи 0–9). Отклонения и находки:
+>
+> - **Живая проверка** без настоящего Telegram: api, worker и bot против
+>   поддельного Bot API (процесс на Python) — привязка по ссылке, перевод
+>   «Алисы» с уведомлениями, `/status`, «Приостановить» кнопкой, `/unlink`;
+>   токена в логах нет. Нашла: склейка глав только в пределах одного
+>   прохода доставщика не спасала от потока сообщений при быстрой модели —
+>   теперь сообщение о главах не чаще раза в 5 минут на перевод, «готово»
+>   отменяет отложенные главы (15 глав «Алисы» — два сообщения).
+> - **Ревью ветки (самопроверка)** нашло: `/status` с десятью длинными
+>   названиями превышал предел Telegram в 4096 символов — названия
+>   обрезаются, размер ограничен; устаревшая ссылка привязки не
+>   останавливала опрос страницы настроек.
+> - **Чужой `translation_id`** и прочие ответы API — как в плане; в боте
+>   всё по плану, кроме: тесты `cmd/bot` писались вместе с кодом.
+> - **Живой бот** с настоящим токеном не проверялся — токена нет; для
+>   включения — README, раздел «Telegram-бот».
+
 ## Задача 0: решения в дополнении к ТЗ
 
 **Files:** Modify `docs/spec/SPEC-ADDENDUM.md` (новый §17, §10 лимиты,
 трассируемость №13).
 
-- [ ] **Step 1:** §17 — процесс `bot`, outbox, привязка (код 32 байта,
+- [x] **Step 1:** §17 — процесс `bot`, outbox, привязка (код 32 байта,
   base64url, TTL 15 мин, в БД — sha256), личные чаты, склейка глав,
   повтор доставки (429 — по `retry_after`, 5xx и сеть — 30 с × 2ⁿ до 5
   попыток, 403 — пропуск), формат сообщений, команды. **Step 2:** коммит.
@@ -90,13 +108,13 @@
   ошибка `*telegram.APIError{Code int; Description string; RetryAfter time.Duration}`
   (`Temporary() bool` — 429 и 5xx); сетевые ошибки — без адреса.
 
-- [ ] **Step 1:** Тесты на httptest-сервере: `TestSendMessageHTML`
+- [x] **Step 1:** Тесты на httptest-сервере: `TestSendMessageHTML`
   (метод, `chat_id`, `parse_mode=HTML`, `link_preview_options.is_disabled`,
   клавиатура), `TestGetUpdatesOffsetTimeout`, `TestAPIErrorRetryAfter`
   (429 с `parameters.retry_after`), `TestAPIErrorForbidden` (403 не
   временная), `TestNetworkErrorHidesToken` (сервер закрыт — в тексте
   ошибки нет токена), `TestRedactsTelegramToken` (фильтр логов).
-- [ ] **Step 2:** FAIL. **Step 3:** реализация. **Step 4:** PASS, lint.
+- [x] **Step 2:** FAIL. **Step 3:** реализация. **Step 4:** PASS, lint.
   **Step 5:** коммит `feat: клиент Telegram Bot API`.
 
 ## Task 2: пауза, возобновление и отмена — общий код
@@ -112,10 +130,10 @@
   ошибки `store.ErrNotFound` (чужой или нет), `queue.ErrBadTransition`
   (`*TransitionError{From string}`).
 
-- [ ] **Step 1:** Тесты: `TestPauseResumeCancel` (переходы и задачи
+- [x] **Step 1:** Тесты: `TestPauseResumeCancel` (переходы и задачи
   очереди), `TestControlForeignProjectNotFound`, `TestBadTransition`.
   Существующие тесты HTTP паузы/возобновления — без изменений.
-- [ ] **Step 2–4:** FAIL → реализация (обработчики HTTP вызывают её) → PASS.
+- [x] **Step 2–4:** FAIL → реализация (обработчики HTTP вызывают её) → PASS.
   **Step 5:** коммит `refactor: управление переводом — общий код для API и бота`.
 
 ## Task 3: схема и привязка из веб-приложения
@@ -142,13 +160,13 @@
   `DELETE /api/telegram` → 204;
   `telegram.LinkCode() (code string, hash []byte)`, `telegram.HashCode(code string) []byte`.
 
-- [ ] **Step 1:** Тесты: `TestTelegramDisabled` (без токена — `enabled:false`,
+- [x] **Step 1:** Тесты: `TestTelegramDisabled` (без токена — `enabled:false`,
   `POST link` → 503 «Telegram-бот не настроен»); `TestTelegramLinkURL`
   (`https://t.me/<бот>?start=<43 символа>`, в БД — хеш, не код; второй
   запрос заменяет код); `TestTelegramSettings` (PATCH флагов без привязки
   — 409, с привязкой — сохраняются); `TestTelegramUnlink`;
   `TestTelegramRoutesRequireAuth` — через общий тест матрицы.
-- [ ] **Step 2–4.** **Step 5:** коммит `feat: привязка Telegram в API`.
+- [x] **Step 2–4.** **Step 5:** коммит `feat: привязка Telegram в API`.
 
 ## Task 4: бот — команды и привязка
 
@@ -165,7 +183,7 @@
   `(*Bot).HandleUpdate(ctx, telegram.Update) error`, `(*Bot).Run(ctx) error`;
   `telegramtest.NewServer(t) *Server` (`Updates(...)`, `Sent() []telegram.Message`, `URL()`).
 
-- [ ] **Step 1:** Тесты: `TestStartLinksAccount` (`/start <код>` в личном
+- [x] **Step 1:** Тесты: `TestStartLinksAccount` (`/start <код>` в личном
   чате → привязка, код удалён, ответ «Готово: …»); `TestStartCodeReuseOrExpired`
   («код не подходит или устарел»); `TestStartMovesTelegramToNewAccount`
   (тот же Telegram, код другого аккаунта → привязка переносится);
@@ -176,7 +194,7 @@
   не больше 10 переводов); `TestPauseCallback` (проект на паузе, ответ на
   нажатие, сообщение обновлено); `TestForeignCallbackRefused` (Review
   Focus №2); `TestHelp`, `TestUnlinkCommand`, `TestUnknownText`.
-- [ ] **Step 2–4.** **Step 5:** коммит `feat: команды Telegram-бота и привязка`.
+- [x] **Step 2–4.** **Step 5:** коммит `feat: команды Telegram-бота и привязка`.
 
 ## Task 5: события уведомлений в worker
 
@@ -191,13 +209,13 @@
   владельца есть привязка с включённым видом уведомлений; повтор события —
   `ON CONFLICT (dedupe_key) DO NOTHING`.
 
-- [ ] **Step 1:** Тесты: `TestChapterDoneOnceWhenAllSegmentsProcessed`
+- [x] **Step 1:** Тесты: `TestChapterDoneOnceWhenAllSegmentsProcessed`
   (глава с pending — нет; все completed/failed — одна запись, повтор не
   дублирует); `TestNoBindingNoNotification`; `TestSettingDisabledNoNotification`;
   `TestWorkerEnqueuesChapterAndCompleted` (книга из двух глав через Fake —
   две главы и «готово»); `TestWorkerEnqueuesFailed` (неповторяемая ошибка
   провайдера); правка сегмента через API не создаёт «failed».
-- [ ] **Step 2–4.** **Step 5:** коммит `feat: события уведомлений Telegram из worker`.
+- [x] **Step 2–4.** **Step 5:** коммит `feat: события уведомлений Telegram из worker`.
 
 ## Task 6: доставка уведомлений
 
@@ -209,7 +227,7 @@
   `(*Dispatcher).RunOnce(ctx) (int, error)`, `(*Dispatcher).Run(ctx) error`;
   `notify.Sender interface { SendMessage(ctx, telegram.Message) (int64, error) }`.
 
-- [ ] **Step 1:** Тесты: `TestCompletedMessage` (название и язык,
+- [x] **Step 1:** Тесты: `TestCompletedMessage` (название и язык,
   «873 из 873», замечания, ссылка `…/translations/{id}`, HTML экранирован:
   название `<b>&` не ломает разметку); `TestChaptersCoalesced` (пять глав
   проекта — одно сообщение «готовы главы «A», «B», «C» и ещё 2»);
@@ -219,7 +237,7 @@
   `TestTransientBackoffThenFailed` (5xx 5 раз → failed);
   `TestBlockedBotSkipped` (403 → skipped); `TestUnlinkedSkipped`;
   `TestSettingTurnedOffSkipped`; `TestNoPublicURLNoLinks`.
-- [ ] **Step 2–4.** **Step 5:** коммит `feat: доставка уведомлений Telegram`.
+- [x] **Step 2–4.** **Step 5:** коммит `feat: доставка уведомлений Telegram`.
 
 ## Task 7: процесс bot и развёртывание
 
@@ -227,7 +245,7 @@
 (собрать `./cmd/bot`), `docker-compose.yml` (сервис `bot`), `backend/Makefile`
 (`run-bot`), `.github/workflows/ci.yml` (если нужно), `.env.example`.
 
-- [ ] **Step 1:** `cmd/bot`: без токена — пишет «бот выключен» и ждёт
+- [x] **Step 1:** `cmd/bot`: без токена — пишет «бот выключен» и ждёт
   сигнала (compose с `restart: unless-stopped` не перезапускает его по
   кругу); с токеном — `getMe` (проверка токена, имя бота в лог), сверка с
   `LINGUASTACK_TELEGRAM_BOT_USERNAME` (расхождение — предупреждение),
@@ -243,7 +261,7 @@
 Modify `frontend/src/router.ts`, `frontend/src/components/AppHeader.vue`
 (ссылка «Настройки»), `frontend/src/api/types.ts`, `frontend/e2e/full-cycle.spec.ts`.
 
-- [ ] **Step 1:** Тесты: бот не настроен — «Telegram-бот не настроен на
+- [x] **Step 1:** Тесты: бот не настроен — «Telegram-бот не настроен на
   этом сервере», кнопок нет; не привязан — «Привязать Telegram» → ссылка
   «Открыть бота» и срок действия, опрос раз в 3 с до привязки; привязан —
   «@username, с 19 окт.», переключатели трёх видов уведомлений
@@ -253,12 +271,12 @@ Modify `frontend/src/router.ts`, `frontend/src/components/AppHeader.vue`
 
 ## Task 9: живая проверка, документация, ревью
 
-- [ ] **Step 1:** Локальный стенд api + worker + bot против поддельного
+- [x] **Step 1:** Локальный стенд api + worker + bot против поддельного
   сервера Telegram (скрипт в scratchpad): привязка по ссылке из API,
   перевод провайдером fake → сообщения о главах (склеенные) и о
   завершении, `/status`, «Приостановить» кнопкой, `/unlink`; логи без
   токена. Живой бот — только если владелец даст токен.
-- [ ] **Step 2:** README, дополнение (трассируемость №13), статус плана;
+- [x] **Step 2:** README, дополнение (трассируемость №13), статус плана;
   полный прогон; ревью ветки; слияние в main.
 
 ## За рамками этого плана
