@@ -71,7 +71,7 @@ func loadHTMLFiles(files []htmlFile, fallbackTitle string, archive map[string]*z
 		}
 		dir := path.Dir(f.name)
 		em := &htmlEmitter{b: builder, dir: dir, blockish: map[*html.Node]bool{},
-			splitChapters: true, minLevel: chapterBaseLevel(root),
+			splitChapters: true, minLevel: chapterBaseLevel(root, len(files) == 1),
 			imageSrc: func(raw string) (string, bool) { return res.resolve(dir, raw) }}
 		em.markBlockish(root)
 		em.blocks(root, htmlContext{})
@@ -172,10 +172,12 @@ func removeElements(root *html.Node, match func(*html.Node) bool) {
 }
 
 // chapterBaseLevel — уровень заголовка, который открывает главу верхнего
-// уровня. Единственный заголовок самого крупного уровня — название книги
-// (так у Project Gutenberg: один h1 и главы в h2); тогда главы верхнего
-// уровня — заголовки следующего уровня, а не подглавы названия.
-func chapterBaseLevel(root *html.Node) int {
+// уровня. В одиночной странице единственный заголовок самого крупного
+// уровня — название книги (так у Project Gutenberg: один h1 и главы в h2);
+// тогда главы верхнего уровня — заголовки следующего уровня, а не подглавы
+// названия. В книге из нескольких страниц единственный h1 страницы — её
+// глава, и разделы вкладываются в неё.
+func chapterBaseLevel(root *html.Node, singlePage bool) int {
 	counts := map[int]int{}
 	walkNodes(root, func(n *html.Node) bool {
 		if n.Type == html.ElementNode && skippedTags[n.DataAtom] {
@@ -194,7 +196,7 @@ func chapterBaseLevel(root *html.Node) int {
 	switch {
 	case len(levels) == 0:
 		return 1
-	case counts[levels[0]] == 1 && len(levels) > 1:
+	case singlePage && counts[levels[0]] == 1 && len(levels) > 1:
 		return levels[1]
 	}
 	return levels[0]

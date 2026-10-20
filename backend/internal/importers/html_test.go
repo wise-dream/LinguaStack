@@ -180,6 +180,20 @@ func TestZipHTMLOrder(t *testing.T) {
 	require.Equal(t, []string{"Начало", "Вторая", "Десятая"}, chapterTitles(res.Document.Chapters))
 }
 
+func TestZipHTMLPagesNestSections(t *testing.T) {
+	// Книга, разложенная по страницам (сайт книги): у каждой страницы один
+	// <h1> — это её глава, а не название книги, как у одиночного файла
+	// Гутенберга; разделы <h2> вкладываются в главу.
+	res := loadZip(t, makeZip(t, files(
+		"01-scanning.html", "<h1>4. Scanning</h1><p>Вступление.</p><h2>4.1 Framework</h2><p>a</p><h2>4.2 Lexemes</h2><p>b</p>",
+		"02-representing.html", "<h1>5. Representing Code</h1><p>c</p><h2>5.1 Grammars</h2><p>d</p>",
+	)...))
+	chs := res.Document.Chapters
+	require.Equal(t, []string{"4. Scanning", "5. Representing Code"}, chapterTitles(chs))
+	require.Equal(t, []string{"4.1 Framework", "4.2 Lexemes"}, chapterTitles(chs[0].Children))
+	require.Equal(t, []string{"5.1 Grammars"}, chapterTitles(chs[1].Children))
+}
+
 func TestZipWithMarkdownIgnoresHTML(t *testing.T) {
 	// Репозиторий документации с HTML рядом — по-прежнему Markdown-книга.
 	res := loadZip(t, makeZip(t, files(
