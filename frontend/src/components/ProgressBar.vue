@@ -33,8 +33,8 @@ const failedWidth = computed(() => `${pct(props.failed)}%`)
 <style scoped>
 .bar {
   display: flex;
-  height: 0.45rem;
-  background: var(--rule);
+  height: 0.5rem;
+  background: var(--rule-soft);
   border-radius: 999px;
   overflow: hidden;
 }

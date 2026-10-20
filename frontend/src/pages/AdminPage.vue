@@ -2,6 +2,7 @@
 // Администрирование (ТЗ §2.1, §8.1 №12; дополнение §18): обзор системы и
 // пользователи. Только метаданные и счётчики — ни названий книг, ни
 // текстов: к содержимому администратор доступа не имеет.
+import { NButton } from 'naive-ui'
 import { computed, onMounted, reactive, ref } from 'vue'
 
 import { getOverview, issueResetLink, listUsers, patchUser } from '../api/admin'
@@ -174,7 +175,7 @@ const until = (iso: string) => new Date(iso).toLocaleTimeString('ru', { hour: '2
 
     <section
       v-if="overview"
-      class="overview"
+      class="overview card"
       aria-labelledby="overview-title"
     >
       <h2 id="overview-title">
@@ -243,7 +244,7 @@ const until = (iso: string) => new Date(iso).toLocaleTimeString('ru', { hour: '2
 
     <section
       v-if="users"
-      class="users"
+      class="users card"
       aria-labelledby="users-title"
     >
       <h2 id="users-title">
@@ -262,12 +263,9 @@ const until = (iso: string) => new Date(iso).toLocaleTimeString('ru', { hour: '2
             placeholder="Поиск по адресу"
           >
         </label>
-        <button
-          type="submit"
-          class="button"
-        >
+        <NButton attr-type="submit">
           Найти
-        </button>
+        </NButton>
       </form>
       <p
         v-if="!users.length"
@@ -325,46 +323,48 @@ const until = (iso: string) => new Date(iso).toLocaleTimeString('ru', { hour: '2
             </td>
             <td class="actions">
               <template v-if="!isSelf(u)">
-                <button
-                  type="button"
-                  class="button role"
+                <NButton
+                  class="role"
+                  size="small"
                   :disabled="busy === u.id"
                   @click="update(u, { role: u.role === 'admin' ? 'user' : 'admin' })"
                 >
                   {{ u.role === 'admin' ? 'Снять администратора' : 'Сделать администратором' }}
-                </button>
+                </NButton>
                 <ConfirmButton
                   v-if="u.is_active"
                   label="Отключить"
                   confirm-label="Точно отключить?"
+                  size="small"
                   :disabled="busy === u.id"
                   @confirm="update(u, { is_active: false })"
                 />
-                <button
+                <NButton
                   v-else
-                  type="button"
-                  class="button"
+                  size="small"
+                  type="primary"
+                  secondary
                   :disabled="busy === u.id"
                   @click="update(u, { is_active: true })"
                 >
                   Включить
-                </button>
+                </NButton>
               </template>
-              <button
-                type="button"
-                class="button quotas"
+              <NButton
+                class="quotas"
+                size="small"
                 :aria-expanded="quotaOpen === u.id"
                 @click="openQuota(u)"
               >
                 Квоты
-              </button>
-              <button
-                type="button"
-                class="button reset"
+              </NButton>
+              <NButton
+                class="reset"
+                size="small"
                 @click="resetLink(u)"
               >
                 Ссылка для сброса пароля
-              </button>
+              </NButton>
             </td>
           </tr>
           <tr
@@ -407,13 +407,13 @@ const until = (iso: string) => new Date(iso).toLocaleTimeString('ru', { hour: '2
                 <p class="hint">
                   Пустое поле — значение сервера по умолчанию (подсказка в поле).
                 </p>
-                <button
-                  type="submit"
-                  class="button primary"
+                <NButton
+                  attr-type="submit"
+                  type="primary"
                   :disabled="busy === u.id"
                 >
                   Сохранить квоты
-                </button>
+                </NButton>
               </form>
             </td>
           </tr>
@@ -449,13 +449,10 @@ const until = (iso: string) => new Date(iso).toLocaleTimeString('ru', { hour: '2
 section {
   display: grid;
   gap: var(--space-4);
-  padding-block: var(--space-5);
-  border-bottom: 1px solid var(--rule);
 }
 
-/* У таблицы своя нижняя линия. */
-section.users {
-  border-bottom: none;
+section + section {
+  margin-top: var(--space-5);
 }
 
 h2 {
@@ -514,7 +511,7 @@ p {
 .group-title {
   font-weight: 500;
   padding-bottom: var(--space-1);
-  border-bottom: 1px solid var(--rule);
+  border-bottom: 1px solid var(--rule-soft);
 }
 
 .figure {
@@ -582,7 +579,7 @@ th {
   color: var(--muted);
   font-size: var(--step--1);
   padding: var(--space-2);
-  border-bottom: 1px solid var(--rule);
+  border-bottom: 1px solid var(--rule-soft);
 }
 
 td {
@@ -596,7 +593,7 @@ td[data-label] {
 }
 
 tbody {
-  border-bottom: 1px solid var(--rule);
+  border-bottom: 1px solid var(--rule-soft);
 }
 
 .account {
@@ -634,11 +631,6 @@ tbody {
   justify-content: flex-end;
 }
 
-.actions .button {
-  padding: var(--space-1) var(--space-3);
-  font-size: var(--step--1);
-}
-
 .detail td {
   padding-top: 0;
 }
@@ -650,7 +642,7 @@ tbody {
   align-items: start;
   padding: var(--space-3);
   background: var(--paper-raised);
-  border: 1px solid var(--rule);
+  border: 1px solid var(--rule-soft);
   border-radius: var(--radius);
 }
 
@@ -667,7 +659,7 @@ tbody {
 .reset-box {
   padding: var(--space-3);
   background: var(--paper-raised);
-  border: 1px solid var(--rule);
+  border: 1px solid var(--rule-soft);
   border-radius: var(--radius);
 }
 

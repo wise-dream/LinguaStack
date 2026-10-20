@@ -8,6 +8,7 @@ import { listTranslations } from '../api/translations'
 import type { Book, Project } from '../api/types'
 import ConfirmButton from '../components/ConfirmButton.vue'
 import LangPair from '../components/LangPair.vue'
+import LinkButton from '../components/LinkButton.vue'
 import StatusMark from '../components/StatusMark.vue'
 import { formatDate, formatName } from '../lib/format'
 
@@ -46,15 +47,15 @@ async function remove(book: Book) {
 
 <template>
   <main class="page">
-    <div class="heading">
+    <div class="page-head">
       <h1>Библиотека</h1>
-      <RouterLink
+      <LinkButton
         v-if="books?.length"
         to="/import"
-        class="button primary"
+        type="primary"
       >
         Загрузить книгу
-      </RouterLink>
+      </LinkButton>
     </div>
 
     <p
@@ -74,142 +75,134 @@ async function remove(book: Book) {
 
     <section
       v-else-if="books?.length === 0"
-      class="empty"
+      class="empty card"
     >
       <h2>Загрузите первую книгу</h2>
-      <p>Подойдут EPUB, Markdown, обычный текст и ZIP-архив документации (mdBook, MkDocs).</p>
-      <RouterLink
+      <p>Подойдут EPUB, PDF, Word, HTML, Markdown, обычный текст и ZIP-архив документации (mdBook, MkDocs).</p>
+      <LinkButton
         to="/import"
-        class="button primary"
+        type="primary"
       >
         Загрузить книгу
-      </RouterLink>
+      </LinkButton>
     </section>
 
-    <table
+    <div
       v-else-if="books"
-      class="ledger"
+      class="card table-card"
     >
-      <thead>
-        <tr>
-          <th scope="col">
-            Книга
-          </th>
-          <th scope="col">
-            Формат
-          </th>
-          <th scope="col">
-            Добавлена
-          </th>
-          <th scope="col">
-            Переводы
-          </th>
-          <th scope="col">
-            <span class="visually-hidden">Действия</span>
-          </th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr
-          v-for="book in books"
-          :key="book.id"
-          :data-book="book.id"
-        >
-          <td class="book">
-            <RouterLink
-              :to="`/books/${book.id}`"
-              class="title"
-            >
-              {{ book.title }}
-            </RouterLink>
-            <span
-              v-if="book.author"
-              class="author"
-            >{{ book.author }}</span>
-          </td>
-          <td>{{ formatName(book.source_format) }}</td>
-          <td>{{ formatDate(book.created_at) }}</td>
-          <td>
-            <ul
-              v-if="byBook.get(book.id)?.length"
-              class="translations"
-            >
-              <li
-                v-for="p in byBook.get(book.id)"
-                :key="p.id"
+      <table class="ledger">
+        <thead>
+          <tr>
+            <th scope="col">
+              Книга
+            </th>
+            <th scope="col">
+              Формат
+            </th>
+            <th scope="col">
+              Добавлена
+            </th>
+            <th scope="col">
+              Переводы
+            </th>
+            <th scope="col">
+              <span class="visually-hidden">Действия</span>
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr
+            v-for="book in books"
+            :key="book.id"
+            :data-book="book.id"
+          >
+            <td class="book">
+              <RouterLink
+                :to="`/books/${book.id}`"
+                class="title"
               >
-                <RouterLink :to="`/translations/${p.id}`">
-                  <LangPair
-                    :source="p.source_lang"
-                    :target="p.target_lang"
-                  />
-                </RouterLink>
-                <StatusMark :status="p.status" />
-              </li>
-            </ul>
-            <span
-              v-else
-              class="muted"
-            >Ещё нет</span>
-          </td>
-          <td class="actions">
-            <RouterLink
-              :to="`/read/${book.id}`"
-              class="button"
-            >
-              Читать
-            </RouterLink>
-            <RouterLink
-              :to="`/books/${book.id}/translate`"
-              class="button"
-            >
-              Перевести
-            </RouterLink>
-            <ConfirmButton
-              label="Удалить"
-              @confirm="remove(book)"
-            />
-          </td>
-        </tr>
-      </tbody>
-    </table>
+                {{ book.title }}
+              </RouterLink>
+              <span
+                v-if="book.author"
+                class="author"
+              >{{ book.author }}</span>
+            </td>
+            <td>{{ formatName(book.source_format) }}</td>
+            <td>{{ formatDate(book.created_at) }}</td>
+            <td>
+              <ul
+                v-if="byBook.get(book.id)?.length"
+                class="translations"
+              >
+                <li
+                  v-for="p in byBook.get(book.id)"
+                  :key="p.id"
+                >
+                  <RouterLink :to="`/translations/${p.id}`">
+                    <LangPair
+                      :source="p.source_lang"
+                      :target="p.target_lang"
+                    />
+                  </RouterLink>
+                  <StatusMark :status="p.status" />
+                </li>
+              </ul>
+              <span
+                v-else
+                class="muted"
+              >Ещё нет</span>
+            </td>
+            <td class="actions">
+              <LinkButton
+                :to="`/read/${book.id}`"
+                size="small"
+              >
+                Читать
+              </LinkButton>
+              <LinkButton
+                :to="`/books/${book.id}/translate`"
+                size="small"
+              >
+                Перевести
+              </LinkButton>
+              <ConfirmButton
+                label="Удалить"
+                size="small"
+                @confirm="remove(book)"
+              />
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
   </main>
 </template>
 
 <style scoped>
-.heading {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: var(--space-4);
-  margin-bottom: var(--space-5);
-}
-
-h1 {
-  font-family: var(--font-book);
-  font-size: var(--step-3);
-  font-weight: 500;
-}
-
-.muted {
-  color: var(--muted);
-}
-
 .empty {
   max-width: var(--measure);
-  padding-block: var(--space-6);
+  display: grid;
+  gap: var(--space-3);
+  justify-items: start;
+  padding: var(--space-6);
 }
 
 .empty h2 {
   font-family: var(--font-book);
   font-size: var(--step-2);
-  font-weight: 500;
-  margin-bottom: var(--space-3);
+  font-weight: 600;
 }
 
 .empty p {
-  margin: 0 0 var(--space-5);
+  margin: 0 0 var(--space-2);
   color: var(--muted);
+}
+
+.table-card {
+  padding: 0;
+  overflow: hidden;
 }
 
 .ledger {
@@ -222,20 +215,29 @@ h1 {
   font-weight: 500;
   color: var(--muted);
   font-size: var(--step--1);
-  padding: var(--space-2) var(--space-3);
-  border-bottom: 1px solid var(--ink-original);
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--rule-soft);
 }
 
 .ledger td {
-  vertical-align: top;
-  padding: var(--space-3);
-  border-bottom: 1px solid var(--rule);
+  vertical-align: middle;
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--rule-soft);
+}
+
+.ledger tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.ledger tbody tr:hover {
+  background: var(--paper-raised);
 }
 
 .book .title {
   display: block;
   font-family: var(--font-book);
   font-size: var(--step-1);
+  font-weight: 500;
   text-decoration: none;
 }
 
@@ -245,6 +247,7 @@ h1 {
 
 .author {
   color: var(--muted);
+  font-size: var(--step--1);
 }
 
 .translations {
@@ -258,7 +261,8 @@ h1 {
 .translations li {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--space-1) var(--space-3);
+  align-items: center;
+  gap: var(--space-1) var(--space-2);
 }
 
 .actions {
@@ -278,8 +282,12 @@ h1 {
   .ledger tr {
     display: grid;
     gap: var(--space-2);
-    padding-block: var(--space-4);
-    border-bottom: 1px solid var(--rule);
+    padding: var(--space-4);
+    border-bottom: 1px solid var(--rule-soft);
+  }
+
+  .ledger tbody tr:last-child {
+    border-bottom: none;
   }
 
   .ledger td {
@@ -289,6 +297,14 @@ h1 {
 
   .actions {
     text-align: left;
+    white-space: normal;
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+  }
+
+  .actions > * + * {
+    margin-left: 0;
   }
 }
 </style>

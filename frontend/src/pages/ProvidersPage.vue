@@ -1,6 +1,7 @@
 <script setup lang="ts">
 // Подключения к моделям (ТЗ §8.1 п.8, §6.4): локальная Ollama и внешние
 // сервисы. Ключ API уходит на сервер один раз и больше не показывается.
+import { NButton } from 'naive-ui'
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 
 import { errorMessage } from '../api/client'
@@ -14,6 +15,7 @@ import {
 } from '../api/providers'
 import type { ProviderConfig, ProviderKind } from '../api/types'
 import ConfirmButton from '../components/ConfirmButton.vue'
+import TextField from '../components/TextField.vue'
 
 const kinds = ref<ProviderKind[]>([])
 const configs = ref<ProviderConfig[]>([])
@@ -124,7 +126,7 @@ async function remove(c: ProviderConfig) {
 
     <ul
       v-if="configs.length"
-      class="configs"
+      class="configs card"
     >
       <li
         v-for="c in configs"
@@ -151,20 +153,22 @@ async function remove(c: ProviderConfig) {
           Разрешить отправку текста книг этому сервису
         </label>
         <div class="row-actions">
-          <button
-            type="button"
-            class="button check"
+          <NButton
+            class="check"
+            size="small"
             @click="check(c)"
           >
             Проверить
-          </button>
+          </NButton>
           <ConfirmButton
             label="Удалить"
+            size="small"
             @confirm="remove(c)"
           />
           <span
             v-if="health[c.id]"
             role="status"
+            class="health"
           >{{ health[c.id] }}</span>
         </div>
         <p
@@ -178,13 +182,13 @@ async function remove(c: ProviderConfig) {
     </ul>
     <p
       v-else-if="!loadError"
-      class="muted"
+      class="muted empty"
     >
       Подключений пока нет — добавьте первое ниже.
     </p>
 
     <form
-      class="new-config"
+      class="new-config card"
       @submit.prevent="create"
     >
       <h2>Новое подключение</h2>
@@ -204,41 +208,31 @@ async function remove(c: ProviderConfig) {
           </option>
         </select>
       </div>
-      <label class="field">
-        <span>Название</span>
-        <input
-          v-model="form.name"
-          name="name"
-          :placeholder="kind?.name"
-        >
-      </label>
-      <label
+      <TextField
+        v-model="form.name"
+        label="Название"
+        name="name"
+        :placeholder="kind?.name ?? ''"
+      />
+      <TextField
         v-if="kind?.user_base_url"
-        class="field"
-      >
-        <span>Адрес API</span>
-        <input
-          v-model="form.base_url"
-          name="base_url"
-          type="url"
-          placeholder="https://api.example.com/v1"
-          required
-        >
-        <small>Адрес OpenAI-совместимого сервиса, например vLLM или LM Studio.</small>
-      </label>
-      <label
+        v-model="form.base_url"
+        label="Адрес API"
+        name="base_url"
+        type="url"
+        placeholder="https://api.example.com/v1"
+        hint="Адрес OpenAI-совместимого сервиса, например vLLM или LM Studio."
+        required
+      />
+      <TextField
         v-if="kind && kind.provider_id !== 'ollama' && kind.provider_id !== 'fake'"
-        class="field"
-      >
-        <span>Ключ API{{ kind.requires_api_key ? '' : ' (если нужен)' }}</span>
-        <input
-          v-model="form.api_key"
-          name="api_key"
-          type="password"
-          autocomplete="off"
-          spellcheck="false"
-        >
-      </label>
+        v-model="form.api_key"
+        :label="`Ключ API${kind.requires_api_key ? '' : ' (если нужен)'}`"
+        name="api_key"
+        type="password"
+        autocomplete="off"
+        :spellcheck="false"
+      />
       <label
         v-if="kind?.sends_data_externally"
         class="consent"
@@ -261,26 +255,25 @@ async function remove(c: ProviderConfig) {
       >
         {{ formError }}
       </p>
-      <button
-        type="submit"
-        class="button primary"
+      <NButton
+        attr-type="submit"
+        type="primary"
+        :loading="saving"
         :disabled="saving"
       >
         Добавить подключение
-      </button>
+      </NButton>
     </form>
   </main>
 </template>
 
 <style scoped>
 .providers {
-  max-width: 48rem;
+  max-width: 52rem;
 }
 
-h1 {
-  font-family: var(--font-book);
-  font-size: var(--step-3);
-  font-weight: 500;
+.providers > h1 {
+  margin-bottom: var(--space-2);
 }
 
 .intro,
@@ -289,25 +282,36 @@ h1 {
   max-width: var(--measure);
 }
 
+.intro {
+  margin: 0 0 var(--space-5);
+}
+
+.empty {
+  margin: 0 0 var(--space-5);
+}
+
 .configs {
-  margin: var(--space-5) 0;
-  padding: 0;
+  margin: 0 0 var(--space-5);
+  padding-block: var(--space-2);
   list-style: none;
-  border-top: 1px solid var(--ink-original);
 }
 
 .configs > li {
   display: grid;
   gap: var(--space-2);
   padding-block: var(--space-4);
-  border-bottom: 1px solid var(--rule);
+  border-bottom: 1px solid var(--rule-soft);
+}
+
+.configs > li:last-child {
+  border-bottom: none;
 }
 
 .config-head {
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
-  gap: var(--space-1) var(--space-4);
+  gap: var(--space-1) var(--space-3);
 }
 
 .config-name {
@@ -318,13 +322,19 @@ h1 {
 .config-kind,
 .key {
   color: var(--muted);
+  font-size: var(--step--1);
 }
 
 .row-actions {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: var(--space-2) var(--space-3);
+  gap: var(--space-2);
+}
+
+.health {
+  color: var(--muted);
+  font-size: var(--step--1);
 }
 
 .inline-check {
@@ -336,14 +346,13 @@ h1 {
 .new-config {
   display: grid;
   gap: var(--space-4);
-  margin-top: var(--space-6);
 }
 
 .new-config h2 {
   font-size: var(--step-1);
 }
 
-.new-config .button {
+.new-config > :last-child {
   justify-self: start;
 }
 
@@ -352,11 +361,13 @@ h1 {
   gap: var(--space-3);
   align-items: flex-start;
   padding: var(--space-3);
-  border-left: 3px solid var(--highlight);
-  background: var(--paper-raised);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--highlight) 18%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--highlight) 55%, var(--surface));
 }
 
 .consent input {
-  margin-top: 0.3em;
+  margin-top: 0.25em;
+  flex: none;
 }
 </style>

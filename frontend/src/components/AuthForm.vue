@@ -1,8 +1,11 @@
 <script setup lang="ts">
 // Общая форма входа и регистрации: два поля, ошибка сервера у формы.
+import { NButton } from 'naive-ui'
 import { ref } from 'vue'
 
 import { errorMessage } from '../api/client'
+import AuthCard from './AuthCard.vue'
+import TextField from './TextField.vue'
 
 const props = defineProps<{
   title: string
@@ -31,32 +34,27 @@ async function onSubmit() {
 </script>
 
 <template>
-  <main class="page auth">
-    <h1>{{ title }}</h1>
+  <AuthCard :title="title">
     <slot name="notice" />
     <form
       novalidate
       @submit.prevent="onSubmit"
     >
-      <label class="field">
-        <span>Электронная почта</span>
-        <input
-          v-model="email"
-          type="email"
-          autocomplete="email"
-          required
-        >
-      </label>
-      <label class="field">
-        <span>Пароль</span>
-        <input
-          v-model="password"
-          type="password"
-          :autocomplete="passwordAutocomplete"
-          required
-        >
-        <small v-if="passwordHint">{{ passwordHint }}</small>
-      </label>
+      <TextField
+        v-model="email"
+        label="Электронная почта"
+        type="email"
+        autocomplete="email"
+        required
+      />
+      <TextField
+        v-model="password"
+        label="Пароль"
+        type="password"
+        :autocomplete="passwordAutocomplete"
+        :hint="passwordHint"
+        required
+      />
       <p
         v-if="error"
         role="alert"
@@ -64,40 +62,26 @@ async function onSubmit() {
       >
         {{ error }}
       </p>
-      <button
-        type="submit"
-        class="button primary"
+      <NButton
+        attr-type="submit"
+        type="primary"
+        block
+        :loading="busy"
         :disabled="busy"
       >
         {{ submitLabel }}
-      </button>
+      </NButton>
       <slot name="after-submit" />
     </form>
-    <p class="switch">
+    <template #footer>
       <slot />
-    </p>
-  </main>
+    </template>
+  </AuthCard>
 </template>
 
 <style scoped>
-.auth {
-  max-width: 26rem;
-}
-
-h1 {
-  font-family: var(--font-book);
-  font-size: var(--step-3);
-  font-weight: 500;
-  margin-bottom: var(--space-5);
-}
-
 form {
   display: grid;
   gap: var(--space-4);
-}
-
-.switch {
-  margin-top: var(--space-5);
-  color: var(--muted);
 }
 </style>

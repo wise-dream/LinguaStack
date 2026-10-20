@@ -2,6 +2,7 @@
 // Оглавление книги. В режиме перестановки главы верхнего уровня
 // двигаются кнопками; наружу уходит новый порядок прежних позиций —
 // ровно то, что принимает PUT /api/books/{id}/toc.
+import { NButton } from 'naive-ui'
 import { computed, ref, watch } from 'vue'
 
 import type { TocEntry } from '../api/types'
@@ -43,20 +44,22 @@ function move(position: number, delta: number) {
           v-if="reorderable"
           class="moves"
         >
-          <button
-            type="button"
+          <NButton
             class="move"
+            size="small"
+            quaternary
             :aria-label="`Переместить «${entry.title}» выше`"
             :disabled="position === 0"
             @click="move(position, -1)"
-          >↑</button>
-          <button
-            type="button"
+          >↑</NButton>
+          <NButton
             class="move"
+            size="small"
+            quaternary
             :aria-label="`Переместить «${entry.title}» ниже`"
             :disabled="position === top.length - 1"
             @click="move(position, 1)"
-          >↓</button>
+          >↓</NButton>
         </span>
       </div>
       <ol
@@ -83,32 +86,24 @@ function move(position: number, delta: number) {
 
 .toc > li {
   padding-block: var(--space-1);
+  border-bottom: 1px solid var(--rule-soft);
+}
+
+.toc > li:last-child {
+  border-bottom: none;
 }
 
 .row {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: var(--space-3);
+  min-height: 2rem;
 }
 
 .moves {
   display: inline-flex;
   gap: var(--space-1);
   margin-left: auto;
-}
-
-.move {
-  width: 2rem;
-  height: 2rem;
-  border: 1px solid var(--rule);
-  border-radius: var(--radius);
-  background: var(--paper-raised);
-  cursor: pointer;
-}
-
-.move:disabled {
-  opacity: 0.35;
-  cursor: default;
 }
 
 .nested {

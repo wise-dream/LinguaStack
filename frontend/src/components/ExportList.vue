@@ -1,6 +1,8 @@
 <script setup lang="ts">
 // Экспорты: формат, состав, состояние, скачивание. Ошибка сборки — с
 // повтором; непереведённые фрагменты — честной строкой под файлом.
+import { NButton } from 'naive-ui'
+
 import { exportFileUrl } from '../api/exports'
 import type { ExportJob } from '../api/types'
 import { exportStatusLabel, formatLabel, modeLabel, untranslatedNote } from '../lib/exports'
@@ -56,23 +58,29 @@ const lang = (j: ExportJob) => {
         {{ j.error }}
       </p>
       <div class="actions">
-        <a
+        <NButton
           v-if="j.status === 'completed'"
-          class="button download"
+          tag="a"
+          class="download"
+          size="small"
+          type="primary"
           :href="exportFileUrl(j.id)"
           :download="j.file_name"
-        >Скачать</a>
-        <button
+        >
+          Скачать
+        </NButton>
+        <NButton
           v-if="j.status === 'failed'"
-          type="button"
-          class="button retry"
+          class="retry"
+          size="small"
           @click="emit('retry', j)"
         >
           Повторить экспорт
-        </button>
+        </NButton>
         <ConfirmButton
           v-if="j.status !== 'running'"
           label="Удалить"
+          size="small"
           @confirm="emit('remove', j)"
         />
       </div>
@@ -91,7 +99,16 @@ const lang = (j: ExportJob) => {
   display: grid;
   gap: var(--space-2);
   padding-block: var(--space-3);
-  border-bottom: 1px solid var(--rule);
+  border-bottom: 1px solid var(--rule-soft);
+}
+
+.exports > li:first-child {
+  padding-top: 0;
+}
+
+.exports > li:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
 }
 
 .what {
@@ -105,6 +122,7 @@ const lang = (j: ExportJob) => {
 .note {
   margin: 0;
   color: var(--muted);
+  font-size: var(--step--1);
 }
 
 .meta {
@@ -114,14 +132,15 @@ const lang = (j: ExportJob) => {
 }
 
 .note {
-  border-left: 3px solid var(--highlight);
-  padding-left: var(--space-3);
+  padding: var(--space-1) var(--space-3);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--highlight) 18%, var(--surface));
   color: var(--ink-original);
 }
 
 .actions {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--space-3);
+  gap: var(--space-2);
 }
 </style>

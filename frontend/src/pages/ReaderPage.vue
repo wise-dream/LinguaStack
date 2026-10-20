@@ -2,6 +2,7 @@
 // Читалка (ТЗ §8.3): оглавление, оригинал и перевод рядом, переключение
 // языковых версий и режимов, поиск, позиция чтения, правка и повторный
 // перевод фрагмента. Адрес: /read/:bookId?t=<перевод>&ch=<глава>&n=<фрагмент>.
+import { NButton, NButtonGroup } from 'naive-ui'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
@@ -12,6 +13,7 @@ import { listTranslations } from '../api/translations'
 import type { Book, Chapter, Project, ReadMode, SearchResult, Segment, TocEntry } from '../api/types'
 import { languageName, sourceLanguageName } from '../lib/format'
 import { fetchChapterSegments, usePositionSaver } from '../lib/position'
+import LinkButton from '../components/LinkButton.vue'
 import ReaderColumns from '../reader/ReaderColumns.vue'
 import ReaderSearch from '../reader/ReaderSearch.vue'
 import SegmentRow from '../reader/SegmentRow.vue'
@@ -186,15 +188,15 @@ onBeforeUnmount(() => {
 <template>
   <div class="reader">
     <header class="toolbar">
-      <button
-        type="button"
-        class="toc-toggle button"
+      <NButton
+        class="toc-toggle"
+        size="small"
         :aria-expanded="tocOpen"
         aria-controls="reader-toc"
         @click="tocOpen = !tocOpen"
       >
         Оглавление
-      </button>
+      </NButton>
       <RouterLink
         v-if="book"
         :to="`/books/${bookId}`"
@@ -203,13 +205,16 @@ onBeforeUnmount(() => {
         {{ book.title }}
       </RouterLink>
       <!-- Переводов ещё нет — выбирать нечего, ведём к новому переводу. -->
-      <RouterLink
+      <LinkButton
         v-if="book && !projects.length"
         :to="`/books/${bookId}/translate`"
-        class="button translate-link"
+        class="translate-link"
+        size="small"
+        type="primary"
+        secondary
       >
         Перевести книгу
-      </RouterLink>
+      </LinkButton>
       <div
         v-else
         class="translation-pick"
@@ -236,23 +241,24 @@ onBeforeUnmount(() => {
           </option>
         </select>
       </div>
-      <div
+      <NButtonGroup
         class="modes"
+        size="small"
         role="group"
         aria-label="Вид"
       >
-        <button
+        <NButton
           v-for="m in ([['parallel', 'Рядом'], ['original', 'Оригинал'], ['translation', 'Перевод']] as const)"
           :key="m[0]"
-          type="button"
+          :type="effectiveMode === m[0] ? 'primary' : 'default'"
           :data-mode="m[0]"
           :aria-pressed="effectiveMode === m[0]"
           :disabled="!project && m[0] !== 'original'"
           @click="setMode(m[0])"
         >
           {{ m[1] }}
-        </button>
-      </div>
+        </NButton>
+      </NButtonGroup>
       <ReaderSearch
         :book-id="bookId"
         :translation-id="translationId"
@@ -359,9 +365,9 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: var(--space-2) var(--space-4);
   padding: var(--space-2) var(--space-4);
-  background: color-mix(in srgb, var(--paper) 94%, transparent);
+  background: color-mix(in srgb, var(--surface) 92%, transparent);
   backdrop-filter: blur(6px);
-  border-bottom: 1px solid var(--rule);
+  border-bottom: 1px solid var(--rule-soft);
 }
 
 .book-title {
@@ -376,34 +382,8 @@ onBeforeUnmount(() => {
 
 .translation-pick select {
   width: auto;
-}
-
-.modes {
-  display: inline-flex;
-  border: 1px solid var(--rule);
-  border-radius: var(--radius);
-  overflow: hidden;
-}
-
-.modes button {
-  padding: var(--space-1) var(--space-3);
-  border: none;
-  background: var(--paper-raised);
-  cursor: pointer;
-}
-
-.modes button + button {
-  border-left: 1px solid var(--rule);
-}
-
-.modes button[aria-pressed='true'] {
-  background: var(--ink-original);
-  color: var(--paper-raised);
-}
-
-.modes button:disabled {
-  color: var(--muted);
-  cursor: not-allowed;
+  min-height: 30px;
+  padding-block: var(--space-1);
 }
 
 .reader-search {
@@ -453,10 +433,14 @@ onBeforeUnmount(() => {
   color: var(--ink-original);
 }
 
+.reader-toc button:hover {
+  background: var(--surface);
+}
+
 .reader-toc button[aria-current='page'] {
   color: var(--ink-original);
   font-weight: 600;
-  background: var(--paper-raised);
+  background: color-mix(in srgb, var(--ink-original) 7%, var(--surface));
 }
 
 .muted {
@@ -469,20 +453,26 @@ onBeforeUnmount(() => {
   gap: var(--space-4);
   margin-top: var(--space-7);
   padding-top: var(--space-4);
-  border-top: 1px solid var(--rule);
+  border-top: 1px solid var(--rule-soft);
 }
 
 .pager button {
   display: grid;
   gap: var(--space-1);
   max-width: 48%;
-  padding: var(--space-2) var(--space-3);
-  border: 1px solid var(--rule);
-  border-radius: var(--radius);
-  background: var(--paper-raised);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--rule-soft);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+  box-shadow: var(--shadow-card);
+  transition: border-color 0.2s;
   font-family: var(--font-book);
   text-align: left;
   cursor: pointer;
+}
+
+.pager button:hover {
+  border-color: var(--ink-original);
 }
 
 .pager .next {

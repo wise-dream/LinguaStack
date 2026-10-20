@@ -2,6 +2,7 @@
 // Настройка перевода (ТЗ §8.1 п.5): подключение и модель, языки по
 // возможностям модели (§5.2), стиль, точность, глоссарий и
 // предупреждение о передаче текста наружу (§6.4).
+import { NButton } from 'naive-ui'
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
@@ -11,6 +12,7 @@ import { configModels, listProviderConfigs } from '../api/providers'
 import { createTranslation, getTranslationOptions } from '../api/translations'
 import type { Book, Determinism, ModelCaps, ProviderConfig, TranslationOptions } from '../api/types'
 import GlossaryEditor from '../components/GlossaryEditor.vue'
+import LinkButton from '../components/LinkButton.vue'
 import { glossaryFromRows, type GlossaryRow } from '../components/glossary'
 import { capitalize, languageName } from '../lib/format'
 
@@ -156,19 +158,20 @@ async function submit() {
 
       <section
         v-if="!configs.length"
-        class="empty"
+        class="empty card"
       >
         <p>Чтобы переводить, подключите модель: локальную Ollama или внешний сервис.</p>
-        <RouterLink
+        <LinkButton
           to="/settings/providers"
-          class="button primary"
+          type="primary"
         >
           Подключить модель
-        </RouterLink>
+        </LinkButton>
       </section>
 
       <form
         v-else
+        class="card"
         @submit.prevent="submit"
       >
         <div class="pair">
@@ -317,13 +320,14 @@ async function submit() {
         >
           {{ submitError }}
         </p>
-        <button
-          type="submit"
-          class="button primary"
+        <NButton
+          attr-type="submit"
+          type="primary"
+          size="large"
           :disabled="!canSubmit"
         >
           Начать перевод
-        </button>
+        </NButton>
       </form>
     </template>
   </main>
@@ -331,20 +335,13 @@ async function submit() {
 
 <style scoped>
 .setup {
-  max-width: 48rem;
+  max-width: 52rem;
 }
 
 .crumb {
   margin: 0 0 var(--space-2);
   color: var(--muted);
   font-family: var(--font-book);
-}
-
-h1 {
-  font-family: var(--font-book);
-  font-size: var(--step-3);
-  font-weight: 500;
-  margin-bottom: var(--space-5);
 }
 
 form {
@@ -360,21 +357,25 @@ form {
 
 .egress {
   padding: var(--space-3) var(--space-4);
-  border-left: 3px solid var(--highlight);
-  background: var(--paper-raised);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--highlight) 18%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--highlight) 55%, var(--surface));
 }
 
 .egress.blocked {
-  border-left-color: var(--proof);
+  color: var(--proof);
+  background: color-mix(in srgb, var(--proof) 7%, var(--surface));
+  border-color: color-mix(in srgb, var(--proof) 25%, var(--surface));
 }
 
+/* Варианты стиля и точности — плитки: выбранная обведена краской оригинала. */
 .choice {
   border: none;
   margin: 0;
   padding: 0;
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: var(--space-2) var(--space-4);
+  gap: var(--space-2);
 }
 
 .choice.styles {
@@ -391,26 +392,49 @@ form {
   display: flex;
   gap: var(--space-2);
   align-items: flex-start;
+  padding: var(--space-3);
+  border: 1px solid var(--rule-soft);
+  border-radius: 8px;
+  background: var(--surface);
   cursor: pointer;
+  transition: border-color 0.2s, background-color 0.2s;
+}
+
+.choice label:hover {
+  border-color: var(--rule);
+}
+
+.choice label:has(input:checked) {
+  border-color: var(--ink-original);
+  background: color-mix(in srgb, var(--ink-original) 4%, var(--surface));
 }
 
 .choice input {
-  margin-top: 0.3em;
+  margin-top: 0.2em;
+  flex: none;
 }
 
 .choice span {
   display: grid;
+  gap: 2px;
 }
 
 .choice small {
   color: var(--muted);
 }
 
-form > .button {
+form > :last-child {
   justify-self: start;
 }
 
+.empty {
+  display: grid;
+  gap: var(--space-3);
+  justify-items: start;
+}
+
 .empty p {
+  margin: 0;
   color: var(--muted);
 }
 

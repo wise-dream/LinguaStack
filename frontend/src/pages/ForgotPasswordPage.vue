@@ -1,10 +1,13 @@
 <script setup lang="ts">
 // Восстановление доступа (ТЗ §2.1): ссылка уходит на почту или в Telegram.
 // Ответ сервера одинаков для любого адреса — страница его и показывает.
+import { NButton } from 'naive-ui'
 import { ref } from 'vue'
 
 import { requestPasswordReset } from '../api/auth'
 import { errorMessage } from '../api/client'
+import AuthCard from '../components/AuthCard.vue'
+import TextField from '../components/TextField.vue'
 
 const email = ref('')
 const sent = ref('')
@@ -26,8 +29,7 @@ async function submit() {
 </script>
 
 <template>
-  <main class="page auth">
-    <h1>Восстановление доступа</h1>
+  <AuthCard title="Восстановление доступа">
     <p
       v-if="sent"
       role="status"
@@ -43,15 +45,13 @@ async function submit() {
       <p class="muted">
         Пришлём ссылку для нового пароля на почту аккаунта или в привязанный Telegram.
       </p>
-      <label class="field">
-        <span>Электронная почта</span>
-        <input
-          v-model="email"
-          type="email"
-          autocomplete="email"
-          required
-        >
-      </label>
+      <TextField
+        v-model="email"
+        label="Электронная почта"
+        type="email"
+        autocomplete="email"
+        required
+      />
       <p
         v-if="error"
         role="alert"
@@ -59,34 +59,25 @@ async function submit() {
       >
         {{ error }}
       </p>
-      <button
-        type="submit"
-        class="button primary"
+      <NButton
+        attr-type="submit"
+        type="primary"
+        block
+        :loading="busy"
         :disabled="busy"
       >
         Отправить ссылку
-      </button>
+      </NButton>
     </form>
-    <p class="switch">
+    <template #footer>
       <RouterLink to="/login">
         Вернуться ко входу
       </RouterLink>
-    </p>
-  </main>
+    </template>
+  </AuthCard>
 </template>
 
 <style scoped>
-.auth {
-  max-width: 26rem;
-}
-
-h1 {
-  font-family: var(--font-book);
-  font-size: var(--step-3);
-  font-weight: 500;
-  margin-bottom: var(--space-5);
-}
-
 form {
   display: grid;
   gap: var(--space-4);
@@ -94,18 +85,5 @@ form {
 
 .muted {
   margin: 0;
-  color: var(--muted);
-}
-
-.notice {
-  margin: 0;
-  color: var(--ink-translation);
-  border-left: 3px solid var(--ink-translation);
-  padding-left: var(--space-3);
-}
-
-.switch {
-  margin-top: var(--space-5);
-  color: var(--muted);
 }
 </style>

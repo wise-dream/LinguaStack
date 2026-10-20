@@ -4,11 +4,15 @@
 :root {
   --paper: #f4f6f3;
   --paper-raised: #fbfcfa;
+  /* Карточки, поля ввода и шапка — чистый лист поверх бумаги страницы. */
+  --surface: #ffffff;
   --ink-original: #1b2440;
   --ink-translation: #14463f;
   --proof: #b3261e;
   --highlight: #f3d35c;
   --rule: #c8cec6;
+  /* Граница карточек и строк таблиц — тише линейки полей. */
+  --rule-soft: #e3e7e1;
   --muted: #5e6a66;
 
   --font-book: 'Literata Variable', 'Literata', Georgia, 'Times New Roman', serif;
@@ -32,6 +36,8 @@
   --space-7: 3rem;
 
   --radius: 6px;
+  --radius-card: 10px;
+  --shadow-card: 0 1px 2px rgb(27 36 64 / 5%), 0 1px 1px rgb(27 36 64 / 3%);
   --measure: 68ch;
   --page-width: 72rem;
 }

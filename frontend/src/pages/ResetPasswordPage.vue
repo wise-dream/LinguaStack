@@ -1,11 +1,14 @@
 <script setup lang="ts">
 // Новый пароль по ссылке из письма, Telegram или от администратора.
 // Ссылка одноразовая; после сохранения все сессии аккаунта закрыты.
+import { NButton } from 'naive-ui'
 import { computed, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import { confirmPasswordReset } from '../api/auth'
 import { ApiError, errorMessage } from '../api/client'
+import AuthCard from '../components/AuthCard.vue'
+import TextField from '../components/TextField.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -34,31 +37,26 @@ async function submit() {
 </script>
 
 <template>
-  <main class="page auth">
-    <h1>Новый пароль</h1>
+  <AuthCard title="Новый пароль">
     <template v-if="!token">
       <p>В ссылке нет кода сброса — откройте её из письма или сообщения целиком.</p>
-      <p class="switch">
-        <RouterLink to="/forgot-password">
-          Запросить новую ссылку
-        </RouterLink>
-      </p>
+      <RouterLink to="/forgot-password">
+        Запросить новую ссылку
+      </RouterLink>
     </template>
     <form
       v-else
       novalidate
       @submit.prevent="submit"
     >
-      <label class="field">
-        <span>Новый пароль</span>
-        <input
-          v-model="password"
-          type="password"
-          autocomplete="new-password"
-          required
-        >
-        <small>Не короче 12 символов. После сохранения на всех устройствах нужно войти заново.</small>
-      </label>
+      <TextField
+        v-model="password"
+        label="Новый пароль"
+        type="password"
+        autocomplete="new-password"
+        hint="Не короче 12 символов. После сохранения на всех устройствах нужно войти заново."
+        required
+      />
       <p
         v-if="error"
         role="alert"
@@ -72,29 +70,20 @@ async function submit() {
       >
         Запросить новую ссылку
       </RouterLink>
-      <button
-        type="submit"
-        class="button primary"
+      <NButton
+        attr-type="submit"
+        type="primary"
+        block
+        :loading="busy"
         :disabled="busy"
       >
         Сохранить пароль
-      </button>
+      </NButton>
     </form>
-  </main>
+  </AuthCard>
 </template>
 
 <style scoped>
-.auth {
-  max-width: 26rem;
-}
-
-h1 {
-  font-family: var(--font-book);
-  font-size: var(--step-3);
-  font-weight: 500;
-  margin-bottom: var(--space-5);
-}
-
 form {
   display: grid;
   gap: var(--space-4);
@@ -104,8 +93,7 @@ form > a {
   justify-self: start;
 }
 
-.switch {
-  margin-top: var(--space-5);
-  color: var(--muted);
+p {
+  margin: 0;
 }
 </style>

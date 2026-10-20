@@ -51,11 +51,12 @@ const sections = computed(() =>
 <style scoped>
 .app-header {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: var(--space-5);
   flex-wrap: wrap;
-  padding: var(--space-3) var(--space-4);
-  border-bottom: 1px solid var(--rule);
+  padding: var(--space-2) var(--space-5);
+  background: var(--surface);
+  border-bottom: 1px solid var(--rule-soft);
 }
 
 .brand {
@@ -68,38 +69,48 @@ const sections = computed(() =>
 
 nav {
   display: flex;
-  gap: var(--space-4);
+  gap: var(--space-1);
 }
 
 nav a {
   text-decoration: none;
   color: var(--muted);
-  padding-block: var(--space-1);
-  border-bottom: 2px solid transparent;
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius);
+  transition: background-color 0.2s, color 0.2s;
 }
 
 nav a:hover {
   color: var(--ink-original);
+  background: var(--paper);
 }
 
 nav a[aria-current='page'] {
   color: var(--ink-original);
-  border-bottom-color: var(--ink-original);
+  background: color-mix(in srgb, var(--ink-original) 8%, var(--surface));
+  font-weight: 500;
 }
 
 .slot {
   margin-left: auto;
+  display: flex;
+  align-items: center;
 }
 
-/* Четыре-пять разделов на телефоне — без прокрутки вбок. */
+/* Пять разделов на телефоне — без прокрутки вбок. */
 @media (max-width: 40rem) {
   .app-header {
-    gap: var(--space-3);
+    gap: var(--space-2);
+    padding: var(--space-2) var(--space-3);
   }
 
   nav {
     flex-wrap: wrap;
-    gap: var(--space-1) var(--space-3);
+    gap: var(--space-1);
+  }
+
+  nav a {
+    padding: var(--space-1) var(--space-2);
   }
 }
 </style>

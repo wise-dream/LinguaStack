@@ -1,5 +1,6 @@
 <script setup lang="ts">
 // Книга: метаданные, оглавление и её переводы (ТЗ §8.2).
+import { NButton } from 'naive-ui'
 import { computed, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 
@@ -9,6 +10,7 @@ import { listTranslations, resumeTranslation } from '../api/translations'
 import type { Book, ExportJob, Project, TocEntry } from '../api/types'
 import ExportList from '../components/ExportList.vue'
 import LangPair from '../components/LangPair.vue'
+import LinkButton from '../components/LinkButton.vue'
 import StatusMark from '../components/StatusMark.vue'
 import TocTree from '../components/TocTree.vue'
 import { useExports } from '../lib/exports'
@@ -80,7 +82,7 @@ async function resume(p: Project) {
       {{ error }}
     </p>
     <template v-if="book">
-      <header class="book-head">
+      <header class="book-head card">
         <h1>{{ book.title }}</h1>
         <p
           v-if="book.author"
@@ -103,23 +105,20 @@ async function resume(p: Project) {
           </div>
         </dl>
         <div class="actions">
-          <RouterLink
-            :to="`/read/${book.id}`"
-            class="button"
-          >
-            Читать оригинал
-          </RouterLink>
-          <RouterLink
+          <LinkButton
             :to="`/books/${book.id}/translate`"
-            class="button primary"
+            type="primary"
           >
             Новый перевод
-          </RouterLink>
+          </LinkButton>
+          <LinkButton :to="`/read/${book.id}`">
+            Читать оригинал
+          </LinkButton>
         </div>
       </header>
 
       <div class="columns">
-        <section>
+        <section class="card">
           <h2>Переводы</h2>
           <p
             v-if="!projects.length"
@@ -149,21 +148,23 @@ async function resume(p: Project) {
                 {{ p.model_id }}, переведено {{ Math.round(p.progress_percent) }}%
               </p>
               <div class="project-actions">
-                <RouterLink
+                <LinkButton
                   v-if="p.segments_done > 0"
                   :to="`/read/${book.id}?t=${p.id}`"
-                  class="button"
+                  size="small"
                 >
                   Читать
-                </RouterLink>
-                <button
+                </LinkButton>
+                <NButton
                   v-if="canResume(p)"
-                  type="button"
-                  class="button resume"
+                  class="resume"
+                  size="small"
+                  type="primary"
+                  secondary
                   @click="resume(p)"
                 >
                   Продолжить
-                </button>
+                </NButton>
               </div>
               <p
                 v-if="rowError[p.id]"
@@ -175,13 +176,13 @@ async function resume(p: Project) {
             </li>
           </ul>
         </section>
-        <section>
+        <section class="card">
           <h2>Оглавление</h2>
           <TocTree :entries="toc" />
         </section>
       </div>
 
-      <section class="exports-history">
+      <section class="exports-history card">
         <h2>Экспорты</h2>
         <p
           v-if="exportError || exports.error.value"
@@ -210,19 +211,20 @@ async function resume(p: Project) {
 
 <style scoped>
 .book-head {
-  padding-bottom: var(--space-5);
-  border-bottom: 1px solid var(--rule);
+  display: grid;
+  gap: var(--space-2);
+  justify-items: start;
 }
 
 h1 {
   font-family: var(--font-book);
   font-size: var(--step-3);
-  font-weight: 500;
+  font-weight: 600;
   max-width: var(--measure);
 }
 
 .author {
-  margin: var(--space-2) 0 0;
+  margin: 0;
   font-family: var(--font-book);
   font-size: var(--step-1);
   color: var(--muted);
@@ -232,7 +234,7 @@ h1 {
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-2) var(--space-6);
-  margin: var(--space-4) 0;
+  margin: var(--space-2) 0;
 }
 
 .facts dt {
@@ -248,13 +250,14 @@ h1 {
 .project-actions {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--space-3);
+  gap: var(--space-2);
 }
 
 .columns {
   display: grid;
   grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
-  gap: var(--space-6);
+  gap: var(--space-5);
+  align-items: start;
   margin-top: var(--space-5);
 }
 
@@ -264,7 +267,7 @@ h2 {
 }
 
 .muted {
-  color: var(--muted);
+  margin: 0;
 }
 
 .projects {
@@ -277,23 +280,33 @@ h2 {
   display: grid;
   gap: var(--space-2);
   padding-block: var(--space-3);
-  border-bottom: 1px solid var(--rule);
+  border-bottom: 1px solid var(--rule-soft);
+}
+
+.projects > li:first-child {
+  padding-top: 0;
+}
+
+.projects > li:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
 }
 
 .project-head {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--space-1) var(--space-4);
+  align-items: center;
+  gap: var(--space-1) var(--space-3);
 }
 
 .project-meta {
   margin: 0;
   color: var(--muted);
+  font-size: var(--step--1);
 }
 
 .exports-history {
-  margin-top: var(--space-6);
-  max-width: var(--measure);
+  margin-top: var(--space-5);
 }
 
 @media (max-width: 48rem) {

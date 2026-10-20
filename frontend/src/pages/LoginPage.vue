@@ -45,15 +45,9 @@ async function submit(email: string, password: string) {
 </template>
 
 <style scoped>
-.notice {
-  margin: 0 0 var(--space-4);
-  color: var(--ink-translation);
-  border-left: 3px solid var(--ink-translation);
-  padding-left: var(--space-3);
-}
-
 .forgot {
-  justify-self: start;
+  justify-self: center;
   color: var(--muted);
+  font-size: var(--step--1);
 }
 </style>

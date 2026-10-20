@@ -1,5 +1,7 @@
 <script setup lang="ts">
 // Глоссарий перевода: термин → как его переводить всегда.
+import { NButton } from 'naive-ui'
+
 import type { GlossaryRow } from './glossary'
 
 const rows = defineModel<GlossaryRow[]>({ required: true })
@@ -39,22 +41,22 @@ function remove(i: number) {
           placeholder="Перевод"
         >
       </label>
-      <button
-        type="button"
+      <NButton
         class="remove"
+        quaternary
         :aria-label="`Убрать термин ${i + 1}`"
         @click="remove(i)"
       >
         ×
-      </button>
+      </NButton>
     </div>
-    <button
-      type="button"
-      class="button"
+    <NButton
+      class="add"
+      dashed
       @click="add"
     >
       Добавить термин
-    </button>
+    </NButton>
   </fieldset>
 </template>
 
@@ -85,16 +87,7 @@ legend {
   gap: var(--space-2);
 }
 
-.remove {
-  width: 2rem;
-  height: 2rem;
-  border: 1px solid var(--rule);
-  border-radius: var(--radius);
-  background: var(--paper-raised);
-  cursor: pointer;
-}
-
-.glossary > .button {
+.glossary > .add {
   justify-self: start;
 }
 </style>

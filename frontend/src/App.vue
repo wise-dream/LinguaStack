@@ -1,9 +1,11 @@
 <script setup lang="ts">
+import { NButton, NConfigProvider, dateRuRU, ruRU } from 'naive-ui'
 import { watchEffect } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import AppHeader from './components/AppHeader.vue'
 import { useSession } from './session'
+import { themeOverrides } from './styles/theme'
 
 const session = useSession()
 const route = useRoute()
@@ -20,17 +22,24 @@ async function logout() {
 </script>
 
 <template>
-  <AppHeader v-if="session.me.value">
-    <span class="who">{{ session.me.value.email }}</span>
-    <button
-      type="button"
-      class="link-button"
-      @click="logout"
-    >
-      Выйти
-    </button>
-  </AppHeader>
-  <RouterView />
+  <NConfigProvider
+    abstract
+    :theme-overrides="themeOverrides"
+    :locale="ruRU"
+    :date-locale="dateRuRU"
+  >
+    <AppHeader v-if="session.me.value">
+      <span class="who">{{ session.me.value.email }}</span>
+      <NButton
+        quaternary
+        size="small"
+        @click="logout"
+      >
+        Выйти
+      </NButton>
+    </AppHeader>
+    <RouterView />
+  </NConfigProvider>
 </template>
 
 <style scoped>
@@ -44,14 +53,5 @@ async function logout() {
   .who {
     display: none;
   }
-}
-
-.link-button {
-  background: none;
-  border: none;
-  padding: 0;
-  text-decoration: underline;
-  text-underline-offset: 0.2em;
-  cursor: pointer;
 }
 </style>

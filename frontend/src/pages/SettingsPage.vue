@@ -2,6 +2,7 @@
 // Настройки аккаунта и Telegram (ТЗ §2.1, §8.1 №11, §9): смена пароля и
 // почты, привязка Telegram по одноразовой ссылке на бота и выбор
 // уведомлений.
+import { NButton } from 'naive-ui'
 import { onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 
 import { changeEmail, changePassword } from '../api/auth'
@@ -9,6 +10,7 @@ import { errorMessage } from '../api/client'
 import { getTelegram, linkTelegram, patchTelegram, unlinkTelegram } from '../api/telegram'
 import type { TelegramLink, TelegramSettings, TelegramState } from '../api/types'
 import ConfirmButton from '../components/ConfirmButton.vue'
+import TextField from '../components/TextField.vue'
 import { formatDate } from '../lib/format'
 import { useSession } from '../session'
 
@@ -136,7 +138,7 @@ async function unlink() {
     <h1>Настройки</h1>
 
     <section
-      class="account"
+      class="account card"
       aria-labelledby="account-title"
     >
       <h2 id="account-title">
@@ -152,7 +154,7 @@ async function unlink() {
     </section>
 
     <section
-      class="password"
+      class="password card"
       aria-labelledby="password-title"
     >
       <h2 id="password-title">
@@ -163,27 +165,23 @@ async function unlink() {
         novalidate
         @submit.prevent="submitPassword"
       >
-        <label class="field">
-          <span>Текущий пароль</span>
-          <input
-            v-model="password.current"
-            name="current_password"
-            type="password"
-            autocomplete="current-password"
-            required
-          >
-        </label>
-        <label class="field">
-          <span>Новый пароль</span>
-          <input
-            v-model="password.next"
-            name="new_password"
-            type="password"
-            autocomplete="new-password"
-            required
-          >
-          <small>Не короче 12 символов. Остальные устройства выйдут из аккаунта.</small>
-        </label>
+        <TextField
+          v-model="password.current"
+          label="Текущий пароль"
+          name="current_password"
+          type="password"
+          autocomplete="current-password"
+          required
+        />
+        <TextField
+          v-model="password.next"
+          label="Новый пароль"
+          name="new_password"
+          type="password"
+          autocomplete="new-password"
+          hint="Не короче 12 символов. Остальные устройства выйдут из аккаунта."
+          required
+        />
         <p
           v-if="password.error"
           role="alert"
@@ -194,22 +192,22 @@ async function unlink() {
         <p
           v-if="password.done"
           role="status"
-          class="done"
+          class="notice"
         >
           {{ password.done }}
         </p>
-        <button
-          type="submit"
-          class="button"
+        <NButton
+          attr-type="submit"
+          :loading="password.busy"
           :disabled="password.busy"
         >
           Сменить пароль
-        </button>
+        </NButton>
       </form>
     </section>
 
     <section
-      class="email"
+      class="email card"
       aria-labelledby="email-title"
     >
       <h2 id="email-title">
@@ -220,26 +218,22 @@ async function unlink() {
         novalidate
         @submit.prevent="submitEmail"
       >
-        <label class="field">
-          <span>Новый адрес</span>
-          <input
-            v-model="email.value"
-            name="email"
-            type="email"
-            autocomplete="email"
-            required
-          >
-        </label>
-        <label class="field">
-          <span>Текущий пароль</span>
-          <input
-            v-model="email.current"
-            name="email_password"
-            type="password"
-            autocomplete="current-password"
-            required
-          >
-        </label>
+        <TextField
+          v-model="email.value"
+          label="Новый адрес"
+          name="email"
+          type="email"
+          autocomplete="email"
+          required
+        />
+        <TextField
+          v-model="email.current"
+          label="Текущий пароль"
+          name="email_password"
+          type="password"
+          autocomplete="current-password"
+          required
+        />
         <p
           v-if="email.error"
           role="alert"
@@ -250,22 +244,22 @@ async function unlink() {
         <p
           v-if="email.done"
           role="status"
-          class="done"
+          class="notice"
         >
           {{ email.done }}
         </p>
-        <button
-          type="submit"
-          class="button"
+        <NButton
+          attr-type="submit"
+          :loading="email.busy"
           :disabled="email.busy"
         >
           Сменить почту
-        </button>
+        </NButton>
       </form>
     </section>
 
     <section
-      class="telegram"
+      class="telegram card"
       aria-labelledby="telegram-title"
     >
       <h2 id="telegram-title">
@@ -281,7 +275,7 @@ async function unlink() {
       <p
         v-if="done"
         role="status"
-        class="done"
+        class="notice"
       >
         {{ done }}
       </p>
@@ -338,21 +332,25 @@ async function unlink() {
               Откройте бота и нажмите «Старт» — ссылка действует до {{ expiresAt(link.expires_at) }}.
               Эта страница обновится сама.
             </p>
-            <a
-              class="button primary open-bot"
+            <NButton
+              tag="a"
+              class="open-bot"
+              type="primary"
               :href="link.url"
               target="_blank"
               rel="noopener noreferrer"
-            >Открыть бота</a>
+            >
+              Открыть бота
+            </NButton>
           </div>
-          <button
+          <NButton
             v-else
-            type="button"
-            class="button primary"
+            class="primary"
+            type="primary"
             @click="bind"
           >
             Привязать Telegram
-          </button>
+          </NButton>
         </template>
       </template>
     </section>
@@ -368,8 +366,10 @@ section {
   display: grid;
   gap: var(--space-3);
   justify-items: start;
-  padding-block: var(--space-5);
-  border-bottom: 1px solid var(--rule);
+}
+
+section + section {
+  margin-top: var(--space-4);
 }
 
 h2 {
@@ -397,10 +397,6 @@ p {
   color: var(--muted);
 }
 
-.done {
-  color: var(--ink-translation);
-}
-
 .toggles {
   border: none;
   margin: 0;
@@ -418,7 +414,7 @@ p {
 
 form {
   display: grid;
-  gap: var(--space-3);
+  gap: var(--space-4);
   justify-items: start;
   width: min(100%, 26rem);
 }

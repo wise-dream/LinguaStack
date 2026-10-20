@@ -9,6 +9,7 @@ import { errorMessage } from '../api/client'
 import { listTranslations } from '../api/translations'
 import type { Project, ProjectStatus } from '../api/types'
 import LangPair from '../components/LangPair.vue'
+import LinkButton from '../components/LinkButton.vue'
 import ProgressBar from '../components/ProgressBar.vue'
 import ProjectFacts from '../components/ProjectFacts.vue'
 import StatusMark from '../components/StatusMark.vue'
@@ -63,24 +64,21 @@ onBeforeUnmount(() => clearTimeout(timer))
 
     <section
       v-if="projects && !projects.length"
-      class="empty"
+      class="empty card"
     >
       <p>Переводов пока нет. Откройте книгу в библиотеке и начните перевод.</p>
-      <RouterLink
-        to="/"
-        class="button"
-      >
+      <LinkButton to="/">
         В библиотеку
-      </RouterLink>
+      </LinkButton>
     </section>
 
     <section
       v-for="g in grouped"
       :key="g.id"
       :data-group="g.id"
-      class="group"
+      class="group card"
     >
-      <h2>{{ g.title }}</h2>
+      <h2>{{ g.title }} <span class="count">{{ g.items.length }}</span></h2>
       <ul class="rows">
         <li
           v-for="p in g.items"
@@ -124,21 +122,22 @@ onBeforeUnmount(() => clearTimeout(timer))
 </template>
 
 <style scoped>
-h1 {
-  font-family: var(--font-book);
-  font-size: var(--step-3);
-  font-weight: 500;
-  margin-bottom: var(--space-5);
-}
-
 .group + .group {
-  margin-top: var(--space-6);
+  margin-top: var(--space-5);
 }
 
 h2 {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
   font-size: var(--step-1);
-  padding-bottom: var(--space-2);
-  border-bottom: 1px solid var(--ink-original);
+}
+
+.count {
+  color: var(--muted);
+  font-weight: 400;
+  font-size: var(--step-0);
+  font-variant-numeric: tabular-nums;
 }
 
 .rows {
@@ -151,13 +150,18 @@ h2 {
   display: grid;
   gap: var(--space-2);
   padding-block: var(--space-4);
-  border-bottom: 1px solid var(--rule);
+  border-bottom: 1px solid var(--rule-soft);
+}
+
+.rows > li:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
 }
 
 .row-head {
   display: flex;
   flex-wrap: wrap;
-  align-items: baseline;
+  align-items: center;
   justify-content: space-between;
   gap: var(--space-2) var(--space-4);
 }
@@ -165,6 +169,7 @@ h2 {
 .title {
   font-family: var(--font-book);
   font-size: var(--step-1);
+  font-weight: 500;
   text-decoration: none;
 }
 
@@ -175,14 +180,25 @@ h2 {
 .sub {
   margin: 0;
   color: var(--muted);
+  font-size: var(--step--1);
 }
 
 .last-error {
   margin: 0;
+  padding: var(--space-2) var(--space-3);
   color: var(--proof);
+  background: color-mix(in srgb, var(--proof) 7%, var(--surface));
+  border-radius: 8px;
+}
+
+.empty {
+  display: grid;
+  gap: var(--space-3);
+  justify-items: start;
 }
 
 .empty p {
+  margin: 0;
   color: var(--muted);
 }
 </style>

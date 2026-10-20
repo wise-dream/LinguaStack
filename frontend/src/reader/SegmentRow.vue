@@ -1,6 +1,7 @@
 <script setup lang="ts">
 // Строка читалки: блок оригинала и его перевод, на полях — пометки и
 // правка. Код, формулы и картинки не переводятся и идут во всю ширину.
+import { NButton } from 'naive-ui'
 import { computed, nextTick, ref } from 'vue'
 
 import { assetUrl } from '../api/books'
@@ -141,20 +142,21 @@ async function retry() {
             @keydown.enter.meta.prevent="save"
           />
           <div class="editor-actions">
-            <button
-              type="submit"
-              class="button primary"
+            <NButton
+              attr-type="submit"
+              type="primary"
+              size="small"
+              :loading="busy"
               :disabled="busy"
             >
               Сохранить
-            </button>
-            <button
-              type="button"
-              class="button"
+            </NButton>
+            <NButton
+              size="small"
               @click="cancel"
             >
               Отмена
-            </button>
+            </NButton>
             <small>Ctrl+Enter — сохранить, Esc — отмена</small>
           </div>
         </form>
@@ -182,20 +184,22 @@ async function retry() {
           v-if="!editing"
           class="actions"
         >
-          <button
-            type="button"
-            class="link edit"
+          <NButton
+            class="edit"
+            size="tiny"
+            text
             @click="startEdit"
           >
             Править
-          </button>
-          <button
-            type="button"
-            class="link retry"
+          </NButton>
+          <NButton
+            class="retry"
+            size="tiny"
+            text
             @click="retry"
           >
             Перевести заново
-          </button>
+          </NButton>
         </div>
         <p
           v-if="error"
@@ -306,21 +310,6 @@ blockquote.translation {
 .row:focus-within .actions,
 .row.revealed .actions {
   opacity: 1;
-}
-
-.link {
-  padding: 0;
-  border: none;
-  background: none;
-  color: var(--muted);
-  font-size: var(--step--1);
-  text-decoration: underline;
-  text-underline-offset: 0.2em;
-  cursor: pointer;
-}
-
-.link:hover {
-  color: var(--ink-original);
 }
 
 .row-error {

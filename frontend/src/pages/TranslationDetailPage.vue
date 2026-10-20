@@ -1,6 +1,7 @@
 <script setup lang="ts">
 // Перевод книги: живой прогресс, управление и сегменты с фильтрами по
 // ошибкам и замечаниям — чтобы найти и повторить проблемные (ТЗ §5.3).
+import { NButton } from 'naive-ui'
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 
@@ -18,6 +19,7 @@ import type { Project, Segment } from '../api/types'
 import ConfirmButton from '../components/ConfirmButton.vue'
 import ExportPanel from '../components/ExportPanel.vue'
 import LangPair from '../components/LangPair.vue'
+import LinkButton from '../components/LinkButton.vue'
 import ProgressBar from '../components/ProgressBar.vue'
 import ProjectFacts from '../components/ProjectFacts.vue'
 import StatusMark from '../components/StatusMark.vue'
@@ -130,100 +132,104 @@ const readerLink = (s: Segment) => ({
       {{ error }}
     </p>
     <template v-if="project">
-      <p class="crumb">
-        <RouterLink :to="`/books/${project.book_id}`">
-          {{ project.book_title }}
-        </RouterLink>
-      </p>
-      <header class="head">
-        <h1>
-          <LangPair
-            :source="project.source_lang"
-            :target="project.target_lang"
-          />
-        </h1>
-        <StatusMark :status="project.status" />
-      </header>
-      <p class="sub">
-        {{ project.model_id }}
-      </p>
-      <ProgressBar
-        :done="project.segments_done"
-        :failed="project.segments_failed"
-        :total="project.segments_total"
-      />
-      <ProjectFacts
-        :project="project"
-        :now="now"
-      />
-      <p
-        v-if="project.last_error"
-        class="last-error"
-      >
-        {{ project.last_error }}
-      </p>
-
-      <div class="controls">
-        <RouterLink
-          v-if="project.segments_done > 0"
-          :to="{ path: `/read/${project.book_id}`, query: { t: project.id } }"
-          class="button primary"
-        >
-          Читать
-        </RouterLink>
-        <button
-          v-if="canPause"
-          type="button"
-          class="button pause"
-          @click="act(pauseTranslation)"
-        >
-          Приостановить
-        </button>
-        <button
-          v-if="canResume"
-          type="button"
-          class="button resume"
-          @click="act(resumeTranslation, true)"
-        >
-          Продолжить
-        </button>
-        <ConfirmButton
-          v-if="canCancel"
-          label="Отменить перевод"
-          confirm-label="Точно отменить?"
-          @confirm="act(cancelTranslation)"
+      <section class="summary card">
+        <p class="crumb">
+          <RouterLink :to="`/books/${project.book_id}`">
+            {{ project.book_title }}
+          </RouterLink>
+        </p>
+        <header class="head">
+          <h1>
+            <LangPair
+              :source="project.source_lang"
+              :target="project.target_lang"
+            />
+          </h1>
+          <StatusMark :status="project.status" />
+        </header>
+        <p class="sub">
+          {{ project.model_id }}
+        </p>
+        <ProgressBar
+          :done="project.segments_done"
+          :failed="project.segments_failed"
+          :total="project.segments_total"
         />
-      </div>
-      <p
-        v-if="actionError"
-        role="alert"
-        class="form-error"
-      >
-        {{ actionError }}
-      </p>
+        <ProjectFacts
+          :project="project"
+          :now="now"
+        />
+        <p
+          v-if="project.last_error"
+          class="last-error"
+        >
+          {{ project.last_error }}
+        </p>
+
+        <div class="controls">
+          <LinkButton
+            v-if="project.segments_done > 0"
+            :to="{ path: `/read/${project.book_id}`, query: { t: project.id } }"
+            type="primary"
+          >
+            Читать
+          </LinkButton>
+          <NButton
+            v-if="canPause"
+            class="pause"
+            @click="act(pauseTranslation)"
+          >
+            Приостановить
+          </NButton>
+          <NButton
+            v-if="canResume"
+            class="resume"
+            type="primary"
+            secondary
+            @click="act(resumeTranslation, true)"
+          >
+            Продолжить
+          </NButton>
+          <ConfirmButton
+            v-if="canCancel"
+            label="Отменить перевод"
+            confirm-label="Точно отменить?"
+            @confirm="act(cancelTranslation)"
+          />
+        </div>
+        <p
+          v-if="actionError"
+          role="alert"
+          class="form-error"
+        >
+          {{ actionError }}
+        </p>
+      </section>
 
       <ExportPanel
         :book-id="project.book_id"
         :translation-id="project.id"
       />
 
-      <section class="segments">
+      <section class="segments card">
         <h2>Фрагменты</h2>
         <div
           class="filters"
           role="group"
           aria-label="Показать фрагменты"
         >
-          <button
+          <NButton
             v-for="f in filters"
             :key="f.id"
-            type="button"
+            size="small"
+            round
+            :type="filter === f.id ? 'primary' : 'default'"
             :data-filter="f.id"
             :aria-pressed="filter === f.id"
             @click="setFilter(f.id)"
           >
             {{ f.label }}
-          </button>
+          </NButton>
         </div>
         <p
           v-if="!segments.length"
@@ -270,16 +276,21 @@ const readerLink = (s: Segment) => ({
               </li>
             </ul>
             <div class="segment-actions">
-              <RouterLink :to="readerLink(s)">
+              <LinkButton
+                :to="readerLink(s)"
+                size="small"
+                text
+              >
                 Открыть в читалке
-              </RouterLink>
-              <button
-                type="button"
-                class="link retry"
+              </LinkButton>
+              <NButton
+                class="retry"
+                size="small"
+                text
                 @click="retry(s)"
               >
                 Перевести заново
-              </button>
+              </NButton>
             </div>
             <p
               v-if="segmentError[s.id]"
@@ -290,14 +301,13 @@ const readerLink = (s: Segment) => ({
             </p>
           </li>
         </ol>
-        <button
+        <NButton
           v-if="hasMore"
-          type="button"
-          class="button more"
+          class="more"
           @click="loadSegments(false)"
         >
           Показать ещё
-        </button>
+        </NButton>
       </section>
     </template>
   </main>
@@ -306,8 +316,13 @@ const readerLink = (s: Segment) => ({
 <style scoped>
 .detail {
   display: grid;
-  gap: var(--space-3);
+  gap: var(--space-5);
   align-content: start;
+}
+
+.summary {
+  display: grid;
+  gap: var(--space-3);
 }
 
 .crumb {
@@ -326,7 +341,7 @@ const readerLink = (s: Segment) => ({
 h1 {
   font-family: var(--font-book);
   font-size: var(--step-3);
-  font-weight: 500;
+  font-weight: 600;
 }
 
 .sub,
@@ -337,18 +352,17 @@ h1 {
 
 .last-error {
   margin: 0;
+  padding: var(--space-2) var(--space-3);
   color: var(--proof);
+  background: color-mix(in srgb, var(--proof) 7%, var(--surface));
+  border-radius: 8px;
 }
 
 .controls {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--space-3);
+  gap: var(--space-2);
   margin-top: var(--space-2);
-}
-
-.segments {
-  margin-top: var(--space-5);
 }
 
 h2 {
@@ -363,20 +377,6 @@ h2 {
   margin-bottom: var(--space-4);
 }
 
-.filters button {
-  padding: var(--space-1) var(--space-3);
-  border: 1px solid var(--rule);
-  border-radius: 999px;
-  background: var(--paper-raised);
-  cursor: pointer;
-}
-
-.filters button[aria-pressed='true'] {
-  border-color: var(--ink-original);
-  background: var(--ink-original);
-  color: var(--paper-raised);
-}
-
 .segment-list {
   margin: 0;
   padding: 0;
@@ -388,8 +388,12 @@ h2 {
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: var(--space-2) var(--space-5);
   padding: var(--space-4) 0 var(--space-4) var(--space-3);
-  border-bottom: 1px solid var(--rule);
+  border-bottom: 1px solid var(--rule-soft);
   border-left: 3px solid transparent;
+}
+
+.segment-list > li:last-child {
+  border-bottom: none;
 }
 
 .segment-list > li.warning {
@@ -441,24 +445,7 @@ h2 {
   gap: var(--space-4);
 }
 
-.link {
-  padding: 0;
-  border: none;
-  background: none;
-  color: var(--muted);
-  text-decoration: underline;
-  text-underline-offset: 0.2em;
-  cursor: pointer;
-}
 
-.link:hover,
-.segment-actions a:hover {
-  color: var(--ink-original);
-}
-
-.segment-actions a {
-  color: var(--muted);
-}
 
 .more {
   margin-top: var(--space-4);

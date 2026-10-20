@@ -1,12 +1,13 @@
 <script setup lang="ts">
 // Разрушительное действие в два нажатия: первое спрашивает, второе в
 // течение 4 с подтверждает. Без модальных окон — вопрос там же, где кнопка.
+import { NButton } from 'naive-ui'
 import { onBeforeUnmount, ref } from 'vue'
 
-const props = withDefaults(defineProps<{ label: string; confirmLabel?: string; disabled?: boolean }>(), {
-  confirmLabel: 'Точно удалить?',
-  disabled: false,
-})
+const props = withDefaults(
+  defineProps<{ label: string; confirmLabel?: string; disabled?: boolean; size?: 'tiny' | 'small' | 'medium' }>(),
+  { confirmLabel: 'Точно удалить?', disabled: false, size: 'medium' },
+)
 const emit = defineEmits<{ confirm: [] }>()
 
 const armed = ref(false)
@@ -31,22 +32,17 @@ onBeforeUnmount(() => clearTimeout(timer))
 </script>
 
 <template>
-  <button
-    type="button"
-    class="button danger"
+  <NButton
+    class="danger"
     :class="{ armed }"
+    :type="'error'"
+    :secondary="!armed"
     :disabled="props.disabled"
+    :size="props.size"
     @click="onClick"
     @keydown.esc="disarm"
     @blur="disarm"
   >
     {{ armed ? props.confirmLabel : props.label }}
-  </button>
+  </NButton>
 </template>
-
-<style scoped>
-.armed {
-  background: var(--proof);
-  color: var(--paper-raised);
-}
-</style>

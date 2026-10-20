@@ -1,6 +1,7 @@
 <script setup lang="ts">
 // Экспорт перевода (ТЗ §3.2): формат, только перевод или вместе с
 // оригиналом. Файл собирает worker; панель ждёт его и даёт скачать.
+import { NButton } from 'naive-ui'
 import { onMounted, reactive, ref } from 'vue'
 
 import { errorMessage } from '../api/client'
@@ -44,7 +45,7 @@ async function remove(j: ExportJob) {
 
 <template>
   <section
-    class="export"
+    class="export card"
     aria-labelledby="export-title"
   >
     <h2 id="export-title">
@@ -85,13 +86,14 @@ async function remove(j: ExportJob) {
           {{ m.label }}
         </label>
       </fieldset>
-      <button
-        type="submit"
-        class="button primary"
+      <NButton
+        attr-type="submit"
+        type="primary"
+        :loading="busy"
         :disabled="busy"
       >
         Экспортировать
-      </button>
+      </NButton>
     </form>
     <p
       v-if="error || exports.error.value"
@@ -109,16 +111,18 @@ async function remove(j: ExportJob) {
 </template>
 
 <style scoped>
-.export {
-  margin-top: var(--space-6);
-}
-
 .export-form {
   display: flex;
   flex-wrap: wrap;
   align-items: flex-end;
   gap: var(--space-3) var(--space-5);
-  margin-bottom: var(--space-3);
+}
+
+/* Черта под формой — только когда под ней есть экспорты. */
+.export :deep(.exports:has(li)) {
+  margin-top: var(--space-4);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--rule-soft);
 }
 
 .export-form .field {
@@ -144,6 +148,7 @@ async function remove(j: ExportJob) {
   display: flex;
   gap: var(--space-2);
   align-items: center;
+  min-height: 38px;
   cursor: pointer;
 }
 

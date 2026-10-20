@@ -1,11 +1,13 @@
 <script setup lang="ts">
 // Импорт книги (ТЗ §4): загрузка с прогрессом, замечания импорта и
 // предварительный просмотр оглавления с перестановкой глав.
+import { NButton, NProgress } from 'naive-ui'
 import { computed, ref } from 'vue'
 
 import { getTOC, putTOC, uploadBook } from '../api/books'
 import { errorMessage } from '../api/client'
 import type { Book, ImportIssue, TocEntry } from '../api/types'
+import LinkButton from '../components/LinkButton.vue'
 import TocTree from '../components/TocTree.vue'
 import { formatNumber, plural } from '../lib/format'
 
@@ -102,9 +104,11 @@ async function saveOrder() {
       v-if="progress !== null"
       class="progress"
     >
-      <progress
-        :value="progress"
-        max="1"
+      <NProgress
+        type="line"
+        :percentage="Math.round(progress * 100)"
+        :show-indicator="false"
+        :processing="progress >= 1"
         aria-label="Загрузка файла"
       />
       <span>{{ progress < 1 ? `Отправлено ${Math.round(progress * 100)}%` : 'Разбираю книгу…' }}</span>
@@ -120,7 +124,7 @@ async function saveOrder() {
 
     <section
       v-if="book"
-      class="result"
+      class="result card"
     >
       <h2 class="book-title">
         {{ book.title }}
@@ -159,33 +163,32 @@ async function saveOrder() {
         @reorder="onReorder"
       />
       <p class="order-actions">
-        <button
+        <NButton
           v-if="pendingOrder"
-          type="button"
-          class="button save-order"
+          class="save-order"
+          type="primary"
+          secondary
           @click="saveOrder"
         >
           Сохранить порядок глав
-        </button>
+        </NButton>
         <span
           v-if="orderSaved"
           role="status"
+          class="notice"
         >Порядок глав сохранён</span>
       </p>
 
       <div class="next">
-        <RouterLink
+        <LinkButton
           :to="`/books/${book.id}/translate`"
-          class="button primary"
+          type="primary"
         >
           Настроить перевод
-        </RouterLink>
-        <RouterLink
-          :to="`/books/${book.id}`"
-          class="button"
-        >
+        </LinkButton>
+        <LinkButton :to="`/books/${book.id}`">
           Открыть книгу
-        </RouterLink>
+        </LinkButton>
       </div>
     </section>
   </main>
@@ -196,26 +199,27 @@ async function saveOrder() {
   max-width: 48rem;
 }
 
-h1 {
-  font-family: var(--font-book);
-  font-size: var(--step-3);
-  font-weight: 500;
-  margin-bottom: var(--space-5);
-}
-
 .drop {
   position: relative;
   display: grid;
   gap: var(--space-1);
-  padding: var(--space-6) var(--space-5);
-  border: 1.5px dashed var(--ink-original);
-  border-radius: var(--radius);
-  background: var(--paper-raised);
+  justify-items: center;
+  text-align: center;
+  padding: var(--space-7) var(--space-5);
+  border: 1.5px dashed var(--rule);
+  border-radius: var(--radius-card);
+  background: var(--surface);
   cursor: pointer;
+  transition: border-color 0.2s, background-color 0.2s;
+}
+
+.drop:hover {
+  border-color: var(--ink-original);
 }
 
 .drop.dragging {
-  background: color-mix(in srgb, var(--highlight) 30%, var(--paper-raised));
+  border-color: var(--ink-original);
+  background: color-mix(in srgb, var(--highlight) 20%, var(--surface));
 }
 
 .drop.busy {
@@ -233,7 +237,6 @@ h1 {
 }
 
 .pick {
-  justify-self: start;
   margin-top: var(--space-3);
 }
 
@@ -249,9 +252,13 @@ h1 {
   margin-top: var(--space-4);
 }
 
-.progress progress {
+.progress > :first-child {
   flex: 1;
-  accent-color: var(--ink-original);
+}
+
+.progress span {
+  color: var(--muted);
+  white-space: nowrap;
 }
 
 .form-error {
@@ -259,13 +266,13 @@ h1 {
 }
 
 .result {
-  margin-top: var(--space-6);
+  margin-top: var(--space-5);
 }
 
 .book-title {
   font-family: var(--font-book);
   font-size: var(--step-2);
-  font-weight: 500;
+  font-weight: 600;
 }
 
 .author {
@@ -286,16 +293,21 @@ h1 {
 }
 
 .issues li {
-  padding-left: var(--space-3);
-  border-left: 3px solid var(--rule);
+  padding: var(--space-2) var(--space-3);
+  border-radius: 8px;
+  background: var(--paper-raised);
+  border: 1px solid var(--rule-soft);
 }
 
 .issues li.warning {
-  border-left-color: var(--highlight);
+  background: color-mix(in srgb, var(--highlight) 18%, var(--surface));
+  border-color: color-mix(in srgb, var(--highlight) 55%, var(--surface));
 }
 
 .issues li.error {
-  border-left-color: var(--proof);
+  color: var(--proof);
+  background: color-mix(in srgb, var(--proof) 7%, var(--surface));
+  border-color: color-mix(in srgb, var(--proof) 25%, var(--surface));
 }
 
 h3 {
@@ -320,5 +332,7 @@ h3 {
   flex-wrap: wrap;
   gap: var(--space-3);
   margin-top: var(--space-5);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--rule-soft);
 }
 </style>
