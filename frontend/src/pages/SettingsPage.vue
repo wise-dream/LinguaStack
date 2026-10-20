@@ -43,10 +43,16 @@ onBeforeUnmount(() => {
 const expiresAt = (iso: string) => new Date(iso).toLocaleTimeString('ru', { hour: '2-digit', minute: '2-digit' })
 
 // Ждём, пока пользователь нажмёт «Старт» в Telegram: привязку делает бот.
+// Ссылка устарела — ждать нечего: опрос останавливается.
 function poll() {
   clearTimeout(timer)
   if (stopped) return
   timer = setTimeout(async () => {
+    if (link.value && Date.now() > Date.parse(link.value.expires_at)) {
+      link.value = null
+      done.value = 'Ссылка устарела. Нажмите «Привязать Telegram», чтобы получить новую.'
+      return
+    }
     try {
       const t = await getTelegram()
       telegram.value = t

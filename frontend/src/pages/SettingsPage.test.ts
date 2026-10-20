@@ -39,6 +39,7 @@ describe('настройки', () => {
   })
 
   it('привязка: ссылка на бота и ожидание подтверждения', async () => {
+    vi.setSystemTime(new Date('2026-10-19T11:00:00Z'))
     let polls = 0
     const { w, calls } = await mountSettings({
       'GET /api/telegram': () => {
@@ -64,6 +65,27 @@ describe('настройки', () => {
     const before = polls
     await vi.advanceTimersByTimeAsync(9000)
     expect(polls).toBe(before) // привязан — опрос остановлен
+  })
+
+  it('ссылка устарела — опрос останавливается, можно получить новую', async () => {
+    vi.setSystemTime(new Date('2026-10-19T11:00:00Z'))
+    let polls = 0
+    const { w } = await mountSettings({
+      'GET /api/telegram': () => {
+        polls++
+        return { body: state() }
+      },
+      'POST /api/telegram/link': { body: { url: 'https://t.me/linguastack_bot?start=abc', expires_at: '2026-10-19T11:00:05Z' } },
+    })
+    await w.find('section.telegram button.primary').trigger('click')
+    await flushPromises()
+    await vi.advanceTimersByTimeAsync(9000)
+    expect(w.find('a.open-bot').exists()).toBe(false)
+    expect(w.text()).toContain('Ссылка устарела')
+    expect(w.find('section.telegram button.primary').text()).toBe('Привязать Telegram')
+    const before = polls
+    await vi.advanceTimersByTimeAsync(30000)
+    expect(polls).toBe(before)
   })
 
   it('привязан: переключатели уведомлений и отвязка с подтверждением', async () => {
