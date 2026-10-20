@@ -25,7 +25,8 @@ const maxLastError = 4000
 // наступил, либо выполняющаяся с истёкшей арендой — её worker упал.
 // FOR UPDATE SKIP LOCKED: несколько worker-ов не берут одну задачу.
 // Подзапрос count — честность: пользователь не занимает больше
-// maxPerUser worker-ов; задачи с истёкшей арендой лимит не занимают.
+// maxPerUser worker-ов (или своей квоты из users, дополнение §18); задачи
+// с истёкшей арендой лимит не занимают.
 const claimSQL = `
 UPDATE translation_tasks
    SET status = 'running', locked_by = ?, locked_until = now() + make_interval(secs => ?),
@@ -36,7 +37,8 @@ UPDATE translation_tasks
         OR (t.status = 'running' AND t.locked_until < now()))
       AND (SELECT count(*) FROM translation_tasks r
             WHERE r.owner_id = t.owner_id AND r.status = 'running'
-              AND r.locked_until > now() AND r.id <> t.id) < ?
+              AND r.locked_until > now() AND r.id <> t.id)
+          < COALESCE((SELECT u.max_concurrent_tasks FROM users u WHERE u.id = t.owner_id), ?)
     ORDER BY t.priority DESC, t.created_at, t.id
     FOR UPDATE SKIP LOCKED
     LIMIT 1)

@@ -278,3 +278,26 @@ func TestCancelPendingForProject(t *testing.T) {
 	require.Equal(t, models.TaskCancelled, reload(t, gdb, task.ID).Status)
 	require.Nil(t, claim(t, gdb, "w", 3))
 }
+
+func TestClaimRespectsUserTaskQuota(t *testing.T) {
+	// Квота одновременных задач из users перекрывает настройку
+	// (дополнение §18); у остальных — значение по умолчанию.
+	gdb := testdb.Committing(t, "queue")
+	limited := testdb.MakeUser(t, gdb)
+	require.NoError(t, gdb.Model(limited).Update("max_concurrent_tasks", 1).Error)
+	other := testdb.MakeUser(t, gdb)
+	for range 2 {
+		enqueueFor(t, gdb, &limited.ID, 10) // выше приоритет — берутся первыми
+	}
+	enqueueFor(t, gdb, &other.ID, 0)
+	enqueueFor(t, gdb, &other.ID, 0)
+
+	first := claim(t, gdb, "w1", 3)
+	require.Equal(t, limited.ID, first.OwnerID)
+	for _, w := range []string{"w2", "w3"} {
+		next := claim(t, gdb, w, 3)
+		require.NotNil(t, next)
+		require.Equal(t, other.ID, next.OwnerID, "вторая задача ограниченного ждёт")
+	}
+	require.Nil(t, claim(t, gdb, "w4", 3))
+}

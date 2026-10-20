@@ -181,8 +181,12 @@ func (s *server) createTranslation(w http.ResponseWriter, r *http.Request) {
 		internalError(w, r, err)
 		return
 	}
-	if active >= int64(s.Cfg.MaxProjectsPerUser) {
-		writeError(w, http.StatusTooManyRequests, fmt.Sprintf("Не больше %d активных переводов одновременно", s.Cfg.MaxProjectsPerUser))
+	limit := s.Cfg.MaxProjectsPerUser
+	if user.MaxActiveProjects != nil {
+		limit = *user.MaxActiveProjects
+	}
+	if active >= int64(limit) {
+		writeError(w, http.StatusTooManyRequests, fmt.Sprintf("Не больше %d активных переводов одновременно", limit))
 		return
 	}
 

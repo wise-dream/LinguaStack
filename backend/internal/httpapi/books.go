@@ -16,6 +16,7 @@ import (
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"github.com/vnovels/linguastack/internal/cdm"
 	"github.com/vnovels/linguastack/internal/db/models"
@@ -145,6 +146,16 @@ func (s *server) uploadBook(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	// Ранняя проверка — до разбора файла, который бывает дорогим (PDF).
+	// Окончательная — при записи, под блокировкой строки пользователя.
+	switch err := checkStorageQuota(r.Context(), s.DB, user.ID, s.storageQuota(user), int64(len(data))); {
+	case errors.Is(err, errStorageQuota):
+		writeError(w, http.StatusRequestEntityTooLarge, storageQuotaMessage)
+		return
+	case err != nil:
+		internalError(w, r, err)
+		return
+	}
 	filename := safeFilename(rawName)
 	suffix, err := storage.NormalizeSuffix(path.Ext(filename))
 	if err != nil {
@@ -211,7 +222,24 @@ func (s *server) uploadBook(w http.ResponseWriter, r *http.Request) {
 	}
 	book.Issues = models.NewJSON(issues)
 
-	if err := s.DB.WithContext(r.Context()).Create(&book).Error; err != nil {
+	// Две одновременные загрузки не обойдут квоту: проверка и вставка идут
+	// под блокировкой строки владельца.
+	err = s.DB.WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
+		var owner models.User
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&owner, "id = ?", user.ID).Error; err != nil {
+			return err
+		}
+		if err := checkStorageQuota(r.Context(), tx, user.ID, s.storageQuota(&owner), book.OriginalSize); err != nil {
+			return err
+		}
+		return tx.Create(&book).Error
+	})
+	if errors.Is(err, errStorageQuota) {
+		cleanup()
+		writeError(w, http.StatusRequestEntityTooLarge, storageQuotaMessage)
+		return
+	}
+	if err != nil {
 		cleanup()
 		internalError(w, r, err)
 		return
