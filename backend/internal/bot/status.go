@@ -18,7 +18,14 @@ import (
 	"github.com/vnovels/linguastack/internal/telegram"
 )
 
-const statusLimit = 10
+const (
+	statusLimit = 10
+	titleLimit  = 100 // символов названия книги
+	errorLimit  = 120 // символов причины сбоя
+	// statusBudget — запас ниже предела Telegram: что не влезло, уходит в
+	// «…и ещё N».
+	statusBudget = telegram.MaxText - 200
+)
 
 var statusLabels = map[string]string{
 	models.ProjectDraft: "Черновик", models.ProjectQueued: "В очереди", models.ProjectRunning: "Переводится",
@@ -70,17 +77,24 @@ func (b *Bot) statusView(ctx context.Context, bnd *models.TelegramBinding) (stri
 	var text strings.Builder
 	text.WriteString("<b>Ваши переводы</b>\n")
 	var keyboard [][]telegram.Button
+	shown := 0
 	for i, p := range projects {
 		n := strconv.Itoa(i + 1)
-		fmt.Fprintf(&text, "\n%s. <b>%s</b> → %s\n%s", n, html.EscapeString(titles[p.BookID]),
+		var item strings.Builder
+		fmt.Fprintf(&item, "\n%s. <b>%s</b> → %s\n%s", n, html.EscapeString(telegram.Clip(titles[p.BookID], titleLimit)),
 			html.EscapeString(telegram.LanguageName(p.TargetLang)), progressLine(&p))
 		if p.Status == models.ProjectFailed && p.LastError != "" {
-			text.WriteString("\n" + html.EscapeString(clip(p.LastError, 200)))
+			item.WriteString("\n" + html.EscapeString(telegram.Clip(p.LastError, errorLimit)))
 		}
 		if url := b.page("/translations/" + p.ID.String()); url != "" {
-			text.WriteString("\n" + telegram.Link(url, "Открыть"))
+			item.WriteString("\n" + telegram.Link(url, "Открыть"))
 		}
-		text.WriteString("\n")
+		item.WriteString("\n")
+		if utf8.RuneCountInString(text.String())+utf8.RuneCountInString(item.String()) > statusBudget {
+			break
+		}
+		text.WriteString(item.String())
+		shown++
 		switch p.Status {
 		case models.ProjectQueued, models.ProjectRunning:
 			keyboard = append(keyboard, []telegram.Button{{Text: "Приостановить " + n, CallbackData: "p:" + p.ID.String()}})
@@ -88,7 +102,7 @@ func (b *Bot) statusView(ctx context.Context, bnd *models.TelegramBinding) (stri
 			keyboard = append(keyboard, []telegram.Button{{Text: "Продолжить " + n, CallbackData: "r:" + p.ID.String()}})
 		}
 	}
-	if rest := int(total) - len(projects); rest > 0 {
+	if rest := int(total) - shown; rest > 0 {
 		fmt.Fprintf(&text, "\n…и ещё %d — на сайте.", rest)
 	}
 	return text.String(), keyboard, nil
@@ -120,14 +134,6 @@ func progressLine(p *models.TranslationProject) string {
 		return label
 	}
 	return fmt.Sprintf("%s: %d%% (%d из %d)", label, int(math.Round(p.ProgressPercent())), p.SegmentsDone, p.SegmentsTotal)
-}
-
-func clip(s string, n int) string {
-	if utf8.RuneCountInString(s) <= n {
-		return s
-	}
-	r := []rune(s)
-	return string(r[:n]) + "…"
 }
 
 // callback — нажатие «Приостановить» или «Продолжить». Данные кнопки

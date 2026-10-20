@@ -13,9 +13,13 @@ import (
 // Тексты уведомлений (дополнение §17): название, язык, счётчики и ссылки —
 // без текста книги.
 
-// shownChapters — сколько названий глав перечислять в склеенном
-// сообщении.
-const shownChapters = 3
+// Сколько названий глав перечислять в склеенном сообщении и сколько
+// символов названий оставлять: сообщение не длиннее предела Telegram.
+const (
+	shownChapters = 3
+	titleLimit    = 100
+	chapterLimit  = 80
+)
 
 type projectInfo struct {
 	project models.TranslationProject
@@ -25,7 +29,7 @@ type projectInfo struct {
 }
 
 func (i *projectInfo) head() string {
-	return "<b>" + html.EscapeString(i.title) + "</b> → " + html.EscapeString(telegram.LanguageName(i.project.TargetLang))
+	return "<b>" + html.EscapeString(telegram.Clip(i.title, titleLimit)) + "</b> → " + html.EscapeString(telegram.LanguageName(i.project.TargetLang))
 }
 
 func (i *projectInfo) link(path, text string) string {
@@ -78,7 +82,7 @@ func (i *projectInfo) progress() string {
 func chaptersText(i *projectInfo, indexes []int) string {
 	quoted := make([]string, 0, shownChapters)
 	for _, idx := range indexes[:min(len(indexes), shownChapters)] {
-		quoted = append(quoted, "«"+html.EscapeString(i.chapterTitle(idx))+"»")
+		quoted = append(quoted, "«"+html.EscapeString(telegram.Clip(i.chapterTitle(idx), chapterLimit))+"»")
 	}
 	var what string
 	if len(indexes) == 1 {
@@ -95,7 +99,7 @@ func chaptersText(i *projectInfo, indexes []int) string {
 
 func completedText(i *projectInfo) string {
 	p := i.project
-	text := fmt.Sprintf("Перевод %s на %s готов: %d из %d фрагментов", "<b>"+html.EscapeString(i.title)+"</b>",
+	text := fmt.Sprintf("Перевод %s на %s готов: %d из %d фрагментов", "<b>"+html.EscapeString(telegram.Clip(i.title, titleLimit))+"</b>",
 		html.EscapeString(telegram.LanguageName(p.TargetLang)), p.SegmentsDone, p.SegmentsTotal)
 	if p.WarningsCount > 0 {
 		text += fmt.Sprintf(", с замечаниями — %d", p.WarningsCount)
@@ -113,6 +117,6 @@ func failedText(i *projectInfo) string {
 		reason = string(r[:300]) + "…"
 	}
 	return fmt.Sprintf("Перевод %s на %s остановлен: %s.\nПродолжить можно на сайте или командой /status.",
-		"<b>"+html.EscapeString(i.title)+"</b>", html.EscapeString(telegram.LanguageName(p.TargetLang)),
+		"<b>"+html.EscapeString(telegram.Clip(i.title, titleLimit))+"</b>", html.EscapeString(telegram.LanguageName(p.TargetLang)),
 		html.EscapeString(strings.TrimSuffix(reason, "."))) + i.projectPage()
 }

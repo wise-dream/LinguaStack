@@ -8,6 +8,7 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
@@ -261,4 +262,25 @@ func TestCompletedCancelsDeferredChapters(t *testing.T) {
 	e.add(t, models.NotifyCompleted, nil)
 	require.Equal(t, 1, e.run(t), "«готово» не ждёт интервала глав")
 	require.Equal(t, models.NotificationSkipped, e.reload(t, deferred).Status, "отложенные главы после «готово» не досылаются")
+}
+
+func TestLongTitlesFitTelegramLimit(t *testing.T) {
+	e := newDispatchEnv(t, "https://ls.example")
+	e.d.ChapterInterval = 0
+	long := strings.Repeat("Длинное название ", 300)
+	require.NoError(t, e.tx.Model(&models.Book{}).Where("id = ?", e.project.BookID).Update("title", long).Error)
+	var book models.Book
+	require.NoError(t, e.tx.First(&book, "id = ?", e.project.BookID).Error)
+	doc := book.CDM.Data
+	for i := range doc.Chapters {
+		doc.Chapters[i].Title = long
+	}
+	require.NoError(t, e.tx.Model(&book).Update("cdm", models.NewJSON(doc)).Error)
+	for i := range 3 {
+		e.add(t, models.NotifyChapter, ptr(i))
+	}
+	e.run(t)
+	require.Len(t, e.sender.sent, 1)
+	require.LessOrEqual(t, utf8.RuneCountInString(e.sender.sent[0].Text), 4096)
+	require.Contains(t, e.sender.sent[0].Text, "…")
 }

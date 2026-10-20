@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
@@ -268,4 +269,20 @@ func TestRunPollsAndConfirms(t *testing.T) {
 	}()
 	require.NoError(t, e.bot.Run(ctx))
 	require.Len(t, e.tg.Sent(), 1, "обновление обработано один раз: offset подтверждает его")
+}
+
+func TestStatusFitsTelegramLimit(t *testing.T) {
+	// Telegram не принимает сообщения длиннее 4096 символов: десять книг с
+	// длинными названиями не должны оставить /status без ответа.
+	e := newEnv(t)
+	user := linkedUser(t, e)
+	long := strings.Repeat("Очень длинное название книги ", 12)
+	for i := range 10 {
+		p := project(t, e, user, models.ProjectFailed, 1, 2, time.Now().Add(-time.Duration(i)*time.Minute))
+		require.NoError(t, e.db.Model(&models.Book{}).Where("id = ?", p.BookID).Update("title", long).Error)
+		require.NoError(t, e.db.Model(p).Update("last_error", strings.Repeat("ошибка провайдера ", 30)).Error)
+	}
+	reply := e.send(t, "private", me, "/status")
+	require.LessOrEqual(t, utf8.RuneCountInString(reply), 4096)
+	require.Equal(t, 10, strings.Count(reply, "/translations/"))
 }
