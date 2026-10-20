@@ -157,6 +157,12 @@ docker compose ps          # api и db — healthy
   передаётся лишь по HTTPS. Прокси должен не буферизовать
   `GET /api/translations/{id}/events` (Server-Sent Events): для nginx —
   `proxy_buffering off;` и `proxy_read_timeout` больше минуты.
+* **IP клиента за прокси.** Лимиты регистраций и сброса пароля и журнал
+  попыток входа считаются по IP. За обратным прокси и Docker все запросы
+  приходят с адреса моста — задать `LINGUASTACK_TRUSTED_PROXIES` (для
+  compose — `172.16.0.0/12`), а прокси должен передавать
+  `X-Forwarded-For` (nginx: `proxy_set_header X-Forwarded-For
+  $proxy_add_x_forwarded_for;`, Caddy — по умолчанию).
 * Больше worker-ов: `docker compose up -d --scale worker=3`. Сколько задач
   одного пользователя выполняется одновременно, ограничивает
   `LINGUASTACK_MAX_TASKS_PER_USER`.

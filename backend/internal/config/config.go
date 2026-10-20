@@ -9,6 +9,8 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"fmt"
+	"net/netip"
+	"strings"
 	"time"
 
 	"github.com/caarlos0/env/v11"
@@ -68,6 +70,17 @@ type Settings struct {
 	MaxSegmentAttempts int           `env:"LINGUASTACK_MAX_SEGMENT_ATTEMPTS" envDefault:"3"`
 	LoginMaxAttempts   int           `env:"LINGUASTACK_LOGIN_MAX_ATTEMPTS" envDefault:"10"`
 	LoginWindow        time.Duration `env:"LINGUASTACK_LOGIN_WINDOW" envDefault:"15m"`
+	// Частота запросов (дополнение §18): на пользователя — в секунду и
+	// всплеск; загрузок на пользователя, регистраций и запросов сброса
+	// пароля с одного IP — в час. 0 — без ограничения.
+	RateLimitRPS    float64 `env:"LINGUASTACK_RATE_LIMIT_RPS" envDefault:"20"`
+	RateLimitBurst  int     `env:"LINGUASTACK_RATE_LIMIT_BURST" envDefault:"60"`
+	UploadsPerHour  int     `env:"LINGUASTACK_UPLOADS_PER_HOUR" envDefault:"30"`
+	RegisterPerHour int     `env:"LINGUASTACK_REGISTER_PER_HOUR" envDefault:"5"`
+	ResetPerHour    int     `env:"LINGUASTACK_RESET_PER_HOUR" envDefault:"5"`
+	// Прокси, которым верится X-Forwarded-For (CIDR или адрес через
+	// запятую). Пусто — IP клиента берётся из соединения.
+	TrustedProxies CIDRList `env:"LINGUASTACK_TRUSTED_PROXIES"`
 	// Разбор PDF (дополнение §15.1): страниц больше — отказ принять файл;
 	// по тайм-ауту экземпляр PDFium уничтожается; память модуля wasm.
 	PDFMaxPages int           `env:"LINGUASTACK_PDF_MAX_PAGES" envDefault:"2000"`
@@ -99,6 +112,37 @@ type Settings struct {
 	// Должно быть меньше срока, который даёт оркестратор до SIGKILL
 	// (stop_grace_period в docker-compose.yml).
 	WorkerShutdownGrace time.Duration `env:"LINGUASTACK_WORKER_SHUTDOWN_GRACE" envDefault:"25s"`
+}
+
+// CIDRList — список сетей из переменной окружения: «10.0.0.0/8, 127.0.0.1».
+// Адрес без маски — сеть из одного адреса.
+type CIDRList []netip.Prefix
+
+// UnmarshalText разбирает список; негодная сеть — ошибка запуска, а не
+// молча пропущенный прокси.
+func (l *CIDRList) UnmarshalText(text []byte) error {
+	var out CIDRList
+	for item := range strings.SplitSeq(string(text), ",") {
+		item = strings.TrimSpace(item)
+		if item == "" {
+			continue
+		}
+		if !strings.Contains(item, "/") {
+			addr, err := netip.ParseAddr(item)
+			if err != nil {
+				return fmt.Errorf("адрес прокси %q: %w", item, err)
+			}
+			out = append(out, netip.PrefixFrom(addr.Unmap(), addr.Unmap().BitLen()))
+			continue
+		}
+		p, err := netip.ParsePrefix(item)
+		if err != nil {
+			return fmt.Errorf("сеть прокси %q: %w", item, err)
+		}
+		out = append(out, p.Masked())
+	}
+	*l = out
+	return nil
 }
 
 // TelegramEnabled — бот настроен: есть токен и имя для ссылок.

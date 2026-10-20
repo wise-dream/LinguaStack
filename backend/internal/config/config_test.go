@@ -104,3 +104,42 @@ func TestEnvOverridesDefault(t *testing.T) {
 		t.Errorf("MaxTasksPerUser = %d, ожидалось 7", cfg.MaxTasksPerUser)
 	}
 }
+
+func TestTrustedProxiesParse(t *testing.T) {
+	t.Setenv("LINGUASTACK_TRUSTED_PROXIES", " 10.0.0.0/8, 127.0.0.1 ,::1")
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf("Load() вернул ошибку: %v", err)
+	}
+	got := make([]string, 0, len(cfg.TrustedProxies))
+	for _, p := range cfg.TrustedProxies {
+		got = append(got, p.String())
+	}
+	if strings.Join(got, ",") != "10.0.0.0/8,127.0.0.1/32,::1/128" {
+		t.Errorf("TrustedProxies = %v", got)
+	}
+
+	t.Setenv("LINGUASTACK_TRUSTED_PROXIES", "10.0.0.0/33")
+	if _, err := config.Load(); err == nil || !strings.Contains(err.Error(), "10.0.0.0/33") {
+		t.Errorf("ожидалась ошибка с негодной сетью, получено %v", err)
+	}
+
+	t.Setenv("LINGUASTACK_TRUSTED_PROXIES", "")
+	cfg, err = config.Load()
+	if err != nil || len(cfg.TrustedProxies) != 0 {
+		t.Errorf("пусто — нет доверенных прокси: %v %v", cfg.TrustedProxies, err)
+	}
+}
+
+func TestRateLimitDefaults(t *testing.T) {
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf("Load() вернул ошибку: %v", err)
+	}
+	// Дополнение §18 и §10.
+	if cfg.RateLimitRPS != 20 || cfg.RateLimitBurst != 60 || cfg.UploadsPerHour != 30 ||
+		cfg.RegisterPerHour != 5 || cfg.ResetPerHour != 5 {
+		t.Errorf("лимиты по умолчанию: %+v", []any{cfg.RateLimitRPS, cfg.RateLimitBurst,
+			cfg.UploadsPerHour, cfg.RegisterPerHour, cfg.ResetPerHour})
+	}
+}

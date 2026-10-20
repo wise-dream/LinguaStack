@@ -46,6 +46,9 @@ func newTestEnvWith(t *testing.T, adjust func(*httpapi.Deps)) *testEnv {
 	require.NoError(t, err)
 	// Тестовый сервер работает по http: cookie с Secure клиент не вернёт.
 	cfg.SessionCookieSecure = false
+	// Тесты шлют десятки регистраций и запросов с одного адреса за
+	// миллисекунды; лимиты частоты включают тесты самих лимитов.
+	cfg.RateLimitRPS, cfg.UploadsPerHour, cfg.RegisterPerHour, cfg.ResetPerHour = 0, 0, 0, 0
 	tx := testdb.New(t)
 	root := t.TempDir()
 	store, err := storage.New(root, cfg.MaxUploadBytes)

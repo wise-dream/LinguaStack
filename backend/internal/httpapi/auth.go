@@ -2,7 +2,6 @@ package httpapi
 
 import (
 	"errors"
-	"net"
 	"net/http"
 	"net/mail"
 	"strings"
@@ -44,16 +43,6 @@ func normalizeEmail(raw string) (string, bool) {
 		return "", false
 	}
 	return email, true
-}
-
-func clientIP(r *http.Request) string {
-	// Доверие X-Forwarded-For — только за явно настроенным прокси (этап 7),
-	// иначе клиент подставит любой адрес и обойдёт лимит попыток.
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		return r.RemoteAddr
-	}
-	return host
 }
 
 var (
@@ -119,7 +108,7 @@ func (s *server) login(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, loginFailedMessage)
 		return
 	}
-	ctx, ip := r.Context(), clientIP(r)
+	ctx, ip := r.Context(), s.clientIP(r)
 
 	failures, err := security.RecentFailures(ctx, s.DB, email, ip, s.Cfg.LoginWindow)
 	if err != nil {

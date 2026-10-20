@@ -40,6 +40,7 @@ type Deps struct {
 
 type server struct {
 	Deps
+	limits limits
 }
 
 // Route — зарегистрированный маршрут. Auth — нужен вход.
@@ -64,8 +65,16 @@ func (rt *router) add(pattern string, auth bool, h http.HandlerFunc) {
 	rt.mux.HandleFunc(pattern, h)
 }
 
-func (rt *router) public(pattern string, h http.HandlerFunc)    { rt.add(pattern, false, h) }
-func (rt *router) protected(pattern string, h http.HandlerFunc) { rt.add(pattern, true, h) }
+func (rt *router) public(pattern string, h http.HandlerFunc) { rt.add(pattern, false, h) }
+
+// protected — маршрут со входом и лимитом частоты на пользователя.
+func (rt *router) protected(pattern string, h http.HandlerFunc) {
+	rt.add(pattern, true, limited(rt.s.limits.user, byUser, tooManyRequests, h))
+}
+
+// stream — маршрут со входом без лимита частоты: поток событий открыт,
+// пока открыта вкладка, и переподключается сам.
+func (rt *router) stream(pattern string, h http.HandlerFunc) { rt.add(pattern, true, h) }
 
 // NewServer возвращает маршрутизатор со всеми эндпоинтами.
 //
@@ -73,7 +82,7 @@ func (rt *router) protected(pattern string, h http.HandlerFunc) { rt.add(pattern
 // понимает метод и параметры в шаблоне ("GET /api/books/{id}"), поэтому
 // отдельный роутер как зависимость не нужен.
 func NewServer(d Deps) http.Handler {
-	s := &server{Deps: d}
+	s := &server{Deps: d, limits: newLimits(d.Cfg)}
 	if s.BuildProvider == nil {
 		s.BuildProvider = s.defaultBuildProvider
 	}
@@ -98,12 +107,12 @@ func buildRoutes(s *server) *router {
 	rt := &router{mux: http.NewServeMux(), s: s}
 
 	rt.public("GET /api/health", s.health)
-	rt.public("POST /api/auth/register", s.register)
+	rt.public("POST /api/auth/register", limited(s.limits.register, s.clientIP, tooManyRegisters, s.register))
 	rt.public("POST /api/auth/login", s.login)
 	rt.public("POST /api/auth/logout", s.logout)
 	rt.protected("GET /api/me", s.me)
 
-	rt.protected("POST /api/books", s.uploadBook)
+	rt.protected("POST /api/books", limited(s.limits.uploads, byUser, tooManyUploads, s.uploadBook))
 	rt.protected("GET /api/books", s.listBooks)
 	rt.protected("GET /api/books/{id}", s.getBook)
 	rt.protected("DELETE /api/books/{id}", s.deleteBook)
@@ -138,7 +147,7 @@ func buildRoutes(s *server) *router {
 	rt.protected("POST /api/translations/{id}/resume", s.resumeTranslation)
 	rt.protected("POST /api/translations/{id}/cancel", s.cancelTranslation)
 	rt.protected("GET /api/translations/{id}/segments", s.listSegments)
-	rt.protected("GET /api/translations/{id}/events", s.translationEvents)
+	rt.stream("GET /api/translations/{id}/events", s.translationEvents)
 
 	rt.protected("GET /api/telegram", s.getTelegram)
 	rt.protected("POST /api/telegram/link", s.linkTelegram)
