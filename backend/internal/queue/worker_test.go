@@ -14,6 +14,7 @@ import (
 	"github.com/vnovels/linguastack/internal/config"
 	"github.com/vnovels/linguastack/internal/db/models"
 	"github.com/vnovels/linguastack/internal/importers"
+	"github.com/vnovels/linguastack/internal/metrics"
 	"github.com/vnovels/linguastack/internal/providers"
 	"github.com/vnovels/linguastack/internal/queue"
 	"github.com/vnovels/linguastack/internal/testdb"
@@ -576,4 +577,31 @@ func TestWorkerWithoutBindingEnqueuesNothing(t *testing.T) {
 	project := e.projectFromMarkdown("# One\n\nA.")
 	e.runUntilIdle(e.worker("w"))
 	require.Empty(t, e.notifications(project))
+}
+
+func TestWorkerReportsBatchMetrics(t *testing.T) {
+	e := newWorkerEnv(t)
+	e.projectFromMarkdown(paragraphs(3)) // 4 сегмента — 2 батча
+	reg := metrics.NewRegistry()
+	w := e.worker("w")
+	w.Metrics = metrics.NewWorker(reg)
+	e.runUntilIdle(w)
+
+	families, err := reg.Gather()
+	require.NoError(t, err)
+	values := map[string]float64{}
+	for _, f := range families {
+		for _, m := range f.GetMetric() {
+			key := f.GetName()
+			for _, l := range m.GetLabel() {
+				key += "/" + l.GetValue()
+			}
+			if c := m.GetCounter(); c != nil {
+				values[key] = c.GetValue()
+			}
+		}
+	}
+	require.InDelta(t, 2, values["linguastack_worker_batches_total/ok"], 0)
+	require.InDelta(t, 4, values["linguastack_worker_segments_total/translated"], 0)
+	require.InDelta(t, 2, values["linguastack_worker_provider_calls_total"], 0)
 }

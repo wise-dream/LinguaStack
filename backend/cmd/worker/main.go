@@ -8,12 +8,16 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"log/slog"
+	"net"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -21,6 +25,7 @@ import (
 	"github.com/vnovels/linguastack/internal/db"
 	"github.com/vnovels/linguastack/internal/exports"
 	"github.com/vnovels/linguastack/internal/logging"
+	"github.com/vnovels/linguastack/internal/metrics"
 	"github.com/vnovels/linguastack/internal/providers"
 	"github.com/vnovels/linguastack/internal/queue"
 	"github.com/vnovels/linguastack/internal/security"
@@ -76,6 +81,11 @@ func run() error {
 	go func() { exportsDone <- runner.Run(ctx) }()
 
 	worker := queue.NewWorker(workerID(), gdb, resolver, cfg)
+	_, stopMetrics, err := serveMetrics(ctx, cfg, worker)
+	if err != nil {
+		return err
+	}
+	defer stopMetrics()
 	slog.Info("worker запущен", "max_tasks_per_user", cfg.MaxTasksPerUser, "lease", cfg.TaskLease,
 		"export_timeout", cfg.ExportTimeout)
 	err = worker.Run(ctx)
@@ -84,6 +94,33 @@ func run() error {
 	}
 	slog.Info("worker остановлен")
 	return err
+}
+
+// serveMetrics отдаёт счётчики worker-а на LINGUASTACK_WORKER_METRICS_ADDR
+// (дополнение §18) с тем же токеном, что /metrics у api. Адрес занят —
+// ошибка запуска, а не молча пропавшие метрики.
+func serveMetrics(ctx context.Context, cfg config.Settings, worker *queue.Worker) (string, func(), error) {
+	if cfg.WorkerMetricsAddr == "" {
+		return "", func() {}, nil
+	}
+	if cfg.MetricsToken == "" {
+		slog.Warn("LINGUASTACK_WORKER_METRICS_ADDR задан без LINGUASTACK_METRICS_TOKEN — метрики worker-а выключены")
+		return "", func() {}, nil
+	}
+	ln, err := (&net.ListenConfig{}).Listen(ctx, "tcp", cfg.WorkerMetricsAddr)
+	if err != nil {
+		return "", nil, fmt.Errorf("адрес метрик worker-а: %w", err)
+	}
+	reg := metrics.NewRegistry()
+	worker.Metrics = metrics.NewWorker(reg)
+	srv := &http.Server{Handler: metrics.Handler(reg, cfg.MetricsToken), ReadHeaderTimeout: 10 * time.Second}
+	go func() {
+		if err := srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			slog.Error("сервер метрик worker-а остановлен", "error", err)
+		}
+	}()
+	slog.Info("метрики worker-а", "addr", ln.Addr().String())
+	return ln.Addr().String(), func() { _ = srv.Close() }, nil
 }
 
 // workerID — уникальное имя для аренд: хост, процесс и случайный хвост

@@ -13,6 +13,7 @@ import (
 
 	"github.com/vnovels/linguastack/internal/config"
 	"github.com/vnovels/linguastack/internal/db/models"
+	"github.com/vnovels/linguastack/internal/metrics"
 	"github.com/vnovels/linguastack/internal/notify"
 	"github.com/vnovels/linguastack/internal/providers"
 	"github.com/vnovels/linguastack/internal/translation"
@@ -41,6 +42,8 @@ type Worker struct {
 	RetryBackoff func(attempt int) time.Duration
 	// AfterBatch вызывается после записи каждого батча (для тестов).
 	AfterBatch func(project uuid.UUID)
+	// Metrics — счётчики батчей; nil — без метрик.
+	Metrics *metrics.Worker
 }
 
 var errStopping = errors.New("worker останавливается")
@@ -255,8 +258,10 @@ func (w *Worker) process(stop, work, calls context.Context, task *models.Transla
 			return "", err
 		}
 		svc := translation.NewService(provider, project.ModelID, translation.ServiceOptions{})
+		started := time.Now()
 		outcome, terr := svc.TranslateBatch(calls, batch, system, providers.Determinism(project.Determinism),
 			project.SourceLang, project.TargetLang)
+		w.Metrics.Batch(batchResult(outcome, terr, time.Since(started)))
 		// Результаты пишутся и при сбое: ответы модели уже оплачены
 		// (Review Focus №5).
 		if err := w.persist(work, project.ID, outcome); err != nil {
@@ -281,6 +286,18 @@ func (w *Worker) process(stop, work, calls context.Context, task *models.Transla
 		}
 	}
 	return models.TaskCompleted, w.finalize(work, project.ID)
+}
+
+func batchResult(o translation.BatchOutcome, err error, d time.Duration) metrics.BatchResult {
+	r := metrics.BatchResult{Calls: o.ProviderCalls, Err: err != nil, Duration: d}
+	for _, res := range o.Results {
+		if res.Translated != nil {
+			r.Translated++
+		} else {
+			r.Failed++
+		}
+	}
+	return r
 }
 
 // materialize создаёт строки сегментов. Идемпотентно: существующие

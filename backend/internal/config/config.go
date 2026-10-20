@@ -91,6 +91,13 @@ type Settings struct {
 	ExportTimeout           time.Duration `env:"LINGUASTACK_EXPORT_TIMEOUT" envDefault:"5m"`
 	MaxActiveExportsPerUser int           `env:"LINGUASTACK_MAX_ACTIVE_EXPORTS_PER_USER" envDefault:"3"`
 
+	// --- эксплуатация, дополнение §18 ---
+	// Токен доступа к /metrics (Authorization: Bearer). Пусто — метрик нет.
+	MetricsToken string `env:"LINGUASTACK_METRICS_TOKEN"`
+	// Адрес, где worker отдаёт свои метрики (например «:9101»); пусто —
+	// не отдаёт. Доступ — тем же токеном.
+	WorkerMetricsAddr string `env:"LINGUASTACK_WORKER_METRICS_ADDR"`
+
 	// --- Telegram, дополнение §17 ---
 	// Токен — секрет развёртывания (ТЗ §9). Без токена и имени бот
 	// выключен, а api отвечает enabled: false.

@@ -11,7 +11,10 @@ import (
 
 type contextKey int
 
-const userKey contextKey = iota
+const (
+	userKey contextKey = iota
+	requestInfoKey
+)
 
 // UserFromContext возвращает пользователя, установленного requireUser.
 func UserFromContext(ctx context.Context) *models.User {
@@ -35,6 +38,9 @@ func (s *server) requireUser(next http.HandlerFunc) http.HandlerFunc {
 		if err != nil {
 			internalError(w, r, err)
 			return
+		}
+		if info := requestInfoFrom(r.Context()); info != nil {
+			info.user = user.ID.String()
 		}
 		next(w, r.WithContext(context.WithValue(r.Context(), userKey, user)))
 	}

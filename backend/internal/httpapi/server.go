@@ -12,6 +12,7 @@ import (
 	"github.com/vnovels/linguastack/internal/config"
 	"github.com/vnovels/linguastack/internal/db/models"
 	"github.com/vnovels/linguastack/internal/importers"
+	"github.com/vnovels/linguastack/internal/metrics"
 	"github.com/vnovels/linguastack/internal/providers"
 	"github.com/vnovels/linguastack/internal/security"
 	"github.com/vnovels/linguastack/internal/storage"
@@ -31,6 +32,8 @@ type Deps struct {
 	BuildProvider func(cfg models.ProviderConfig, apiKey string) (providers.Provider, error)
 	// SSEInterval — частота опроса прогресса для потока событий.
 	SSEInterval time.Duration
+	// Metrics — реестр метрик api; nil — создаётся по DB.
+	Metrics *metrics.API
 	// Stopping отменяется в начале остановки сервера: потоки событий по
 	// нему закрываются. http.Server.Shutdown контексты запросов не
 	// отменяет и ждёт их завершения, а поток сам не кончается. nil —
@@ -92,9 +95,14 @@ func NewServer(d Deps) http.Handler {
 	if s.Stopping == nil {
 		s.Stopping = context.Background()
 	}
+	if s.Metrics == nil {
+		s.Metrics = metrics.NewAPI(s.DB)
+	}
 	mux := buildRoutes(s).mux
+	// Вне Routes(): у метрик свой токен, а не сессия пользователя.
+	mux.Handle("GET /metrics", s.Metrics.Handler(s.Cfg.MetricsToken))
 	mountWeb(mux, s.Cfg.WebRoot)
-	return mux
+	return s.observe(mux)
 }
 
 // Routes — все маршруты сервера. По ним матрица изоляции в тестах

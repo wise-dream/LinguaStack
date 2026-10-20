@@ -30,7 +30,8 @@ func writeError(w http.ResponseWriter, status int, message string) {
 // internalError логирует причину и отдаёт клиенту обезличенную ошибку:
 // текст внутренних ошибок может содержать SQL, пути и прочие детали.
 func internalError(w http.ResponseWriter, r *http.Request, err error) {
-	slog.Error("внутренняя ошибка", "method", r.Method, "path", r.URL.Path, "error", err)
+	slog.Error("внутренняя ошибка", "method", r.Method, "path", r.URL.Path,
+		"request_id", requestID(r.Context()), "error", err)
 	writeError(w, http.StatusInternalServerError, "Внутренняя ошибка сервера")
 }
 
