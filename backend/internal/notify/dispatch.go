@@ -43,6 +43,11 @@ type Dispatcher struct {
 	// Lease — на сколько уведомление занято доставкой: упавший процесс не
 	// держит его дольше.
 	Lease time.Duration
+	// ChapterInterval — не чаще одного сообщения о главах одного перевода:
+	// быстрая модель заканчивает главы каждые несколько секунд, и книга из
+	// 200 глав дала бы 200 сообщений. Главы за интервал копятся и приходят
+	// одним сообщением; «готово» и ошибки интервала не ждут.
+	ChapterInterval time.Duration
 }
 
 // NewDispatcher создаёт доставщика.
@@ -51,7 +56,7 @@ func NewDispatcher(db *gorm.DB, sender Sender, cfg config.Settings) *Dispatcher 
 		db: db, sender: sender, base: strings.TrimRight(cfg.PublicURL, "/"),
 		PollInterval: 2 * time.Second, SendGap: 40 * time.Millisecond, BatchSize: 100, MaxAttempts: 5,
 		Backoff: func(attempts int) time.Duration { return 30 * time.Second << max(attempts-1, 0) },
-		Lease:   5 * time.Minute,
+		Lease:   5 * time.Minute, ChapterInterval: 5 * time.Minute,
 	}
 }
 
@@ -179,10 +184,26 @@ func (d *Dispatcher) project(ctx context.Context, bnd *models.TelegramBinding, p
 	}
 	var messages []message
 	if len(g.completed) > 0 {
-		// Перевод готов — отдельные главы уже не новость.
+		// Перевод готов — отдельные главы уже не новость, в том числе
+		// отложенные интервалом.
 		d.finish(ctx, g.chapters, models.NotificationSkipped, "заменено уведомлением о завершении")
+		if err := d.db.WithContext(ctx).Model(&models.TelegramNotification{}).
+			Where("project_id = ? AND kind = ? AND status = ?", projectID, models.NotifyChapter, models.NotificationPending).
+			Updates(map[string]any{"status": models.NotificationSkipped, "last_error": "заменено уведомлением о завершении"}).Error; err != nil {
+			return 0, false, err
+		}
 		messages = append(messages, message{completedText(info), g.completed, bnd.NotifyCompleted})
-	} else if len(g.chapters) > 0 {
+	} else if len(g.chapters) > 0 && bnd.NotifyChapters {
+		wait, err := d.chapterWait(ctx, projectID)
+		if err != nil {
+			return 0, false, err
+		}
+		if wait > 0 {
+			d.later(ctx, g.chapters, wait, false, errChapterInterval)
+			g.chapters = nil
+		}
+	}
+	if len(g.completed) == 0 && len(g.chapters) > 0 {
 		indexes := make([]int, 0, len(g.chapters))
 		for _, n := range g.chapters {
 			if n.ChapterIndex != nil {
@@ -226,6 +247,22 @@ func (d *Dispatcher) project(ctx context.Context, bnd *models.TelegramBinding, p
 	return sent, false, nil
 }
 
+var errChapterInterval = errors.New("ждёт интервала между сообщениями о главах")
+
+// chapterWait — сколько ещё ждать до следующего сообщения о главах
+// перевода; время — по часам базы.
+func (d *Dispatcher) chapterWait(ctx context.Context, projectID uuid.UUID) (time.Duration, error) {
+	var seconds *float64
+	err := d.db.WithContext(ctx).Raw(`
+SELECT extract(epoch FROM max(sent_at) + make_interval(secs => ?) - clock_timestamp())
+  FROM telegram_notifications WHERE project_id = ? AND kind = 'chapter' AND status = 'sent'`,
+		d.ChapterInterval.Seconds(), projectID).Scan(&seconds).Error
+	if err != nil || seconds == nil || *seconds <= 0 {
+		return 0, err
+	}
+	return time.Duration(*seconds * float64(time.Second)), nil
+}
+
 func ids(rows []models.TelegramNotification) []uuid.UUID {
 	out := make([]uuid.UUID, len(rows))
 	for i, r := range rows {
@@ -240,7 +277,7 @@ func (d *Dispatcher) finish(ctx context.Context, rows []models.TelegramNotificat
 	}
 	updates := map[string]any{"status": status, "last_error": reason}
 	if status == models.NotificationSent {
-		updates["sent_at"] = time.Now().UTC()
+		updates["sent_at"] = gorm.Expr("clock_timestamp()") // по часам базы, как интервал глав
 	}
 	if err := d.db.WithContext(ctx).Model(&models.TelegramNotification{}).Where("id IN ?", ids(rows)).Updates(updates).Error; err != nil {
 		slog.Error("уведомления: статус не записан", "error", err)

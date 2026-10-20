@@ -118,6 +118,7 @@ func TestCompletedMessage(t *testing.T) {
 
 func TestChaptersCoalesced(t *testing.T) {
 	e := newDispatchEnv(t, "https://ls.example")
+	e.d.ChapterInterval = 0 // здесь — только текст склейки
 	for i := range 5 {
 		e.add(t, models.NotifyChapter, ptr(i))
 	}
@@ -227,4 +228,37 @@ func TestNoPublicURLNoLinks(t *testing.T) {
 	e.add(t, models.NotifyChapter, ptr(0))
 	e.run(t)
 	require.False(t, strings.Contains(e.sender.sent[0].Text, "href"))
+}
+
+func TestChapterMessagesThrottledPerProject(t *testing.T) {
+	// Review Focus №4: быстрая модель заканчивает главы каждые несколько
+	// секунд — сообщение о главах не чаще раза в ChapterInterval.
+	e := newDispatchEnv(t, "")
+	e.d.ChapterInterval = 300 * time.Millisecond
+	e.add(t, models.NotifyChapter, ptr(0))
+	require.Equal(t, 1, e.run(t))
+
+	second := e.add(t, models.NotifyChapter, ptr(1))
+	e.add(t, models.NotifyChapter, ptr(2))
+	require.Zero(t, e.run(t), "рано: прошлое сообщение о главах только что")
+	got := e.reload(t, second)
+	require.Equal(t, models.NotificationPending, got.Status)
+	require.Zero(t, got.Attempts, "ожидание — не неудача")
+
+	time.Sleep(350 * time.Millisecond)
+	require.Equal(t, 1, e.run(t))
+	require.Contains(t, e.sender.sent[1].Text, "готовы главы «Глава 2», «Глава 3»")
+}
+
+func TestCompletedCancelsDeferredChapters(t *testing.T) {
+	e := newDispatchEnv(t, "")
+	e.d.ChapterInterval = time.Hour
+	e.add(t, models.NotifyChapter, ptr(0))
+	e.run(t)
+	deferred := e.add(t, models.NotifyChapter, ptr(1))
+	e.run(t) // отложено на час
+	require.NoError(t, e.tx.Model(e.project).Update("status", models.ProjectCompleted).Error)
+	e.add(t, models.NotifyCompleted, nil)
+	require.Equal(t, 1, e.run(t), "«готово» не ждёт интервала глав")
+	require.Equal(t, models.NotificationSkipped, e.reload(t, deferred).Status, "отложенные главы после «готово» не досылаются")
 }
