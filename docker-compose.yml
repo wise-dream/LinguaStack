@@ -9,7 +9,9 @@ services:
       POSTGRES_PASSWORD: ${LINGUASTACK_DB_PASSWORD:-linguastack}
       POSTGRES_DB: linguastack
     ports:
-      - "127.0.0.1:5434:5432"
+      # Порт на хосте — для процессов разработки; LINGUASTACK_DB_PORT меняет
+      # его, чтобы рядом поднять второй стенд (scripts/backup-drill.sh).
+      - "127.0.0.1:${LINGUASTACK_DB_PORT:-5434}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -23,7 +25,8 @@ services:
 
   api:
     build: .
-    image: linguastack:local
+    # Образ из реестра: LINGUASTACK_IMAGE=ghcr.io/…:<тег> docker compose pull.
+    image: ${LINGUASTACK_IMAGE:-linguastack:local}
     # Все настройки из .env (ключ шифрования, лимиты, тайм-ауты — см.
     # .env.example) передаются в контейнер; без .env действуют значения по
     # умолчанию, cookie — только по HTTPS.
@@ -56,7 +59,7 @@ services:
     restart: unless-stopped
 
   worker:
-    image: linguastack:local
+    image: ${LINGUASTACK_IMAGE:-linguastack:local}
     entrypoint: ["/app/worker"]
     env_file: *app-env-file
     environment: *app-env
@@ -82,7 +85,7 @@ services:
   # обновления только одному опрашивающему. Без
   # LINGUASTACK_TELEGRAM_BOT_TOKEN в .env он выключен и просто ждёт.
   bot:
-    image: linguastack:local
+    image: ${LINGUASTACK_IMAGE:-linguastack:local}
     entrypoint: ["/app/bot"]
     env_file: *app-env-file
     environment: *app-env

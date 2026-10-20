@@ -1,0 +1,19 @@
+# Дополнение к docker-compose.yml для scripts/backup-drill.sh: отдельный
+# стенд проверки восстановления. Тестовый провайдер fake вместо моделей,
+# cookie по http, без лимита регистраций, без Telegram и почты — даже если
+# в .env рядом настроены настоящие.
+x-drill-env: &drill-env
+  LINGUASTACK_SESSION_COOKIE_SECURE: "false"
+  LINGUASTACK_E2E_FAKE_PROVIDER: "true"
+  LINGUASTACK_E2E_FAKE_DELAY: "0s"
+  LINGUASTACK_REGISTER_PER_HOUR: "0"
+  LINGUASTACK_TELEGRAM_BOT_TOKEN: ""
+  LINGUASTACK_SMTP_HOST: ""
+
+services:
+  api:
+    environment: *drill-env
+  worker:
+    environment: *drill-env
+  bot:
+    environment: *drill-env

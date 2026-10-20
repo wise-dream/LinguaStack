@@ -205,28 +205,32 @@ docker compose ps          # api и db — healthy
 
 ### Резервное копирование
 
-Состояние — это три вещи: **БД**, **том `storage`** (оригиналы книг и
-ресурсы) и **`LINGUASTACK_SECRET_KEY`** (без него сохранённые ключи API
-провайдеров не расшифровать — храните его отдельно от бэкапов).
+Состояние — это три вещи: **БД**, **том `storage`** (оригиналы книг,
+ресурсы, файлы экспорта) и **`LINGUASTACK_SECRET_KEY`** (без него
+сохранённые ключи API провайдеров не расшифровать — храните его отдельно от
+бэкапов).
 
 ```bash
-mkdir -p backup
-# БД — в формате pg_dump custom (сжат, восстанавливается выборочно)
-docker compose exec -T db pg_dump -U linguastack -Fc linguastack > backup/db-$(date +%F).dump
-# Файлы
-docker run --rm -v linguastack_storage:/data:ro -v "$PWD/backup":/backup \
-  alpine tar czf /backup/storage-$(date +%F).tgz -C /data .
+scripts/backup.sh /srv/backups          # db.dump + storage.tar.gz, последние 14 (KEEP)
+scripts/restore.sh /srv/backups/linguastack-20261020T030000Z
 ```
 
-Восстановление (имя тома — `<каталог проекта>_storage`, см. `docker volume ls`):
+`backup.sh` работает на запущенном стеке и проверяет, что дамп читается
+(`pg_restore --list`). Ежедневно — cron:
+`0 3 * * * cd /srv/linguastack && scripts/backup.sh /srv/backups`; копии
+стоит увозить с сервера. `restore.sh` спрашивает подтверждение (`--yes` —
+без вопроса), останавливает api, worker и bot, пересоздаёт базу из дампа,
+заменяет содержимое тома и запускает стек.
 
-```bash
-docker compose stop api worker
-docker compose exec -T db pg_restore -U linguastack -d linguastack --clean --if-exists < backup/db-ДАТА.dump
-docker run --rm -v linguastack_storage:/data -v "$PWD/backup":/backup \
-  alpine sh -c 'rm -rf /data/* && tar xzf /backup/storage-ДАТА.tgz -C /data'
-docker compose start api worker
-```
+`scripts/backup-drill.sh` — «учебная тревога» (задание `backup-drill` в
+CI): отдельный проект compose `lsdrill` на портах 55434/58000 наполняется
+через API, бэкапится, тома стираются, копия восстанавливается и
+проверяется — вход, книга с картинкой, позиция чтения, перевод и экспорт.
+Рабочий стек и чужие контейнеры она не трогает и убирает за собой.
+
+После перезагрузки сервера стек поднимается сам: у сервисов
+`restart: unless-stopped`, служба Docker должна быть включена
+(`systemctl enable docker`).
 
 ## HTTP API
 

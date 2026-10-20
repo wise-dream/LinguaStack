@@ -127,3 +127,12 @@ jobs:
           context: .
           push: false
           tags: linguastack:ci
+
+  backup-drill:
+    # Учебная тревога (дополнение §18): отдельный стенд compose — бэкап,
+    # стирание томов, восстановление, проверка книги, перевода и экспорта.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Бэкап и восстановление
+        run: scripts/backup-drill.sh
