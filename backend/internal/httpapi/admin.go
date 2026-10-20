@@ -18,6 +18,7 @@ import (
 	"github.com/vnovels/linguastack/internal/metrics"
 	"github.com/vnovels/linguastack/internal/providers"
 	"github.com/vnovels/linguastack/internal/queue"
+	"github.com/vnovels/linguastack/internal/security"
 )
 
 // Админ-панель (ТЗ §2.1, §8.1 №12; дополнение §18). Ответы — метаданные и
@@ -294,8 +295,8 @@ func (s *server) adminPatchUser(w http.ResponseWriter, r *http.Request) {
 // книги (Review Focus №3). Включение обратно переводы не возобновляет —
 // это решает сам пользователь.
 func deactivate(ctx context.Context, tx *gorm.DB, userID uuid.UUID) error {
-	if err := tx.Where("user_id = ?", userID).Delete(&models.UserSession{}).Error; err != nil {
-		return fmt.Errorf("отзыв сессий: %w", err)
+	if err := security.RevokeUserSessions(ctx, tx, userID, ""); err != nil {
+		return err
 	}
 	var active []uuid.UUID
 	err := tx.Model(&models.TranslationProject{}).

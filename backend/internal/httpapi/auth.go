@@ -45,6 +45,13 @@ func normalizeEmail(raw string) (string, bool) {
 	return email, true
 }
 
+const lengthRuleMessage = "Пароль должен содержать от 12 до 256 символов"
+
+func passwordLengthOK(p string) bool {
+	n := utf8.RuneCountInString(p)
+	return n >= minPasswordLength && n <= maxPasswordLength
+}
+
 var (
 	dummyHashOnce sync.Once
 	dummyHash     string
@@ -70,8 +77,8 @@ func (s *server) register(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnprocessableEntity, "Некорректный адрес электронной почты")
 		return
 	}
-	if n := utf8.RuneCountInString(in.Password); n < minPasswordLength || n > maxPasswordLength {
-		writeError(w, http.StatusUnprocessableEntity, "Пароль должен содержать от 12 до 256 символов")
+	if !passwordLengthOK(in.Password) {
+		writeError(w, http.StatusUnprocessableEntity, lengthRuleMessage)
 		return
 	}
 	hash, err := security.HashPassword(in.Password)

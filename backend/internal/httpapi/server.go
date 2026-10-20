@@ -124,6 +124,8 @@ func buildRoutes(s *server) *router {
 	rt.public("POST /api/auth/login", s.login)
 	rt.public("POST /api/auth/logout", s.logout)
 	rt.protected("GET /api/me", s.me)
+	rt.protected("PATCH /api/me", s.changeEmail)
+	rt.protected("POST /api/me/password", s.changePassword)
 
 	rt.protected("POST /api/books", limited(s.limits.uploads, byUser, tooManyUploads, s.uploadBook))
 	rt.protected("GET /api/books", s.listBooks)

@@ -80,3 +80,17 @@ func RevokeSession(ctx context.Context, db *gorm.DB, token string) error {
 	}
 	return nil
 }
+
+// RevokeUserSessions гасит все сессии пользователя, кроме сессии с токеном
+// except (пусто — все): смена пароля выкидывает остальные устройства, а
+// сброс и отключение аккаунта — все.
+func RevokeUserSessions(ctx context.Context, db *gorm.DB, userID uuid.UUID, except string) error {
+	q := db.WithContext(ctx).Where("user_id = ?", userID)
+	if except != "" {
+		q = q.Where("token_hash <> ?", HashToken(except))
+	}
+	if err := q.Delete(&models.UserSession{}).Error; err != nil {
+		return fmt.Errorf("отзыв сессий пользователя: %w", err)
+	}
+	return nil
+}
