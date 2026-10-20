@@ -45,6 +45,23 @@ func normalizeEmail(raw string) (string, bool) {
 	return email, true
 }
 
+// registrationAllowed — адрес есть в списке приглашённых или его домен
+// указан как «@домен»; пустой список — регистрация открыта. email уже
+// нормализован (нижний регистр).
+func registrationAllowed(allowlist, email string) bool {
+	if strings.TrimSpace(allowlist) == "" {
+		return true
+	}
+	domain := email[strings.LastIndexByte(email, '@'):]
+	for entry := range strings.SplitSeq(allowlist, ",") {
+		entry = strings.ToLower(strings.TrimSpace(entry))
+		if entry != "" && (entry == email || entry == domain) {
+			return true
+		}
+	}
+	return false
+}
+
 const lengthRuleMessage = "Пароль должен содержать от 12 до 256 символов"
 
 func passwordLengthOK(p string) bool {
@@ -79,6 +96,10 @@ func (s *server) register(w http.ResponseWriter, r *http.Request) {
 	}
 	if !passwordLengthOK(in.Password) {
 		writeError(w, http.StatusUnprocessableEntity, lengthRuleMessage)
+		return
+	}
+	if !registrationAllowed(s.Cfg.RegistrationAllowlist, email) {
+		writeError(w, http.StatusForbidden, "Регистрация по приглашению. Чтобы получить доступ, напишите администратору.")
 		return
 	}
 	hash, err := security.HashPassword(in.Password)

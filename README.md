@@ -236,6 +236,9 @@ docker compose pull && docker compose up -d
 * **Почта** для ссылок сброса пароля — `LINGUASTACK_SMTP_*` (STARTTLS
   обязателен по умолчанию) и `LINGUASTACK_PUBLIC_URL`. Без почты ссылка
   уходит в привязанный Telegram или её выдаёт администратор.
+* **Закрытая регистрация** — `LINGUASTACK_REGISTRATION_ALLOWLIST`: адреса
+  и домены (`anna@example.com, @team.example`), которым можно
+  зарегистрироваться; пусто — регистрация открыта.
 * **Квоты по умолчанию** — `LINGUASTACK_STORAGE_QUOTA_BYTES` (2 ГиБ
   оригиналов книг), `LINGUASTACK_MAX_PROJECTS_PER_USER`,
   `LINGUASTACK_MAX_TASKS_PER_USER`; свою квоту пользователю задаёт

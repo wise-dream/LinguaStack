@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/vnovels/linguastack/internal/db/models"
+	"github.com/vnovels/linguastack/internal/httpapi"
 	"github.com/vnovels/linguastack/internal/security"
 )
 
@@ -197,4 +198,19 @@ func TestDeactivatedUserCannotAuthenticate(t *testing.T) {
 	require.Equal(t, http.StatusUnauthorized, c.do(http.MethodGet, "/api/me", nil).Status,
 		"ранее выданная сессия должна перестать работать")
 	require.Equal(t, http.StatusUnauthorized, c.login("d@example.com", testPassword).Status)
+}
+
+func TestRegistrationAllowlist(t *testing.T) {
+	// Бета по приглашению: регистрируются только адреса и домены из списка.
+	env := newTestEnvWith(t, func(d *httpapi.Deps) {
+		d.Cfg.RegistrationAllowlist = " Boss@Example.com, @team.example "
+	})
+	c := env.client(t)
+	require.Equal(t, http.StatusCreated, c.register("boss@example.com").Status)
+	require.Equal(t, http.StatusCreated, c.register("Anna@Team.Example").Status)
+	r := c.register("stranger@example.com")
+	require.Equal(t, http.StatusForbidden, r.Status)
+	require.Contains(t, string(r.Body), "по приглашению")
+	require.Equal(t, http.StatusForbidden, c.register("x@evilteam.example").Status, "домен — целиком, не суффикс")
+	require.Equal(t, http.StatusUnauthorized, c.login("stranger@example.com", testPassword).Status, "аккаунт не создан")
 }

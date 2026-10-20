@@ -81,6 +81,9 @@ type Settings struct {
 	UploadsPerHour  int     `env:"LINGUASTACK_UPLOADS_PER_HOUR" envDefault:"30"`
 	RegisterPerHour int     `env:"LINGUASTACK_REGISTER_PER_HOUR" envDefault:"5"`
 	ResetPerHour    int     `env:"LINGUASTACK_RESET_PER_HOUR" envDefault:"5"`
+	// Регистрация по приглашению: адреса и домены («@team.example») через
+	// запятую. Пусто — регистрация открыта.
+	RegistrationAllowlist string `env:"LINGUASTACK_REGISTRATION_ALLOWLIST"`
 	// Прокси, которым верится X-Forwarded-For (CIDR или адрес через
 	// запятую). Пусто — IP клиента берётся из соединения.
 	TrustedProxies CIDRList `env:"LINGUASTACK_TRUSTED_PROXIES"`
