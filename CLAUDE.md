@@ -54,8 +54,12 @@ npm run e2e      # нужен go в PATH (см. выше) и БД из docker co
 SCREENSHOTS=1 npm run e2e   # снимки в test-results/screens/ для визуальной вычитки
 ```
 
-* Vue 3 + TypeScript, без UI-библиотек; цвета, шрифты и отступы — только
-  токены из `src/styles/tokens.css`.
+* Vue 3 + TypeScript, UI-кит Naive UI (MIT; PrimeVue 5 стал платным):
+  кнопки — `NButton` и `LinkButton`, текстовые поля — `TextField`; списки
+  выбора и флажки — родные, оформлены в тон киту (на телефоне родной список
+  удобнее). Цвета, шрифты и отступы — токены `src/styles/tokens.css`; тема
+  Naive — `src/styles/theme.ts`, тест сверяет её с токенами. Компонент Naive
+  без импорта не замечают ни `vue-tsc`, ни линтер — только тесты.
 * Текст книги и перевода попадает в `v-html` только через `renderInline`
   (`src/lib/inline.ts` — сначала экранирует); правило `vue/no-v-html`
   включено, исключения — с комментарием-обоснованием.
