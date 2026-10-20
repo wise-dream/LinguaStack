@@ -152,6 +152,17 @@ docker compose up -d --build
 docker compose ps          # api и db — healthy
 ```
 
+Без сборки на сервере — готовый образ из GitHub Container Registry
+(публикуется по тегу `v*`, workflow `release.yml`):
+
+```bash
+echo 'LINGUASTACK_IMAGE=ghcr.io/wise-dream/linguastack:1.0.0' >> .env
+docker compose pull && docker compose up -d
+```
+
+Обновление — сменить тег в `.env` и повторить `pull` и `up -d`; миграции
+накатываются при старте.
+
 * api слушает **127.0.0.1:8000** (`LINGUASTACK_PUBLISH_PORT`). Наружу — только
   через обратный прокси с TLS (Caddy, nginx): cookie сессии по умолчанию
   передаётся лишь по HTTPS. Прокси должен не буферизовать
