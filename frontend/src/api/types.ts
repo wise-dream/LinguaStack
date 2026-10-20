@@ -277,3 +277,67 @@ export interface TelegramLink {
 }
 
 export type TelegramSettings = Partial<Pick<TelegramState, 'notify_chapters' | 'notify_completed' | 'notify_errors'>>
+
+/** Счётчики данных и очереди (админ-панель, дополнение §18). */
+export interface AdminSnapshot {
+  users: number
+  books: number
+  projects: Record<string, number>
+  tasks: Record<string, number>
+  exports: Record<string, number>
+  notifications: Record<string, number>
+  cost_usd: number
+  input_tokens: number
+  output_tokens: number
+}
+
+export interface ProviderStatus {
+  id: string
+  base_url: string
+  available: boolean
+  detail?: string
+  models: string[]
+}
+
+export interface AdminOverview {
+  metrics: AdminSnapshot
+  providers: ProviderStatus[]
+}
+
+/** Пользователь в админ-панели: метаданные и счётчики, без содержимого. */
+export interface AdminUser {
+  id: string
+  email: string
+  role: 'user' | 'admin'
+  is_active: boolean
+  created_at: string
+  last_seen_at: string | null
+  books: number
+  translations: number
+  storage_bytes: number
+  /** null — значение по умолчанию из настроек сервера. */
+  max_active_projects: number | null
+  max_concurrent_tasks: number | null
+  /** 0 — без предела. */
+  storage_quota_bytes: number | null
+}
+
+export interface QuotaDefaults {
+  max_active_projects: number
+  max_concurrent_tasks: number
+  storage_quota_bytes: number
+}
+
+export interface AdminUsers {
+  users: AdminUser[]
+  defaults: QuotaDefaults
+}
+
+export type AdminUserPatch = Partial<
+  Pick<AdminUser, 'is_active' | 'role' | 'max_active_projects' | 'max_concurrent_tasks' | 'storage_quota_bytes'>
+>
+
+export interface ResetLink {
+  url: string
+  expires_at: string
+}

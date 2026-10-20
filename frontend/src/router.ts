@@ -1,6 +1,8 @@
 import { createRouter, createWebHistory, type RouterHistory } from 'vue-router'
 
+import AdminPage from './pages/AdminPage.vue'
 import BookPage from './pages/BookPage.vue'
+import ForgotPasswordPage from './pages/ForgotPasswordPage.vue'
 import ImportPage from './pages/ImportPage.vue'
 import LibraryPage from './pages/LibraryPage.vue'
 import LoginPage from './pages/LoginPage.vue'
@@ -8,13 +10,14 @@ import PendingPage from './pages/PendingPage.vue'
 import ProvidersPage from './pages/ProvidersPage.vue'
 import ReaderPage from './pages/ReaderPage.vue'
 import RegisterPage from './pages/RegisterPage.vue'
+import ResetPasswordPage from './pages/ResetPasswordPage.vue'
 import SettingsPage from './pages/SettingsPage.vue'
 import TranslationDetailPage from './pages/TranslationDetailPage.vue'
 import TranslationSetupPage from './pages/TranslationSetupPage.vue'
 import TranslationsPage from './pages/TranslationsPage.vue'
 
 /** Раздел навигации, к которому относится страница. */
-export type Section = 'library' | 'translations' | 'providers' | 'settings'
+export type Section = 'library' | 'translations' | 'providers' | 'settings' | 'admin'
 
 declare module 'vue-router' {
   interface RouteMeta {
@@ -31,6 +34,8 @@ export function createAppRouter(history: RouterHistory = createWebHistory()) {
     routes: [
       { path: '/login', component: LoginPage, meta: { title: 'Вход', public: true } },
       { path: '/register', component: RegisterPage, meta: { title: 'Регистрация', public: true } },
+      { path: '/forgot-password', component: ForgotPasswordPage, meta: { title: 'Восстановление доступа', public: true } },
+      { path: '/reset-password', component: ResetPasswordPage, meta: { title: 'Новый пароль', public: true } },
       { path: '/', component: LibraryPage, meta: { title: 'Библиотека', section: 'library' } },
       { path: '/import', component: ImportPage, meta: { title: 'Загрузка книги', section: 'library' } },
       { path: '/books/:id', component: BookPage, meta: { title: 'Книга', section: 'library' } },
@@ -40,6 +45,7 @@ export function createAppRouter(history: RouterHistory = createWebHistory()) {
       { path: '/read/:bookId', component: ReaderPage, meta: { title: 'Чтение', section: 'library' } },
       { path: '/settings', component: SettingsPage, meta: { title: 'Настройки', section: 'settings' } },
       { path: '/settings/providers', component: ProvidersPage, meta: { title: 'Модели', section: 'providers' } },
+      { path: '/admin', component: AdminPage, meta: { title: 'Администрирование', section: 'admin' } },
       { path: '/:pathMatch(.*)*', component: PendingPage, meta: { title: 'Страница не найдена' } },
     ],
   })

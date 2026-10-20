@@ -185,3 +185,60 @@ test('настройки Telegram', async ({ page }, info) => {
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)
   expect(overflow).toBeLessThanOrEqual(0)
 })
+
+test('смена пароля и «Забыли пароль?»', async ({ page }, info) => {
+  const email = `e2e-pw-${info.project.name}-${Date.now()}@example.com`
+  const next = 'brand new password 42'
+  await register(page, email)
+  await page.getByRole('link', { name: 'Настройки' }).click()
+
+  const form = page.locator('form.password-form')
+  await form.getByLabel('Текущий пароль').fill('not my password at all')
+  await form.getByLabel('Новый пароль').fill(next)
+  await form.getByRole('button', { name: 'Сменить пароль' }).click()
+  await expect(form.getByRole('alert')).toHaveText('Неверный текущий пароль')
+  await form.getByLabel('Текущий пароль').fill('correct horse battery staple')
+  await form.getByRole('button', { name: 'Сменить пароль' }).click()
+  await expect(form.getByRole('status')).toContainText('Пароль изменён')
+  await shot(page, 'settings-password')
+  const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)
+  expect(overflow).toBeLessThanOrEqual(0)
+
+  // Выход и вход: старый пароль больше не подходит, новый — да.
+  await page.getByRole('button', { name: 'Выйти' }).click()
+  await expect(page.getByRole('heading', { name: 'Вход' })).toBeVisible()
+  await page.getByLabel('Электронная почта').fill(email)
+  await page.getByLabel('Пароль').fill('correct horse battery staple')
+  await page.getByRole('button', { name: 'Войти' }).click()
+  await expect(page.getByRole('alert')).toHaveText('Неверный адрес или пароль')
+  await page.getByLabel('Пароль').fill(next)
+  await page.getByRole('button', { name: 'Войти' }).click()
+  await expect(page.getByRole('heading', { name: 'Загрузите первую книгу' })).toBeVisible()
+
+  // «Забыли пароль?» отвечает одинаково — есть аккаунт или нет.
+  await page.getByRole('button', { name: 'Выйти' }).click()
+  await page.getByRole('link', { name: 'Забыли пароль?' }).click()
+  await expect(page.getByRole('heading', { name: 'Восстановление доступа' })).toBeVisible()
+  await page.getByLabel('Электронная почта').fill(email)
+  await page.getByRole('button', { name: 'Отправить ссылку' }).click()
+  await expect(page.getByRole('status')).toContainText('Если такой аккаунт есть')
+  await shot(page, 'forgot-password')
+})
+
+test('администрирование', async ({ page }) => {
+  // Администратора заводит e2e/run-stack.sh командой api -set-role.
+  await page.goto('/login')
+  await page.getByLabel('Электронная почта').fill('admin@e2e.example')
+  await page.getByLabel('Пароль').fill('e2e admin password')
+  await page.getByRole('button', { name: 'Войти' }).click()
+  await page.getByRole('link', { name: 'Администрирование' }).click()
+  await expect(page.getByRole('heading', { name: 'Обзор' })).toBeVisible()
+  await expect(page.locator('section.overview')).toContainText('Ollama сервера')
+  const self = page.locator('tbody', { hasText: 'admin@e2e.example' })
+  await expect(self).toContainText('это вы')
+  await self.getByRole('button', { name: 'Квоты' }).click()
+  await expect(self.locator('form.quota-form')).toBeVisible()
+  await shot(page, 'admin')
+  const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)
+  expect(overflow).toBeLessThanOrEqual(0)
+})

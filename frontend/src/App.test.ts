@@ -9,11 +9,11 @@ import { SESSION, createSession } from './session'
 
 const user: User = { id: 'u1', email: 'reader@example.com', role: 'user', created_at: '2026-10-19T00:00:00Z' }
 
-async function mountAt(path: string, signedIn = true) {
+async function mountAt(path: string, signedIn = true, who: User = user) {
   const session = createSession({
     me: async () => {
       if (!signedIn) throw new Error('нет сессии')
-      return user
+      return who
     },
     login: async () => user,
     register: async () => user,
@@ -58,5 +58,14 @@ describe('оболочка приложения', () => {
     const wrapper = await mountAt('/books/123')
     const current = wrapper.findAll('nav a').filter((a) => a.attributes('aria-current') === 'page')
     expect(current.map((a) => a.text())).toEqual(['Библиотека'])
+  })
+})
+
+describe('администрирование', () => {
+  it('раздел виден только администратору', async () => {
+    const admin = await mountAt('/', true, { ...user, role: 'admin' })
+    expect(admin.findAll('nav a').map((a) => a.text())).toContain('Администрирование')
+    const plain = await mountAt('/')
+    expect(plain.findAll('nav a').map((a) => a.text())).not.toContain('Администрирование')
   })
 })

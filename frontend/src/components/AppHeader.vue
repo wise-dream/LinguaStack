@@ -1,16 +1,27 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import { useRoute } from 'vue-router'
 
 import type { Section } from '../router'
+import { useSession } from '../session'
 
 const route = useRoute()
+const session = useSession()
 
-const sections: { section: Section; to: string; label: string }[] = [
+const common: { section: Section; to: string; label: string }[] = [
   { section: 'library', to: '/', label: 'Библиотека' },
   { section: 'translations', to: '/translations', label: 'Переводы' },
   { section: 'providers', to: '/settings/providers', label: 'Модели' },
   { section: 'settings', to: '/settings', label: 'Настройки' },
 ]
+
+// Администрирование — только администратору: остальным сервер всё равно
+// ответит «не найдено».
+const sections = computed(() =>
+  session.me.value?.role === 'admin'
+    ? [...common, { section: 'admin' as const, to: '/admin', label: 'Администрирование' }]
+    : common,
+)
 </script>
 
 <template>
@@ -80,7 +91,7 @@ nav a[aria-current='page'] {
   margin-left: auto;
 }
 
-/* Четыре раздела на телефоне — без прокрутки вбок. */
+/* Четыре-пять разделов на телефоне — без прокрутки вбок. */
 @media (max-width: 40rem) {
   .app-header {
     gap: var(--space-3);

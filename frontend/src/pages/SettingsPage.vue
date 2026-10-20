@@ -1,8 +1,10 @@
 <script setup lang="ts">
-// Настройки аккаунта и Telegram (ТЗ §2.1, §8.1 №11, §9): привязка по
-// одноразовой ссылке на бота и выбор уведомлений.
-import { onBeforeUnmount, onMounted, ref } from 'vue'
+// Настройки аккаунта и Telegram (ТЗ §2.1, §8.1 №11, §9): смена пароля и
+// почты, привязка Telegram по одноразовой ссылке на бота и выбор
+// уведомлений.
+import { onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 
+import { changeEmail, changePassword } from '../api/auth'
 import { errorMessage } from '../api/client'
 import { getTelegram, linkTelegram, patchTelegram, unlinkTelegram } from '../api/telegram'
 import type { TelegramLink, TelegramSettings, TelegramState } from '../api/types'
@@ -19,6 +21,35 @@ const error = ref('')
 const done = ref('')
 let timer: ReturnType<typeof setTimeout> | undefined
 let stopped = false
+
+// Формы профиля: у каждой своя ошибка и своё «готово».
+const password = reactive({ current: '', next: '', error: '', done: '', busy: false })
+const email = reactive({ value: '', current: '', error: '', done: '', busy: false })
+
+async function submitPassword() {
+  Object.assign(password, { error: '', done: '', busy: true })
+  try {
+    await changePassword(password.current, password.next)
+    Object.assign(password, { current: '', next: '', done: 'Пароль изменён. На других устройствах нужно войти заново.' })
+  } catch (e) {
+    password.error = errorMessage(e)
+  } finally {
+    password.busy = false
+  }
+}
+
+async function submitEmail() {
+  Object.assign(email, { error: '', done: '', busy: true })
+  try {
+    const user = await changeEmail(email.value.trim(), email.current)
+    session.me.value = user
+    Object.assign(email, { value: '', current: '', done: `Почта изменена: теперь вход по адресу ${user.email}.` })
+  } catch (e) {
+    email.error = errorMessage(e)
+  } finally {
+    email.busy = false
+  }
+}
 
 const notifications: { key: keyof TelegramSettings; label: string }[] = [
   { key: 'notify_chapters', label: 'Глава переведена' },
@@ -118,6 +149,119 @@ async function unlink() {
       <RouterLink to="/settings/providers">
         Подключения моделей
       </RouterLink>
+    </section>
+
+    <section
+      class="password"
+      aria-labelledby="password-title"
+    >
+      <h2 id="password-title">
+        Пароль
+      </h2>
+      <form
+        class="password-form"
+        novalidate
+        @submit.prevent="submitPassword"
+      >
+        <label class="field">
+          <span>Текущий пароль</span>
+          <input
+            v-model="password.current"
+            name="current_password"
+            type="password"
+            autocomplete="current-password"
+            required
+          >
+        </label>
+        <label class="field">
+          <span>Новый пароль</span>
+          <input
+            v-model="password.next"
+            name="new_password"
+            type="password"
+            autocomplete="new-password"
+            required
+          >
+          <small>Не короче 12 символов. Остальные устройства выйдут из аккаунта.</small>
+        </label>
+        <p
+          v-if="password.error"
+          role="alert"
+          class="form-error"
+        >
+          {{ password.error }}
+        </p>
+        <p
+          v-if="password.done"
+          role="status"
+          class="done"
+        >
+          {{ password.done }}
+        </p>
+        <button
+          type="submit"
+          class="button"
+          :disabled="password.busy"
+        >
+          Сменить пароль
+        </button>
+      </form>
+    </section>
+
+    <section
+      class="email"
+      aria-labelledby="email-title"
+    >
+      <h2 id="email-title">
+        Электронная почта
+      </h2>
+      <form
+        class="email-form"
+        novalidate
+        @submit.prevent="submitEmail"
+      >
+        <label class="field">
+          <span>Новый адрес</span>
+          <input
+            v-model="email.value"
+            name="email"
+            type="email"
+            autocomplete="email"
+            required
+          >
+        </label>
+        <label class="field">
+          <span>Текущий пароль</span>
+          <input
+            v-model="email.current"
+            name="email_password"
+            type="password"
+            autocomplete="current-password"
+            required
+          >
+        </label>
+        <p
+          v-if="email.error"
+          role="alert"
+          class="form-error"
+        >
+          {{ email.error }}
+        </p>
+        <p
+          v-if="email.done"
+          role="status"
+          class="done"
+        >
+          {{ email.done }}
+        </p>
+        <button
+          type="submit"
+          class="button"
+          :disabled="email.busy"
+        >
+          Сменить почту
+        </button>
+      </form>
     </section>
 
     <section
@@ -270,6 +414,17 @@ p {
   gap: var(--space-2);
   align-items: center;
   cursor: pointer;
+}
+
+form {
+  display: grid;
+  gap: var(--space-3);
+  justify-items: start;
+  width: min(100%, 26rem);
+}
+
+form .field {
+  width: 100%;
 }
 
 .link {

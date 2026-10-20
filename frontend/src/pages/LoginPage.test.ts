@@ -18,6 +18,7 @@ async function mountPage(component: object, api: AuthApi, path: string) {
       { path: '/books/:id', component: { template: '<div />' }, meta: { title: 'Книга' } },
       { path: '/login', component: LoginPage, meta: { title: 'Вход', public: true } },
       { path: '/register', component: RegisterPage, meta: { title: 'Регистрация', public: true } },
+      { path: '/forgot-password', component: { template: '<div />' }, meta: { title: '', public: true } },
     ],
   })
   await router.push(path)
@@ -87,5 +88,13 @@ describe('регистрация', () => {
     await wrapper.find('form').trigger('submit')
     await flushPromises()
     expect(wrapper.find('[role=alert]').text()).toContain('от 12 до 256')
+  })
+})
+
+describe('вход после сброса пароля', () => {
+  it('ссылка «Забыли пароль?» и сообщение после сброса', async () => {
+    const { wrapper } = await mountPage(LoginPage, api({}), '/login?reset=done')
+    expect(wrapper.find('a[href="/forgot-password"]').text()).toBe('Забыли пароль?')
+    expect(wrapper.find('[role=status]').text()).toBe('Пароль изменён. Войдите с новым паролем.')
   })
 })

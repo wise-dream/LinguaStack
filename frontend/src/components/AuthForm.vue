@@ -33,6 +33,7 @@ async function onSubmit() {
 <template>
   <main class="page auth">
     <h1>{{ title }}</h1>
+    <slot name="notice" />
     <form
       novalidate
       @submit.prevent="onSubmit"
@@ -70,6 +71,7 @@ async function onSubmit() {
       >
         {{ submitLabel }}
       </button>
+      <slot name="after-submit" />
     </form>
     <p class="switch">
       <slot />

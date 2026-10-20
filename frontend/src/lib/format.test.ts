@@ -23,6 +23,8 @@ describe('форматирование', () => {
     const plain = (s: string) => s.replace(/\s/g, ' ')
     expect(plain(formatBytes(189_249))).toBe('184,8 КБ')
     expect(plain(formatBytes(512))).toBe('512 Б')
+    expect(plain(formatBytes(2 * 1024 ** 3))).toBe('2 ГБ')
+    expect(plain(formatBytes(1.5 * 1024 ** 3))).toBe('1,5 ГБ')
     expect(plain(formatNumber(1234567))).toBe('1 234 567')
   })
 

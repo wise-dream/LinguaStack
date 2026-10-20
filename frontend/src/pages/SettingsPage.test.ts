@@ -120,3 +120,51 @@ describe('настройки', () => {
     expect(w.find('[role=alert]').text()).toBe('Telegram-бот не настроен на этом сервере')
   })
 })
+
+describe('профиль', () => {
+  const telegramOff = { 'GET /api/telegram': { body: state({ enabled: false, bot_username: undefined }) } }
+
+  it('смена пароля: ошибка текущего пароля показана, успех — поля очищены', async () => {
+    let attempt = 0
+    const { w, calls } = await mountSettings({
+      ...telegramOff,
+      'POST /api/me/password': () =>
+        ++attempt === 1 ? { status: 403, body: { error: 'Неверный текущий пароль' } } : { status: 204 },
+    })
+    const form = w.find('form.password-form')
+    expect(form.find('button[type=submit]').text()).toBe('Сменить пароль')
+    await form.find('input[name=current_password]').setValue('wrong-password-1')
+    await form.find('input[name=new_password]').setValue('new-password-123')
+    await form.trigger('submit')
+    await flushPromises()
+    expect(form.find('[role=alert]').text()).toBe('Неверный текущий пароль')
+
+    await form.find('input[name=current_password]').setValue('right-password-1')
+    await form.trigger('submit')
+    await flushPromises()
+    expect(calls.filter((c) => c.path === '/api/me/password').at(-1)?.body).toEqual({
+      current_password: 'right-password-1', new_password: 'new-password-123',
+    })
+    expect(form.find('[role=alert]').exists()).toBe(false)
+    expect(form.find('[role=status]').text()).toContain('Пароль изменён')
+    expect((form.find('input[name=current_password]').element as HTMLInputElement).value).toBe('')
+    expect((form.find('input[name=new_password]').element as HTMLInputElement).value).toBe('')
+  })
+
+  it('смена почты: новый адрес виден сразу', async () => {
+    const { w, calls } = await mountSettings({
+      ...telegramOff,
+      'PATCH /api/me': { body: { ...me, email: 'new@example.com' } },
+    })
+    const form = w.find('form.email-form')
+    await form.find('input[name=email]').setValue('new@example.com')
+    await form.find('input[name=email_password]').setValue('right-password-1')
+    await form.trigger('submit')
+    await flushPromises()
+    expect(calls.find((c) => c.method === 'PATCH' && c.path === '/api/me')?.body).toEqual({
+      email: 'new@example.com', current_password: 'right-password-1',
+    })
+    expect(w.find('section.account dd').text()).toBe('new@example.com')
+    expect(form.find('[role=status]').text()).toContain('Почта изменена')
+  })
+})

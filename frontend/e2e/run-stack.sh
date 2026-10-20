@@ -49,4 +49,14 @@ API=$!
 "$WORK/worker" &
 WORKER=$!
 trap 'kill $API $WORKER 2>/dev/null; wait; rm -rf "$WORK"' EXIT INT TERM
+
+# Администратор стенда: регистрация через API и роль командой api -set-role,
+# как на настоящем сервере.
+for _ in $(seq 50); do
+  curl -sf "http://$LINGUASTACK_HTTP_ADDR/api/health" >/dev/null && break
+  sleep 0.2
+done
+curl -sf -H 'Content-Type: application/json' -d '{"email":"admin@e2e.example","password":"e2e admin password"}' \
+  "http://$LINGUASTACK_HTTP_ADDR/api/auth/register" >/dev/null
+"$WORK/api" -set-role admin@e2e.example=admin
 wait -n

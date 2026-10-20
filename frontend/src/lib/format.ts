@@ -39,7 +39,8 @@ export function formatNumber(n: number): string {
 export function formatBytes(n: number): string {
   if (n < 1024) return `${n}${NBSP}Б`
   if (n < 1024 * 1024) return `${decimals.format(n / 1024)}${NBSP}КБ`
-  return `${decimals.format(n / 1024 / 1024)}${NBSP}МБ`
+  if (n < 1024 ** 3) return `${decimals.format(n / 1024 / 1024)}${NBSP}МБ`
+  return `${decimals.format(n / 1024 ** 3)}${NBSP}ГБ`
 }
 
 /** «12 с», «4 мин 12 с», «3 ч 05 мин». */
