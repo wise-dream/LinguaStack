@@ -259,3 +259,21 @@ export interface ExportInput {
   format: ExportFormat
   mode: ExportMode
 }
+
+export interface TelegramState {
+  enabled: boolean
+  bot_username?: string
+  linked: boolean
+  username?: string
+  linked_at?: string
+  notify_chapters: boolean
+  notify_completed: boolean
+  notify_errors: boolean
+}
+
+export interface TelegramLink {
+  url: string
+  expires_at: string
+}
+
+export type TelegramSettings = Partial<Pick<TelegramState, 'notify_chapters' | 'notify_completed' | 'notify_errors'>>

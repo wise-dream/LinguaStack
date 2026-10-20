@@ -35,6 +35,10 @@ export LINGUASTACK_SESSION_COOKIE_SECURE=false
 export LINGUASTACK_E2E_FAKE_PROVIDER=true
 export LINGUASTACK_E2E_FAKE_DELAY=${LINGUASTACK_E2E_FAKE_DELAY:-400ms}
 export LINGUASTACK_MAX_BATCH_SEGMENTS=2
+# Telegram «включён» только для api: страница настроек выдаёт ссылку
+# привязки. Процесс bot на стенде не запускается — в Telegram ничего не уходит.
+export LINGUASTACK_TELEGRAM_BOT_TOKEN=000000:e2e-not-a-real-token-for-tests-only
+export LINGUASTACK_TELEGRAM_BOT_USERNAME=linguastack_e2e_bot
 
 "$WORK/api" -migrate
 "$WORK/api" &

@@ -171,3 +171,17 @@ test('импорт HTML', async ({ page }, info) => {
   await expect(page.getByText('Menu')).toHaveCount(0)
   await shot(page, 'import-html')
 })
+
+test('настройки Telegram', async ({ page }, info) => {
+  const email = `e2e-tg-${info.project.name}-${Date.now()}@example.com`
+  await register(page, email)
+  await page.getByRole('link', { name: 'Настройки' }).click()
+  await expect(page.getByRole('heading', { name: 'Настройки', level: 1 })).toBeVisible()
+  await expect(page.locator('main').getByText(email)).toBeVisible()
+  await page.getByRole('button', { name: 'Привязать Telegram' }).click()
+  const open = page.getByRole('link', { name: 'Открыть бота' })
+  await expect(open).toHaveAttribute('href', /^https:\/\/t\.me\/linguastack_e2e_bot\?start=[A-Za-z0-9_-]{43}$/)
+  await shot(page, 'settings-telegram')
+  const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)
+  expect(overflow).toBeLessThanOrEqual(0)
+})

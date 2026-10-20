@@ -9,6 +9,7 @@ const sections: { section: Section; to: string; label: string }[] = [
   { section: 'library', to: '/', label: 'Библиотека' },
   { section: 'translations', to: '/translations', label: 'Переводы' },
   { section: 'providers', to: '/settings/providers', label: 'Модели' },
+  { section: 'settings', to: '/settings', label: 'Настройки' },
 ]
 </script>
 
@@ -77,5 +78,17 @@ nav a[aria-current='page'] {
 
 .slot {
   margin-left: auto;
+}
+
+/* Четыре раздела на телефоне — без прокрутки вбок. */
+@media (max-width: 40rem) {
+  .app-header {
+    gap: var(--space-3);
+  }
+
+  nav {
+    flex-wrap: wrap;
+    gap: var(--space-1) var(--space-3);
+  }
 }
 </style>

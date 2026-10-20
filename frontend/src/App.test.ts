@@ -32,9 +32,15 @@ describe('оболочка приложения', () => {
   it('показывает разделы и отмечает текущий', async () => {
     const wrapper = await mountAt('/translations')
     const links = wrapper.findAll('nav a')
-    expect(links.map((a) => a.text())).toEqual(['Библиотека', 'Переводы', 'Модели'])
+    expect(links.map((a) => a.text())).toEqual(['Библиотека', 'Переводы', 'Модели', 'Настройки'])
     const current = links.filter((a) => a.attributes('aria-current') === 'page')
     expect(current.map((a) => a.text())).toEqual(['Переводы'])
+  })
+
+  it('настройки — свой раздел, «Модели» — отдельно', async () => {
+    const wrapper = await mountAt('/settings')
+    const current = wrapper.findAll('nav a').filter((a) => a.attributes('aria-current') === 'page')
+    expect(current.map((a) => a.text())).toEqual(['Настройки'])
   })
 
   it('без входа шапки с разделами нет', async () => {
