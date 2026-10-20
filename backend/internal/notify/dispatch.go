@@ -128,10 +128,13 @@ func (d *Dispatcher) RunOnce(ctx context.Context) (int, error) {
 	sent := 0
 	for _, userID := range users {
 		var bnd models.TelegramBinding
-		err := d.db.WithContext(ctx).First(&bnd, "user_id = ?", userID).Error
+		// Отключённому аккаунту не пишем — как будто Telegram не привязан.
+		err := d.db.WithContext(ctx).
+			Joins("JOIN users ON users.id = telegram_bindings.user_id AND users.is_active").
+			First(&bnd, "telegram_bindings.user_id = ?", userID).Error
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			for _, g := range byUser[userID] {
-				d.finish(ctx, all(g), models.NotificationSkipped, "Telegram не привязан")
+				d.finish(ctx, all(g), models.NotificationSkipped, "Telegram не привязан или аккаунт отключён")
 			}
 			continue
 		}

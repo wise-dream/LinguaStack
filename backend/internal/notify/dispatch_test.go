@@ -284,3 +284,13 @@ func TestLongTitlesFitTelegramLimit(t *testing.T) {
 	require.LessOrEqual(t, utf8.RuneCountInString(e.sender.sent[0].Text), 4096)
 	require.Contains(t, e.sender.sent[0].Text, "…")
 }
+
+func TestInactiveUserSkipped(t *testing.T) {
+	// Отключённый администратором аккаунт уведомлений не получает.
+	e := newDispatchEnv(t, "")
+	n := e.add(t, models.NotifyCompleted, nil)
+	require.NoError(t, e.tx.Model(&models.User{}).Where("id = ?", e.project.OwnerID).Update("is_active", false).Error)
+	e.run(t)
+	require.Empty(t, e.sender.sent)
+	require.Equal(t, models.NotificationSkipped, e.reload(t, n).Status)
+}

@@ -39,6 +39,7 @@ func (s *server) requireUser(next http.HandlerFunc) http.HandlerFunc {
 			internalError(w, r, err)
 			return
 		}
+		s.touchLastSeen(r.Context(), user)
 		if info := requestInfoFrom(r.Context()); info != nil {
 			info.user = user.ID.String()
 		}

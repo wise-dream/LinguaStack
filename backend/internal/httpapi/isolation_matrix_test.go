@@ -15,7 +15,7 @@ import (
 // эндпоинт с параметром, не внесённый в матрицу, роняет тест.
 
 type foreignResources struct {
-	book, project, segment, config, export string
+	book, project, segment, config, export, user string
 }
 
 func setupForeign(t *testing.T) (*translationEnv, *apiClient, foreignResources) {
@@ -28,7 +28,7 @@ func setupForeign(t *testing.T) (*translationEnv, *apiClient, foreignResources) 
 	owner.runExports(t)
 	intruder := owner.signedIn(t, "intruder@example.com")
 	return owner, intruder, foreignResources{book: p.BookID, project: p.ID, segment: seg.ID,
-		config: owner.ollamaConfig(t), export: export.ID}
+		config: owner.ollamaConfig(t), export: export.ID, user: owner.c.meID(t)}
 }
 
 func (f foreignResources) url(t *testing.T, path string) (string, bool) {
@@ -51,6 +51,9 @@ func (f foreignResources) url(t *testing.T, path string) (string, bool) {
 		return strings.Replace(path, "{id}", f.config, 1), true
 	case strings.HasPrefix(path, "/api/exports/{id}"):
 		return strings.Replace(path, "{id}", f.export, 1), true
+	case strings.HasPrefix(path, "/api/admin/users/{id}"):
+		// Для не администратора админские маршруты не существуют.
+		return strings.Replace(path, "{id}", f.user, 1), true
 	}
 	t.Errorf("маршрут %s не внесён в матрицу изоляции — добавьте его ресурс", path)
 	return "", false
@@ -72,6 +75,28 @@ func TestEveryResourceEndpointIs404ForForeignUser(t *testing.T) {
 		checked++
 	}
 	require.GreaterOrEqual(t, checked, 15, "матрица должна покрывать все ресурсные маршруты")
+}
+
+func TestAdminHasNoContentAccess(t *testing.T) {
+	// Роль admin не даёт доступа к содержимому (ТЗ §2.1, дополнение §9):
+	// для администратора-чужака каждый ресурсный маршрут — тот же 404.
+	owner, intruder, foreign := setupForeign(t)
+	owner.promote(t, "intruder@example.com")
+	require.Equal(t, http.StatusOK, intruder.do(http.MethodGet, "/api/admin/users", nil).Status, "чужак стал администратором")
+	checked := 0
+	for _, route := range httpapi.Routes() {
+		if !route.Auth || !strings.Contains(route.Path, "{") || strings.HasPrefix(route.Path, "/api/admin/") {
+			continue
+		}
+		url, ok := foreign.url(t, route.Path)
+		if !ok {
+			continue
+		}
+		r := intruder.do(route.Method, url, map[string]any{})
+		require.Equal(t, http.StatusNotFound, r.Status, "%s %s открывает администратору чужое: %s", route.Method, route.Path, r.Body)
+		checked++
+	}
+	require.GreaterOrEqual(t, checked, 15)
 }
 
 func TestEveryProtectedEndpointRequiresAuthentication(t *testing.T) {

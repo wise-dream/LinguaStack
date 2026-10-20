@@ -12,10 +12,14 @@ import (
 	"github.com/vnovels/linguastack/internal/telegram"
 )
 
-// binding — привязка Telegram-пользователя; nil — не привязан.
+// binding — привязка Telegram-пользователя; nil — не привязан. Привязка
+// отключённого аккаунта считается отсутствующей: отключение гасит и
+// управление переводами из Telegram (дополнение §18).
 func (b *Bot) binding(ctx context.Context, telegramUserID int64) (*models.TelegramBinding, error) {
 	var bnd models.TelegramBinding
-	err := b.db.WithContext(ctx).First(&bnd, "telegram_user_id = ?", telegramUserID).Error
+	err := b.db.WithContext(ctx).
+		Joins("JOIN users ON users.id = telegram_bindings.user_id AND users.is_active").
+		First(&bnd, "telegram_bindings.telegram_user_id = ?", telegramUserID).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, nil
 	}
@@ -70,6 +74,13 @@ func (b *Bot) link(ctx context.Context, m *telegram.IncomingMessage, code string
 			return errBadCode
 		}
 		userID := tokens[0].UserID
+		var active bool
+		if err := tx.Model(&models.User{}).Where("id = ?", userID).Pluck("is_active", &active).Error; err != nil {
+			return err
+		}
+		if !active {
+			return errBadCode
+		}
 		bnd = models.TelegramBinding{UserID: userID, TelegramUserID: m.From.ID, ChatID: m.Chat.ID, Username: m.From.Username,
 			NotifyChapters: true, NotifyCompleted: true, NotifyErrors: true}
 		var prev models.TelegramBinding

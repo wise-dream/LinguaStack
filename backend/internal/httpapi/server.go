@@ -75,6 +75,11 @@ func (rt *router) protected(pattern string, h http.HandlerFunc) {
 	rt.add(pattern, true, limited(rt.s.limits.user, byUser, tooManyRequests, h))
 }
 
+// admin — маршрут администратора; остальным его нет (404).
+func (rt *router) admin(pattern string, h http.HandlerFunc) {
+	rt.protected(pattern, rt.s.requireAdmin(h))
+}
+
 // stream — маршрут со входом без лимита частоты: поток событий открыт,
 // пока открыта вкладка, и переподключается сам.
 func (rt *router) stream(pattern string, h http.HandlerFunc) { rt.add(pattern, true, h) }
@@ -161,6 +166,10 @@ func buildRoutes(s *server) *router {
 	rt.protected("POST /api/telegram/link", s.linkTelegram)
 	rt.protected("PATCH /api/telegram", s.patchTelegram)
 	rt.protected("DELETE /api/telegram", s.unlinkTelegram)
+
+	rt.admin("GET /api/admin/overview", s.adminOverview)
+	rt.admin("GET /api/admin/users", s.adminListUsers)
+	rt.admin("PATCH /api/admin/users/{id}", s.adminPatchUser)
 
 	rt.protected("PATCH /api/segments/{id}", s.patchSegment)
 	rt.protected("POST /api/segments/{id}/retry", s.retrySegment)

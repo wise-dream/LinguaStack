@@ -33,6 +33,7 @@ func main() {
 func run() error {
 	migrateOnly := flag.Bool("migrate", false, "накатить миграции и выйти")
 	healthcheck := flag.Bool("healthcheck", false, "проверить, что запущенный сервер отвечает, и выйти")
+	roleSpec := flag.String("set-role", "", "назначить роль пользователю (адрес=admin или адрес=user) и выйти")
 	flag.Parse()
 	// Фильтр секретов на всех логах: ключ мог оказаться в тексте ошибки
 	// провайдера (ТЗ §13).
@@ -66,6 +67,9 @@ func run() error {
 	if *migrateOnly {
 		slog.Info("миграции накатаны")
 		return nil
+	}
+	if *roleSpec != "" {
+		return setRole(ctx, gdb, *roleSpec)
 	}
 
 	if err := httpapi.CheckWebRoot(cfg.WebRoot); err != nil {

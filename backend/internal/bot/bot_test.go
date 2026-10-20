@@ -286,3 +286,23 @@ func TestStatusFitsTelegramLimit(t *testing.T) {
 	require.LessOrEqual(t, utf8.RuneCountInString(reply), 4096)
 	require.Equal(t, 10, strings.Count(reply, "/translations/"))
 }
+
+func TestInactiveUserTreatedAsUnlinked(t *testing.T) {
+	// Отключённый аккаунт не управляет переводами и через Telegram.
+	e := newEnv(t)
+	user := linkedUser(t, e)
+	p := project(t, e, user, models.ProjectRunning, 1, 10, time.Now())
+	code := e.linkCode(t, user, time.Now().Add(time.Hour))
+	require.NoError(t, e.db.Model(user).Update("is_active", false).Error)
+
+	require.Contains(t, e.send(t, "private", me, "/status"), "не привязан")
+	require.Equal(t, "Telegram не привязан", e.press(t, me, "p:"+p.ID.String()))
+	var got models.TranslationProject
+	require.NoError(t, e.db.First(&got, "id = ?", p.ID).Error)
+	require.Equal(t, models.ProjectRunning, got.Status)
+
+	require.NoError(t, e.db.Delete(&models.TelegramBinding{}, "user_id = ?", user.ID).Error)
+	reply := e.send(t, "private", me, "/start "+code)
+	require.NotContains(t, reply, "привязан к аккаунту")
+	require.Nil(t, e.binding(t, me), "код отключённого аккаунта не привязывает")
+}

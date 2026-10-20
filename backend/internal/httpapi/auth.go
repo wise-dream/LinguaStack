@@ -150,6 +150,7 @@ func (s *server) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	http.SetCookie(w, s.sessionCookie(token, int(s.Cfg.SessionTTL/time.Second)))
+	s.touchLastSeen(ctx, &user)
 	writeJSON(w, http.StatusOK, user)
 }
 

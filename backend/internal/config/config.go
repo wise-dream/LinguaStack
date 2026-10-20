@@ -61,12 +61,15 @@ type Settings struct {
 	SessionTTL          time.Duration `env:"LINGUASTACK_SESSION_TTL" envDefault:"720h"`
 
 	// --- лимиты, дополнение §10 ---
-	MaxUploadBytes     int64         `env:"LINGUASTACK_MAX_UPLOAD_BYTES" envDefault:"52428800"`
-	MaxZipEntries      int           `env:"LINGUASTACK_MAX_ZIP_ENTRIES" envDefault:"2000"`
-	MaxZipTotalBytes   int64         `env:"LINGUASTACK_MAX_ZIP_TOTAL_BYTES" envDefault:"209715200"`
-	MaxZipRatio        int           `env:"LINGUASTACK_MAX_ZIP_RATIO" envDefault:"100"`
-	MaxTasksPerUser    int           `env:"LINGUASTACK_MAX_TASKS_PER_USER" envDefault:"3"`
-	MaxProjectsPerUser int           `env:"LINGUASTACK_MAX_PROJECTS_PER_USER" envDefault:"20"`
+	MaxUploadBytes     int64 `env:"LINGUASTACK_MAX_UPLOAD_BYTES" envDefault:"52428800"`
+	MaxZipEntries      int   `env:"LINGUASTACK_MAX_ZIP_ENTRIES" envDefault:"2000"`
+	MaxZipTotalBytes   int64 `env:"LINGUASTACK_MAX_ZIP_TOTAL_BYTES" envDefault:"209715200"`
+	MaxZipRatio        int   `env:"LINGUASTACK_MAX_ZIP_RATIO" envDefault:"100"`
+	MaxTasksPerUser    int   `env:"LINGUASTACK_MAX_TASKS_PER_USER" envDefault:"3"`
+	MaxProjectsPerUser int   `env:"LINGUASTACK_MAX_PROJECTS_PER_USER" envDefault:"20"`
+	// Хранилище пользователя — сумма размеров оригиналов книг (дополнение
+	// §18): 2 ГиБ; 0 — без предела.
+	StorageQuotaBytes  int64         `env:"LINGUASTACK_STORAGE_QUOTA_BYTES" envDefault:"2147483648"`
 	MaxSegmentAttempts int           `env:"LINGUASTACK_MAX_SEGMENT_ATTEMPTS" envDefault:"3"`
 	LoginMaxAttempts   int           `env:"LINGUASTACK_LOGIN_MAX_ATTEMPTS" envDefault:"10"`
 	LoginWindow        time.Duration `env:"LINGUASTACK_LOGIN_WINDOW" envDefault:"15m"`
