@@ -40,6 +40,14 @@ describe('библиотека', () => {
     expect(row.find('a[href="/books/b1"]').exists()).toBe(true)
   })
 
+  it('из строки книги — сразу к чтению и к новому переводу', async () => {
+    stubApi({ 'GET /api/books': { body: [book()] }, 'GET /api/translations': { body: [] } })
+    const w = await mountLibrary()
+    const row = w.find('[data-book="b1"]')
+    expect(row.find('a[href="/read/b1"]').text()).toBe('Читать')
+    expect(row.find('a[href="/books/b1/translate"]').text()).toBe('Перевести')
+  })
+
   it('пустая библиотека приглашает загрузить книгу', async () => {
     stubApi({ 'GET /api/books': { body: [] }, 'GET /api/translations': { body: [] } })
     const w = await mountLibrary()

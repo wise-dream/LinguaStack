@@ -202,7 +202,18 @@ onBeforeUnmount(() => {
       >
         {{ book.title }}
       </RouterLink>
-      <div class="translation-pick">
+      <!-- Переводов ещё нет — выбирать нечего, ведём к новому переводу. -->
+      <RouterLink
+        v-if="book && !projects.length"
+        :to="`/books/${bookId}/translate`"
+        class="button translate-link"
+      >
+        Перевести книгу
+      </RouterLink>
+      <div
+        v-else
+        class="translation-pick"
+      >
         <label
           for="reader-translation"
           class="visually-hidden"

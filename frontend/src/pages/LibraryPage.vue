@@ -159,6 +159,12 @@ async function remove(book: Book) {
             >
               Читать
             </RouterLink>
+            <RouterLink
+              :to="`/books/${book.id}/translate`"
+              class="button"
+            >
+              Перевести
+            </RouterLink>
             <ConfirmButton
               label="Удалить"
               @confirm="remove(book)"

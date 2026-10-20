@@ -109,6 +109,12 @@ describe('читалка (ТЗ §8.3)', () => {
     expect(w.find('[data-node="ch0001/b0001"] .translation').exists()).toBe(true)
   })
 
+  it('книга без переводов — вместо выбора версии ссылка на новый перевод', async () => {
+    const { w } = await mountReader('/read/b1?ch=1', { 'GET /api/translations': { body: [] } })
+    expect(w.find('select[name=translation]').exists()).toBe(false)
+    expect(w.find('a[href="/books/b1/translate"]').text()).toBe('Перевести книгу')
+  })
+
   it('переключение языковой версии — переводы книги', async () => {
     const { w, router, calls } = await mountReader('/read/b1?t=p1&ch=1')
     const options = w.findAll('select[name=translation] option').map((o) => o.text())

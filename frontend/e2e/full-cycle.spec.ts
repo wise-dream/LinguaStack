@@ -170,6 +170,23 @@ test('импорт HTML', async ({ page }, info) => {
   await expect(page.getByText('Second')).toBeVisible()
   await expect(page.getByText('Menu')).toHaveCount(0)
   await shot(page, 'import-html')
+
+  // Книга без переводов: из читалки и из библиотеки — прямо к новому переводу.
+  await page.getByRole('link', { name: 'Библиотека' }).click()
+  const row = page.locator('tr', { hasText: 'Web Book' })
+  await row.getByRole('link', { name: 'Читать' }).click()
+  await expect(page.getByRole('link', { name: 'Перевести книгу' })).toBeVisible()
+  await shot(page, 'reader-untranslated')
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(0)
+  await page.getByRole('link', { name: 'Перевести книгу' }).click()
+  await expect(page.getByRole('heading', { name: 'Новый перевод' })).toBeVisible()
+  await page.getByRole('link', { name: 'Библиотека' }).click()
+  await expect(row.getByRole('link', { name: 'Перевести' })).toBeVisible()
+  await shot(page, 'library-book')
+  await row.getByRole('link', { name: 'Перевести' }).click()
+  await expect(page.getByRole('heading', { name: 'Новый перевод' })).toBeVisible()
+  const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)
+  expect(overflow).toBeLessThanOrEqual(0)
 })
 
 test('настройки Telegram', async ({ page }, info) => {
