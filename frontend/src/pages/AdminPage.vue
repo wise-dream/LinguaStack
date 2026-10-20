@@ -511,6 +511,11 @@ p {
 }
 
 .headline .tokens :deep(.n-statistic-value) {
+  /* Меньший кегль прижат к низу строки, чтобы числа стояли на одной линии
+     с соседними. */
+  display: flex;
+  align-items: flex-end;
+  min-height: calc(var(--step-3) * 1.1);
   font-size: var(--step-1);
 }
 

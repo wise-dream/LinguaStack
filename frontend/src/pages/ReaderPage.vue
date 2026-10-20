@@ -349,7 +349,7 @@ onBeforeUnmount(() => {
   flex-wrap: wrap;
   align-items: center;
   gap: var(--space-2) var(--space-4);
-  padding: var(--space-2) var(--space-4);
+  padding: var(--space-2) var(--page-inset);
   background: color-mix(in srgb, var(--surface) 92%, transparent);
   backdrop-filter: blur(6px);
   border-bottom: 1px solid var(--rule-soft);
@@ -377,9 +377,9 @@ onBeforeUnmount(() => {
   display: grid;
   grid-template-columns: 15rem minmax(0, 1fr);
   gap: var(--space-6);
-  max-width: 90rem;
+  width: var(--page-width);
   margin: 0 auto;
-  padding: var(--space-5) var(--space-4) var(--space-7);
+  padding-block: var(--space-5) var(--space-7);
 }
 
 .toc-toggle {
@@ -498,7 +498,7 @@ onBeforeUnmount(() => {
     width: 100%;
   }
 
-  .reader-search :deep(.search input) {
+  .reader-search :deep(.search) {
     width: 100%;
   }
 }

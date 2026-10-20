@@ -3,7 +3,7 @@
 // прогрессом, ошибками, временем работы и статистикой провайдера.
 // Список опрашивается раз в 5 с, пока есть активные переводы: по SSE на
 // строку браузер исчерпал бы соединения с сервером.
-import { NEmpty, NList, NListItem } from 'naive-ui'
+import { NCard, NEmpty } from 'naive-ui'
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 
 import { errorMessage } from '../api/client'
@@ -75,14 +75,16 @@ onBeforeUnmount(() => clearTimeout(timer))
       v-for="g in grouped"
       :key="g.id"
       :data-group="g.id"
-      class="group card"
+      class="group"
     >
       <h2>{{ g.title }} <span class="count">{{ g.items.length }}</span></h2>
-      <NList class="rows">
-        <NListItem
+      <div class="tiles">
+        <NCard
           v-for="p in g.items"
           :key="p.id"
           :data-project="p.id"
+          class="tile"
+          size="small"
         >
           <div class="row-head">
             <RouterLink
@@ -114,8 +116,8 @@ onBeforeUnmount(() => clearTimeout(timer))
           >
             {{ p.last_error }}
           </p>
-        </NListItem>
-      </NList>
+        </NCard>
+      </div>
     </section>
   </main>
 </template>
@@ -130,6 +132,7 @@ h2 {
   align-items: baseline;
   gap: var(--space-2);
   font-size: var(--step-1);
+  margin-bottom: var(--space-3);
 }
 
 .count {
@@ -139,13 +142,21 @@ h2 {
   font-variant-numeric: tabular-nums;
 }
 
-.rows {
-  background: transparent;
+/* Переводы группы — сеткой карточек: на широком экране по три-четыре в ряд. */
+.tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(22rem, 1fr));
+  gap: var(--space-4);
 }
 
-.rows :deep(.n-list-item__main) {
+.tile {
+  box-shadow: var(--shadow-card);
+}
+
+.tile :deep(.n-card__content) {
   display: grid;
   gap: var(--space-2);
+  align-content: start;
 }
 
 .row-head {

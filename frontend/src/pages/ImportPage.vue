@@ -72,129 +72,203 @@ async function saveOrder() {
   <main class="page import">
     <h1>Загрузка книги</h1>
 
-    <NUpload
-      class="drop"
-      :class="{ busy }"
-      :default-upload="false"
-      :show-file-list="false"
-      :file-list="[]"
-      accept=".epub,.pdf,.docx,.html,.htm,.md,.markdown,.txt,.zip"
-      :disabled="busy"
-      @change="onUploadChange"
-    >
-      <NUploadDragger>
-        <p class="drop-title">
-          Перетащите файл сюда или выберите его
-        </p>
-        <p class="drop-hint">
-          EPUB, PDF, DOCX, HTML, Markdown, TXT или ZIP-архив документации, до 50 МБ
-        </p>
-        <NButton
-          class="pick"
-          tag="span"
-          aria-hidden="true"
-          tabindex="-1"
+    <div class="layout">
+      <div class="upload">
+        <NUpload
+          class="drop"
+          :class="{ busy }"
+          :default-upload="false"
+          :show-file-list="false"
+          :file-list="[]"
+          accept=".epub,.pdf,.docx,.html,.htm,.md,.markdown,.txt,.zip"
+          :disabled="busy"
+          @change="onUploadChange"
         >
-          Выбрать файл
-        </NButton>
-      </NUploadDragger>
-    </NUpload>
+          <NUploadDragger>
+            <p class="drop-title">
+              Перетащите файл сюда или выберите его
+            </p>
+            <p class="drop-hint">
+              EPUB, PDF, DOCX, HTML, Markdown, TXT или ZIP-архив документации, до 50 МБ
+            </p>
+            <NButton
+              class="pick"
+              tag="span"
+              aria-hidden="true"
+              tabindex="-1"
+            >
+              Выбрать файл
+            </NButton>
+          </NUploadDragger>
+        </NUpload>
 
-    <div
-      v-if="progress !== null"
-      class="progress"
-    >
-      <NProgress
-        type="line"
-        :percentage="Math.round(progress * 100)"
-        :show-indicator="false"
-        :processing="progress >= 1"
-        aria-label="Загрузка файла"
-      />
-      <span>{{ progress < 1 ? `Отправлено ${Math.round(progress * 100)}%` : 'Разбираю книгу…' }}</span>
+        <div
+          v-if="progress !== null"
+          class="progress"
+        >
+          <NProgress
+            type="line"
+            :percentage="Math.round(progress * 100)"
+            :show-indicator="false"
+            :processing="progress >= 1"
+            aria-label="Загрузка файла"
+          />
+          <span>{{ progress < 1 ? `Отправлено ${Math.round(progress * 100)}%` : 'Разбираю книгу…' }}</span>
+        </div>
+
+        <ErrorAlert :message="error" />
+      </div>
+      <section
+        v-if="book"
+        class="result card"
+      >
+        <h2 class="book-title">
+          {{ book.title }}
+        </h2>
+        <p
+          v-if="book.author"
+          class="author"
+        >
+          {{ book.author }}
+        </p>
+        <p class="stats">
+          {{ formatNumber(book.chapters) }} {{ plural(book.chapters, ['глава', 'главы', 'глав']) }},
+          {{ formatNumber(book.translatable) }} {{ plural(book.translatable, ['фрагмент', 'фрагмента', 'фрагментов']) }} для перевода
+        </p>
+
+        <div
+          v-if="book.issues.length"
+          class="issues"
+        >
+          <NAlert
+            v-for="(issue, i) in book.issues"
+            :key="i"
+            :type="issue.severity"
+            :title="severityLabel[issue.severity]"
+          >
+            {{ issue.message }}
+          </NAlert>
+        </div>
+
+        <h3>Оглавление</h3>
+        <p class="hint">
+          Если главы встали не по порядку, переставьте их — перевод и читалка пойдут в этом порядке.
+        </p>
+        <TocTree
+          :entries="toc"
+          reorderable
+          @reorder="onReorder"
+        />
+        <p
+          v-if="pendingOrder || orderSaved"
+          class="order-actions"
+        >
+          <NButton
+            v-if="pendingOrder"
+            class="save-order"
+            type="primary"
+            secondary
+            @click="saveOrder"
+          >
+            Сохранить порядок глав
+          </NButton>
+          <span
+            v-if="orderSaved"
+            role="status"
+            class="notice"
+          >Порядок глав сохранён</span>
+        </p>
+
+        <div class="next">
+          <LinkButton
+            :to="`/books/${book.id}/translate`"
+            type="primary"
+          >
+            Настроить перевод
+          </LinkButton>
+          <LinkButton :to="`/books/${book.id}`">
+            Открыть книгу
+          </LinkButton>
+        </div>
+      </section>
+      <section
+        v-else
+        class="help card"
+        aria-labelledby="help-title"
+      >
+        <h2 id="help-title">
+          Что получится из файла
+        </h2>
+        <dl class="formats">
+          <div>
+            <dt>EPUB, DOCX, HTML</dt>
+            <dd>Главы — по оглавлению и заголовкам, картинки сохраняются.</dd>
+          </div>
+          <div>
+            <dt>PDF</dt>
+            <dd>Нужен текстовый слой: сканы без распознавания не подойдут. До 2000 страниц.</dd>
+          </div>
+          <div>
+            <dt>Markdown и TXT</dt>
+            <dd>Главы — по заголовкам; код в блоках не переводится.</dd>
+          </div>
+          <div>
+            <dt>ZIP с документацией</dt>
+            <dd>mdBook, MkDocs или папка с .md: порядок глав — из SUMMARY.md или mkdocs.yml.</dd>
+          </div>
+        </dl>
+        <p class="muted">
+          После загрузки проверьте оглавление: главы можно переставить, оригинал книги не меняется.
+        </p>
+      </section>
     </div>
-
-    <ErrorAlert :message="error" />
-
-    <section
-      v-if="book"
-      class="result card"
-    >
-      <h2 class="book-title">
-        {{ book.title }}
-      </h2>
-      <p
-        v-if="book.author"
-        class="author"
-      >
-        {{ book.author }}
-      </p>
-      <p class="stats">
-        {{ formatNumber(book.chapters) }} {{ plural(book.chapters, ['глава', 'главы', 'глав']) }},
-        {{ formatNumber(book.translatable) }} {{ plural(book.translatable, ['фрагмент', 'фрагмента', 'фрагментов']) }} для перевода
-      </p>
-
-      <div
-        v-if="book.issues.length"
-        class="issues"
-      >
-        <NAlert
-          v-for="(issue, i) in book.issues"
-          :key="i"
-          :type="issue.severity"
-          :title="severityLabel[issue.severity]"
-        >
-          {{ issue.message }}
-        </NAlert>
-      </div>
-
-      <h3>Оглавление</h3>
-      <p class="hint">
-        Если главы встали не по порядку, переставьте их — перевод и читалка пойдут в этом порядке.
-      </p>
-      <TocTree
-        :entries="toc"
-        reorderable
-        @reorder="onReorder"
-      />
-      <p
-        v-if="pendingOrder || orderSaved"
-        class="order-actions"
-      >
-        <NButton
-          v-if="pendingOrder"
-          class="save-order"
-          type="primary"
-          secondary
-          @click="saveOrder"
-        >
-          Сохранить порядок глав
-        </NButton>
-        <span
-          v-if="orderSaved"
-          role="status"
-          class="notice"
-        >Порядок глав сохранён</span>
-      </p>
-
-      <div class="next">
-        <LinkButton
-          :to="`/books/${book.id}/translate`"
-          type="primary"
-        >
-          Настроить перевод
-        </LinkButton>
-        <LinkButton :to="`/books/${book.id}`">
-          Открыть книгу
-        </LinkButton>
-      </div>
-    </section>
   </main>
 </template>
 
 <style scoped>
-.import {
-  max-width: 48rem;
+/* Слева — загрузка, справа — разобранная книга или памятка по форматам. */
+.layout {
+  display: grid;
+  grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
+  gap: var(--space-5);
+  align-items: start;
+}
+
+.upload {
+  display: grid;
+  gap: var(--space-4);
+  position: sticky;
+  top: var(--space-4);
+}
+
+.help h2 {
+  font-size: var(--step-1);
+  margin-bottom: var(--space-3);
+}
+
+.formats {
+  margin: 0 0 var(--space-4);
+  display: grid;
+  gap: var(--space-3);
+}
+
+.formats dt {
+  font-weight: 600;
+}
+
+.formats dd {
+  margin: 0;
+  color: var(--muted);
+}
+
+@media (max-width: 56rem) {
+  .layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .upload {
+    position: static;
+  }
 }
 
 .drop :deep(.n-upload-dragger) {
@@ -244,7 +318,7 @@ async function saveOrder() {
 
 
 .result {
-  margin-top: var(--space-5);
+  margin-top: 0;
 }
 
 .book-title {

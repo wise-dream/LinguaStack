@@ -176,110 +176,134 @@ async function submit() {
         class="card"
         @submit.prevent="submit"
       >
-        <div class="pair">
-          <SelectField
-            v-model="form.provider_config_id"
-            label="Подключение"
-            name="provider_config_id"
-            :options="configOptions"
-          />
-          <SelectField
-            v-model="form.model_id"
-            label="Модель"
-            name="model_id"
-            :options="modelOptions"
-            :disabled="!models.length"
-            filterable
-          />
-        </div>
-        <ErrorAlert :message="modelsError" />
-        <NAlert
-          v-if="egress === 'allowed'"
-          class="egress"
-          type="warning"
-        >
-          Текст книги будет отправлен в «{{ config?.name }}» и покинет этот сервер.
-        </NAlert>
-        <NAlert
-          v-else-if="egress === 'blocked'"
-          class="egress blocked"
-          type="error"
-        >
-          Подключение «{{ config?.name }}» не разрешает отправку текста книг наружу. Разрешите её в разделе
-          <RouterLink to="/settings/providers">
-            «Модели»
-          </RouterLink> или выберите локальную модель.
-        </NAlert>
-        <div class="pair">
-          <SelectField
-            v-model="form.source_lang"
-            label="Язык оригинала"
-            name="source_lang"
-            :options="sourceOptions"
-            filterable
-          />
-          <SelectField
-            v-model="form.target_lang"
-            label="Язык перевода"
-            name="target_lang"
-            :options="targetOptions"
-            filterable
-          />
-        </div>
-        <fieldset class="choice-set">
-          <legend>Стиль</legend>
-          <NRadioGroup
-            v-model:value="form.style"
-            name="style"
-            class="choice styles"
+        <div class="col">
+          <div class="pair">
+            <SelectField
+              v-model="form.provider_config_id"
+              label="Подключение"
+              name="provider_config_id"
+              :options="configOptions"
+            />
+            <SelectField
+              v-model="form.model_id"
+              label="Модель"
+              name="model_id"
+              :options="modelOptions"
+              :disabled="!models.length"
+              filterable
+            />
+          </div>
+          <ErrorAlert :message="modelsError" />
+          <NAlert
+            v-if="egress === 'allowed'"
+            class="egress"
+            type="warning"
           >
-            <NRadio
-              v-for="s in styles"
-              :key="s"
-              :value="s"
-              class="tile"
-            >
-              <strong>{{ styleText[s]?.label ?? s }}</strong>
-              <small>{{ styleText[s]?.hint }}</small>
-            </NRadio>
-          </NRadioGroup>
-        </fieldset>
-        <fieldset class="choice-set">
-          <legend>Точность</legend>
-          <NRadioGroup
-            v-model:value="form.determinism"
-            name="determinism"
-            class="choice"
+            Текст книги будет отправлен в «{{ config?.name }}» и покинет этот сервер.
+          </NAlert>
+          <NAlert
+            v-else-if="egress === 'blocked'"
+            class="egress blocked"
+            type="error"
           >
-            <NRadio
-              v-for="d in options.determinism"
-              :key="d"
-              :value="d"
-              class="tile"
+            Подключение «{{ config?.name }}» не разрешает отправку текста книг наружу. Разрешите её в разделе
+            <RouterLink to="/settings/providers">
+              «Модели»
+            </RouterLink> или выберите локальную модель.
+          </NAlert>
+          <div class="pair">
+            <SelectField
+              v-model="form.source_lang"
+              label="Язык оригинала"
+              name="source_lang"
+              :options="sourceOptions"
+              filterable
+            />
+            <SelectField
+              v-model="form.target_lang"
+              label="Язык перевода"
+              name="target_lang"
+              :options="targetOptions"
+              filterable
+            />
+          </div>
+          <GlossaryEditor v-model="glossary" />
+        </div>
+        <div class="col">
+          <fieldset class="choice-set">
+            <legend>Стиль</legend>
+            <NRadioGroup
+              v-model:value="form.style"
+              name="style"
+              class="choice styles"
             >
-              <strong>{{ determinismText[d]?.label ?? d }}</strong>
-              <small>{{ determinismText[d]?.hint }}</small>
-            </NRadio>
-          </NRadioGroup>
-        </fieldset>
-        <GlossaryEditor v-model="glossary" />
-        <ErrorAlert :message="submitError" />
-        <NButton
-          attr-type="submit"
-          type="primary"
-          size="large"
-          :disabled="!canSubmit"
-        >
-          Начать перевод
-        </NButton>
+              <NRadio
+                v-for="s in styles"
+                :key="s"
+                :value="s"
+                class="tile"
+              >
+                <strong>{{ styleText[s]?.label ?? s }}</strong>
+                <small>{{ styleText[s]?.hint }}</small>
+              </NRadio>
+            </NRadioGroup>
+          </fieldset>
+          <fieldset class="choice-set">
+            <legend>Точность</legend>
+            <NRadioGroup
+              v-model:value="form.determinism"
+              name="determinism"
+              class="choice"
+            >
+              <NRadio
+                v-for="d in options.determinism"
+                :key="d"
+                :value="d"
+                class="tile"
+              >
+                <strong>{{ determinismText[d]?.label ?? d }}</strong>
+                <small>{{ determinismText[d]?.hint }}</small>
+              </NRadio>
+            </NRadioGroup>
+          </fieldset>
+        </div>
+        <div class="submit-row">
+          <ErrorAlert :message="submitError" />
+          <NButton
+            attr-type="submit"
+            type="primary"
+            size="large"
+            :disabled="!canSubmit"
+          >
+            Начать перевод
+          </NButton>
+        </div>
       </form>
     </template>
   </main>
 </template>
 
 <style scoped>
-.setup {
-  max-width: 52rem;
+/* Форма в две колонки: слева — модель, языки и глоссарий, справа — как
+   переводить; запуск — внизу во всю ширину. */
+.setup form {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  column-gap: var(--space-6);
+  align-items: start;
+}
+
+.col {
+  display: grid;
+  gap: var(--space-5);
+}
+
+.submit-row {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: var(--space-3);
+  justify-items: start;
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--rule-soft);
 }
 
 .crumb {
@@ -314,12 +338,8 @@ form {
 
 .choice {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
   gap: var(--space-2);
-}
-
-.choice.styles {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .tile {
@@ -351,10 +371,6 @@ form {
   color: var(--muted);
 }
 
-form > :last-child {
-  justify-self: start;
-}
-
 .empty {
   display: grid;
   gap: var(--space-3);
@@ -366,10 +382,15 @@ form > :last-child {
   color: var(--muted);
 }
 
+@media (max-width: 64rem) {
+  .setup form {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 @media (max-width: 40rem) {
   .pair,
-  .choice,
-  .choice.styles {
+  .choice {
     grid-template-columns: 1fr;
   }
 }

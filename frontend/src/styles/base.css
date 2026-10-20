@@ -49,9 +49,9 @@ textarea {
 }
 
 .page {
-  max-width: var(--page-width);
+  width: var(--page-width);
   margin: 0 auto;
-  padding: var(--space-6) var(--space-4) var(--space-7);
+  padding-block: var(--space-6) var(--space-7);
 }
 
 .visually-hidden {

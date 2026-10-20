@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // Подключения к моделям (ТЗ §8.1 п.8, §6.4): локальная Ollama и внешние
 // сервисы. Ключ API уходит на сервер один раз и больше не показывается.
-import { NButton, NCheckbox, NList, NListItem, NSwitch, NTag } from 'naive-ui'
+import { NButton, NCheckbox, NEmpty, NList, NListItem, NSwitch, NTag } from 'naive-ui'
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 
 import { errorMessage } from '../api/client'
@@ -123,134 +123,157 @@ async function remove(c: ProviderConfig) {
 
     <ErrorAlert :message="loadError" />
 
-    <NList
-      v-if="configs.length"
-      class="configs card"
-    >
-      <NListItem
-        v-for="c in configs"
-        :key="c.id"
-        :data-config="c.id"
-      >
-        <div class="config-head">
-          <span class="config-name">{{ c.name }}</span>
-          <span class="config-kind">{{ kindName(c.provider_id) }}</span>
-          <span
-            v-if="c.has_api_key"
-            class="key"
-          >ключ …{{ c.key_last4 }}</span>
-        </div>
-        <div
-          v-if="c.sends_data_externally"
-          class="inline-check"
+    <div class="layout">
+      <div class="list-col">
+        <NList
+          v-if="configs.length"
+          class="configs card"
         >
-          <NSwitch
-            :value="c.allow_external"
-            :aria-label="`Разрешить отправку текста книг в «${c.name}»`"
-            @update:value="(v: boolean) => setExternal(c, v)"
-          />
-          <span>Разрешить отправку текста книг этому сервису</span>
-        </div>
-        <div class="row-actions">
-          <NButton
-            class="check"
-            size="small"
-            @click="check(c)"
+          <NListItem
+            v-for="c in configs"
+            :key="c.id"
+            :data-config="c.id"
           >
-            Проверить
-          </NButton>
-          <ConfirmButton
-            label="Удалить"
-            size="small"
-            @confirm="remove(c)"
-          />
-          <NTag
-            v-if="health[c.id]"
-            role="status"
-            class="health"
-            size="small"
-            round
-            :bordered="false"
-            :type="healthType(health[c.id]!)"
-          >
-            {{ health[c.id] }}
-          </NTag>
-        </div>
-        <ErrorAlert
-          :message="rowError[c.id]"
-          size="small"
-        />
-      </NListItem>
-    </NList>
-    <p
-      v-else-if="!loadError"
-      class="muted empty"
-    >
-      Подключений пока нет — добавьте первое ниже.
-    </p>
-
-    <form
-      class="new-config card"
-      @submit.prevent="create"
-    >
-      <h2>Новое подключение</h2>
-      <SelectField
-        v-model="form.provider_id"
-        label="Провайдер"
-        name="provider_id"
-        :options="kindOptions"
-      />
-      <TextField
-        v-model="form.name"
-        label="Название"
-        name="name"
-        :placeholder="kind?.name ?? ''"
-      />
-      <TextField
-        v-if="kind?.user_base_url"
-        v-model="form.base_url"
-        label="Адрес API"
-        name="base_url"
-        type="url"
-        placeholder="https://api.example.com/v1"
-        hint="Адрес OpenAI-совместимого сервиса, например vLLM или LM Studio."
-        required
-      />
-      <TextField
-        v-if="kind && kind.provider_id !== 'ollama' && kind.provider_id !== 'fake'"
-        v-model="form.api_key"
-        :label="`Ключ API${kind.requires_api_key ? '' : ' (если нужен)'}`"
-        name="api_key"
-        type="password"
-        autocomplete="off"
-        :spellcheck="false"
-      />
-      <div
-        v-if="kind?.sends_data_externally"
-        class="consent"
-      >
-        <NCheckbox v-model:checked="form.allow_external">
-          <strong>Разрешить отправку текста книг этому сервису.</strong>
-          Текст переводимых книг покинет этот сервер и уйдёт к «{{ kind.name }}». Без разрешения перевод через
-          это подключение не запустится.
-        </NCheckbox>
+            <div class="config-head">
+              <span class="config-name">{{ c.name }}</span>
+              <span class="config-kind">{{ kindName(c.provider_id) }}</span>
+              <span
+                v-if="c.has_api_key"
+                class="key"
+              >ключ …{{ c.key_last4 }}</span>
+            </div>
+            <div
+              v-if="c.sends_data_externally"
+              class="inline-check"
+            >
+              <NSwitch
+                :value="c.allow_external"
+                :aria-label="`Разрешить отправку текста книг в «${c.name}»`"
+                @update:value="(v: boolean) => setExternal(c, v)"
+              />
+              <span>Разрешить отправку текста книг этому сервису</span>
+            </div>
+            <div class="row-actions">
+              <NButton
+                class="check"
+                size="small"
+                @click="check(c)"
+              >
+                Проверить
+              </NButton>
+              <ConfirmButton
+                label="Удалить"
+                size="small"
+                @confirm="remove(c)"
+              />
+              <NTag
+                v-if="health[c.id]"
+                role="status"
+                class="health"
+                size="small"
+                round
+                :bordered="false"
+                :type="healthType(health[c.id]!)"
+              >
+                {{ health[c.id] }}
+              </NTag>
+            </div>
+            <ErrorAlert
+              :message="rowError[c.id]"
+              size="small"
+            />
+          </NListItem>
+        </NList>
+        <section
+          v-else-if="!loadError"
+          class="empty card"
+        >
+          <NEmpty description="Подключений пока нет. Добавьте первое в форме «Новое подключение»." />
+        </section>
       </div>
-      <ErrorAlert :message="formError" />
-      <NButton
-        attr-type="submit"
-        type="primary"
-        :loading="saving"
-        :disabled="saving"
+      <form
+        class="new-config card"
+        @submit.prevent="create"
       >
-        Добавить подключение
-      </NButton>
-    </form>
+        <h2>Новое подключение</h2>
+        <SelectField
+          v-model="form.provider_id"
+          label="Провайдер"
+          name="provider_id"
+          :options="kindOptions"
+        />
+        <TextField
+          v-model="form.name"
+          label="Название"
+          name="name"
+          :placeholder="kind?.name ?? ''"
+        />
+        <TextField
+          v-if="kind?.user_base_url"
+          v-model="form.base_url"
+          label="Адрес API"
+          name="base_url"
+          type="url"
+          placeholder="https://api.example.com/v1"
+          hint="Адрес OpenAI-совместимого сервиса, например vLLM или LM Studio."
+          required
+        />
+        <TextField
+          v-if="kind && kind.provider_id !== 'ollama' && kind.provider_id !== 'fake'"
+          v-model="form.api_key"
+          :label="`Ключ API${kind.requires_api_key ? '' : ' (если нужен)'}`"
+          name="api_key"
+          type="password"
+          autocomplete="off"
+          :spellcheck="false"
+        />
+        <div
+          v-if="kind?.sends_data_externally"
+          class="consent"
+        >
+          <NCheckbox v-model:checked="form.allow_external">
+            <strong>Разрешить отправку текста книг этому сервису.</strong>
+            Текст переводимых книг покинет этот сервер и уйдёт к «{{ kind.name }}». Без разрешения перевод через
+            это подключение не запустится.
+          </NCheckbox>
+        </div>
+        <ErrorAlert :message="formError" />
+        <NButton
+          attr-type="submit"
+          type="primary"
+          :loading="saving"
+          :disabled="saving"
+        >
+          Добавить подключение
+        </NButton>
+      </form>
+    </div>
   </main>
 </template>
 
 <style scoped>
-.providers {
-  max-width: 52rem;
+/* Слева — подключения, справа — форма нового: на широком экране обе видны
+   сразу, форма не уезжает при прокрутке длинного списка. */
+.layout {
+  display: grid;
+  grid-template-columns: minmax(0, 7fr) minmax(0, 5fr);
+  gap: var(--space-5);
+  align-items: start;
+}
+
+.new-config {
+  position: sticky;
+  top: var(--space-4);
+}
+
+@media (max-width: 56rem) {
+  .layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .new-config {
+    position: static;
+  }
 }
 
 .providers > h1 {
@@ -268,11 +291,11 @@ async function remove(c: ProviderConfig) {
 }
 
 .empty {
-  margin: 0 0 var(--space-5);
+  padding-block: var(--space-6);
 }
 
 .configs {
-  margin: 0 0 var(--space-5);
+  margin: 0;
   padding-block: var(--space-2);
 }
 

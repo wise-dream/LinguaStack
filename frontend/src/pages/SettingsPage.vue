@@ -138,222 +138,238 @@ async function unlink() {
   <main class="page settings">
     <h1>Настройки</h1>
 
-    <section
-      class="account card"
-      aria-labelledby="account-title"
-    >
-      <h2 id="account-title">
-        Аккаунт
-      </h2>
-      <dl>
-        <dt>Электронная почта</dt>
-        <dd>{{ session.me.value?.email }}</dd>
-      </dl>
-      <RouterLink to="/settings/providers">
-        Подключения моделей
-      </RouterLink>
-    </section>
-
-    <section
-      class="password card"
-      aria-labelledby="password-title"
-    >
-      <h2 id="password-title">
-        Пароль
-      </h2>
-      <form
-        class="password-form"
-        novalidate
-        @submit.prevent="submitPassword"
-      >
-        <TextField
-          v-model="password.current"
-          label="Текущий пароль"
-          name="current_password"
-          type="password"
-          autocomplete="current-password"
-          required
-        />
-        <TextField
-          v-model="password.next"
-          label="Новый пароль"
-          name="new_password"
-          type="password"
-          autocomplete="new-password"
-          hint="Не короче 12 символов. Остальные устройства выйдут из аккаунта."
-          required
-        />
-        <ErrorAlert :message="password.error" />
-        <p
-          v-if="password.done"
-          role="status"
-          class="notice"
+    <div class="layout">
+      <div class="col">
+        <section
+          class="account card"
+          aria-labelledby="account-title"
         >
-          {{ password.done }}
-        </p>
-        <NButton
-          attr-type="submit"
-          :loading="password.busy"
-          :disabled="password.busy"
-        >
-          Сменить пароль
-        </NButton>
-      </form>
-    </section>
+          <h2 id="account-title">
+            Аккаунт
+          </h2>
+          <dl>
+            <dt>Электронная почта</dt>
+            <dd>{{ session.me.value?.email }}</dd>
+          </dl>
+          <RouterLink to="/settings/providers">
+            Подключения моделей
+          </RouterLink>
+        </section>
 
-    <section
-      class="email card"
-      aria-labelledby="email-title"
-    >
-      <h2 id="email-title">
-        Электронная почта
-      </h2>
-      <form
-        class="email-form"
-        novalidate
-        @submit.prevent="submitEmail"
-      >
-        <TextField
-          v-model="email.value"
-          label="Новый адрес"
-          name="email"
-          type="email"
-          autocomplete="email"
-          required
-        />
-        <TextField
-          v-model="email.current"
-          label="Текущий пароль"
-          name="email_password"
-          type="password"
-          autocomplete="current-password"
-          required
-        />
-        <ErrorAlert :message="email.error" />
-        <p
-          v-if="email.done"
-          role="status"
-          class="notice"
+        <section
+          class="telegram card"
+          aria-labelledby="telegram-title"
         >
-          {{ email.done }}
-        </p>
-        <NButton
-          attr-type="submit"
-          :loading="email.busy"
-          :disabled="email.busy"
-        >
-          Сменить почту
-        </NButton>
-      </form>
-    </section>
-
-    <section
-      class="telegram card"
-      aria-labelledby="telegram-title"
-    >
-      <h2 id="telegram-title">
-        Telegram
-      </h2>
-      <ErrorAlert :message="error" />
-      <p
-        v-if="done"
-        role="status"
-        class="notice"
-      >
-        {{ done }}
-      </p>
-      <template v-if="telegram">
-        <p
-          v-if="!telegram.enabled"
-          class="muted"
-        >
-          Telegram-бот на этом сервере не настроен.
-        </p>
-
-        <template v-else-if="telegram.linked">
-          <p>
-            Привязан{{ telegram.username ? ` к @${telegram.username}` : '' }}{{ telegram.linked_at ? `, с ${formatDate(telegram.linked_at)}` : '' }}.
-            Бот пишет сюда:
-          </p>
-          <fieldset class="toggles">
-            <legend class="visually-hidden">
-              Уведомления
-            </legend>
-            <div
-              v-for="n in notifications"
-              :key="n.key"
-              class="toggle"
-              :data-toggle="n.key"
-            >
-              <NSwitch
-                :value="telegram[n.key]"
-                :aria-labelledby="`toggle-${n.key}`"
-                @update:value="(v: boolean) => toggle(n.key, v)"
-              />
-              <span :id="`toggle-${n.key}`">{{ n.label }}</span>
-            </div>
-          </fieldset>
-          <p class="muted">
-            В Telegram команда /status показывает ход переводов и ставит их на паузу.
-          </p>
-          <ConfirmButton
-            label="Отвязать Telegram"
-            confirm-label="Точно отвязать?"
-            @confirm="unlink"
-          />
-        </template>
-
-        <template v-else>
-          <p>
-            Бот пришлёт сообщение, когда глава или книга переведена или перевод остановился из-за ошибки.
-            Командой /status в Telegram можно смотреть ход переводов и ставить их на паузу.
-          </p>
-          <div
-            v-if="link"
-            class="link"
+          <h2 id="telegram-title">
+            Telegram
+          </h2>
+          <ErrorAlert :message="error" />
+          <p
+            v-if="done"
+            role="status"
+            class="notice"
           >
-            <p>
-              Откройте бота и нажмите «Старт» — ссылка действует до {{ expiresAt(link.expires_at) }}.
-              Эта страница обновится сама.
+            {{ done }}
+          </p>
+          <template v-if="telegram">
+            <p
+              v-if="!telegram.enabled"
+              class="muted"
+            >
+              Telegram-бот на этом сервере не настроен.
+            </p>
+
+            <template v-else-if="telegram.linked">
+              <p>
+                Привязан{{ telegram.username ? ` к @${telegram.username}` : '' }}{{ telegram.linked_at ? `, с ${formatDate(telegram.linked_at)}` : '' }}.
+                Бот пишет сюда:
+              </p>
+              <fieldset class="toggles">
+                <legend class="visually-hidden">
+                  Уведомления
+                </legend>
+                <div
+                  v-for="n in notifications"
+                  :key="n.key"
+                  class="toggle"
+                  :data-toggle="n.key"
+                >
+                  <NSwitch
+                    :value="telegram[n.key]"
+                    :aria-labelledby="`toggle-${n.key}`"
+                    @update:value="(v: boolean) => toggle(n.key, v)"
+                  />
+                  <span :id="`toggle-${n.key}`">{{ n.label }}</span>
+                </div>
+              </fieldset>
+              <p class="muted">
+                В Telegram команда /status показывает ход переводов и ставит их на паузу.
+              </p>
+              <ConfirmButton
+                label="Отвязать Telegram"
+                confirm-label="Точно отвязать?"
+                @confirm="unlink"
+              />
+            </template>
+
+            <template v-else>
+              <p>
+                Бот пришлёт сообщение, когда глава или книга переведена или перевод остановился из-за ошибки.
+                Командой /status в Telegram можно смотреть ход переводов и ставить их на паузу.
+              </p>
+              <div
+                v-if="link"
+                class="link"
+              >
+                <p>
+                  Откройте бота и нажмите «Старт» — ссылка действует до {{ expiresAt(link.expires_at) }}.
+                  Эта страница обновится сама.
+                </p>
+                <NButton
+                  tag="a"
+                  class="open-bot"
+                  type="primary"
+                  :href="link.url"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  Открыть бота
+                </NButton>
+              </div>
+              <NButton
+                v-else
+                class="primary"
+                type="primary"
+                @click="bind"
+              >
+                Привязать Telegram
+              </NButton>
+            </template>
+          </template>
+        </section>
+      </div>
+      <div class="col">
+        <section
+          class="password card"
+          aria-labelledby="password-title"
+        >
+          <h2 id="password-title">
+            Пароль
+          </h2>
+          <form
+            class="password-form"
+            novalidate
+            @submit.prevent="submitPassword"
+          >
+            <TextField
+              v-model="password.current"
+              label="Текущий пароль"
+              name="current_password"
+              type="password"
+              autocomplete="current-password"
+              required
+            />
+            <TextField
+              v-model="password.next"
+              label="Новый пароль"
+              name="new_password"
+              type="password"
+              autocomplete="new-password"
+              hint="Не короче 12 символов. Остальные устройства выйдут из аккаунта."
+              required
+            />
+            <ErrorAlert :message="password.error" />
+            <p
+              v-if="password.done"
+              role="status"
+              class="notice"
+            >
+              {{ password.done }}
             </p>
             <NButton
-              tag="a"
-              class="open-bot"
-              type="primary"
-              :href="link.url"
-              target="_blank"
-              rel="noopener noreferrer"
+              attr-type="submit"
+              :loading="password.busy"
+              :disabled="password.busy"
             >
-              Открыть бота
+              Сменить пароль
             </NButton>
-          </div>
-          <NButton
-            v-else
-            class="primary"
-            type="primary"
-            @click="bind"
+          </form>
+        </section>
+
+        <section
+          class="email card"
+          aria-labelledby="email-title"
+        >
+          <h2 id="email-title">
+            Электронная почта
+          </h2>
+          <form
+            class="email-form"
+            novalidate
+            @submit.prevent="submitEmail"
           >
-            Привязать Telegram
-          </NButton>
-        </template>
-      </template>
-    </section>
+            <TextField
+              v-model="email.value"
+              label="Новый адрес"
+              name="email"
+              type="email"
+              autocomplete="email"
+              required
+            />
+            <TextField
+              v-model="email.current"
+              label="Текущий пароль"
+              name="email_password"
+              type="password"
+              autocomplete="current-password"
+              required
+            />
+            <ErrorAlert :message="email.error" />
+            <p
+              v-if="email.done"
+              role="status"
+              class="notice"
+            >
+              {{ email.done }}
+            </p>
+            <NButton
+              attr-type="submit"
+              :loading="email.busy"
+              :disabled="email.busy"
+            >
+              Сменить почту
+            </NButton>
+          </form>
+        </section>
+      </div>
+    </div>
   </main>
 </template>
 
 <style scoped>
-.settings {
-  max-width: var(--measure);
+/* Две колонки: слева — аккаунт и Telegram, справа — пароль и почта. */
+.layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: var(--space-5);
+  align-items: start;
+}
+
+.col {
+  display: grid;
+  gap: var(--space-5);
+}
+
+@media (max-width: 56rem) {
+  .layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 section {
   display: grid;
   gap: var(--space-3);
   justify-items: start;
-}
-
-section + section {
-  margin-top: var(--space-4);
 }
 
 h2 {
@@ -399,7 +415,7 @@ form {
   display: grid;
   gap: var(--space-4);
   justify-items: start;
-  width: min(100%, 26rem);
+  width: 100%;
 }
 
 form .field {

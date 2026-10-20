@@ -118,82 +118,85 @@ async function resume(p: Project) {
       </header>
 
       <div class="columns">
-        <section class="card">
-          <h2>Переводы</h2>
-          <NEmpty
-            v-if="!projects.length"
-            size="small"
-            description="Переводов ещё нет."
-          />
-          <NList
-            v-else
-            class="projects"
-          >
-            <NListItem
-              v-for="p in projects"
-              :key="p.id"
-              :data-project="p.id"
+        <div class="main-col">
+          <section class="card">
+            <h2>Переводы</h2>
+            <NEmpty
+              v-if="!projects.length"
+              size="small"
+              description="Переводов ещё нет."
+            />
+            <NList
+              v-else
+              class="projects"
             >
-              <div class="project-head">
-                <RouterLink :to="`/translations/${p.id}`">
-                  <LangPair
-                    :source="p.source_lang"
-                    :target="p.target_lang"
-                  />
-                </RouterLink>
-                <StatusMark :status="p.status" />
-              </div>
-              <p class="project-meta">
-                {{ p.model_id }}, переведено {{ Math.round(p.progress_percent) }}%
-              </p>
-              <div class="project-actions">
-                <LinkButton
-                  v-if="p.segments_done > 0"
-                  :to="`/read/${book.id}?t=${p.id}`"
+              <NListItem
+                v-for="p in projects"
+                :key="p.id"
+                :data-project="p.id"
+              >
+                <div class="project-head">
+                  <RouterLink :to="`/translations/${p.id}`">
+                    <LangPair
+                      :source="p.source_lang"
+                      :target="p.target_lang"
+                    />
+                  </RouterLink>
+                  <StatusMark :status="p.status" />
+                </div>
+                <p class="project-meta">
+                  {{ p.model_id }}, переведено {{ Math.round(p.progress_percent) }}%
+                </p>
+                <div class="project-actions">
+                  <LinkButton
+                    v-if="p.segments_done > 0"
+                    :to="`/read/${book.id}?t=${p.id}`"
+                    size="small"
+                  >
+                    Читать
+                  </LinkButton>
+                  <NButton
+                    v-if="canResume(p)"
+                    class="resume"
+                    size="small"
+                    type="primary"
+                    secondary
+                    @click="resume(p)"
+                  >
+                    Продолжить
+                  </NButton>
+                </div>
+                <ErrorAlert
+                  :message="rowError[p.id]"
                   size="small"
-                >
-                  Читать
-                </LinkButton>
-                <NButton
-                  v-if="canResume(p)"
-                  class="resume"
-                  size="small"
-                  type="primary"
-                  secondary
-                  @click="resume(p)"
-                >
-                  Продолжить
-                </NButton>
-              </div>
-              <ErrorAlert
-                :message="rowError[p.id]"
-                size="small"
-              />
-            </NListItem>
-          </NList>
-        </section>
-        <section class="card">
-          <h2>Оглавление</h2>
-          <TocTree :entries="toc" />
-        </section>
+                />
+              </NListItem>
+            </NList>
+          </section>
+          <section class="exports-history card">
+            <h2>Экспорты</h2>
+            <ErrorAlert :message="exportError || exports.error.value" />
+            <NEmpty
+              v-if="!exports.items.value.length"
+              size="small"
+              description="Экспортов ещё нет. Экспортировать перевод в EPUB, Word, Markdown, HTML или текст можно на странице перевода."
+            />
+            <ExportList
+              v-else
+              :items="exports.items.value"
+              :languages="exportLanguages"
+              @retry="retryExport"
+              @remove="removeExport"
+            />
+          </section>
+        </div>
+        <aside class="side">
+          <section class="card">
+            <h2>Оглавление</h2>
+            <TocTree :entries="toc" />
+          </section>
+        </aside>
       </div>
-
-      <section class="exports-history card">
-        <h2>Экспорты</h2>
-        <ErrorAlert :message="exportError || exports.error.value" />
-        <NEmpty
-          v-if="!exports.items.value.length"
-          size="small"
-          description="Экспортов ещё нет. Экспортировать перевод в EPUB, Word, Markdown, HTML или текст можно на странице перевода."
-        />
-        <ExportList
-          v-else
-          :items="exports.items.value"
-          :languages="exportLanguages"
-          @retry="retryExport"
-          @remove="removeExport"
-        />
-      </section>
     </template>
   </main>
 </template>
@@ -201,8 +204,17 @@ async function resume(p: Project) {
 <style scoped>
 .book-head {
   display: grid;
-  gap: var(--space-2);
+  grid-template-columns: minmax(0, 1fr) auto;
+  column-gap: var(--space-6);
+  row-gap: var(--space-2);
   justify-items: start;
+}
+
+/* Действия — справа от названия; на телефоне — под ним. */
+.book-head .actions {
+  grid-column: 2;
+  grid-row: 1 / span 3;
+  align-self: end;
 }
 
 h1 {
@@ -231,12 +243,26 @@ h1 {
   gap: var(--space-2);
 }
 
+/* Слева — переводы и экспорты, справа — оглавление: на широком экране
+   оно рядом и не уезжает при прокрутке. */
 .columns {
   display: grid;
-  grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
   gap: var(--space-5);
   align-items: start;
   margin-top: var(--space-5);
+}
+
+.main-col {
+  display: grid;
+  gap: var(--space-5);
+}
+
+.side {
+  position: sticky;
+  top: var(--space-4);
+  max-height: calc(100vh - var(--space-6));
+  overflow-y: auto;
 }
 
 h2 {
@@ -266,13 +292,25 @@ h2 {
   font-size: var(--step--1);
 }
 
-.exports-history {
-  margin-top: var(--space-5);
-}
 
-@media (max-width: 48rem) {
+
+@media (max-width: 56rem) {
+  .book-head {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .book-head .actions {
+    grid-column: auto;
+    grid-row: auto;
+  }
+
   .columns {
     grid-template-columns: 1fr;
+  }
+
+  .side {
+    position: static;
+    max-height: none;
   }
 }
 </style>

@@ -54,7 +54,7 @@ const sections = computed(() =>
   align-items: center;
   gap: var(--space-5);
   flex-wrap: wrap;
-  padding: var(--space-2) var(--space-5);
+  padding: var(--space-2) var(--page-inset);
   background: var(--surface);
   border-bottom: 1px solid var(--rule-soft);
 }
@@ -101,7 +101,6 @@ nav a[aria-current='page'] {
 @media (max-width: 40rem) {
   .app-header {
     gap: var(--space-2);
-    padding: var(--space-2) var(--space-3);
   }
 
   nav {

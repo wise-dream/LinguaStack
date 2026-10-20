@@ -127,78 +127,80 @@ const readerLink = (s: Segment) => ({
   <main class="page detail">
     <ErrorAlert :message="error" />
     <template v-if="project">
-      <section class="summary card">
-        <p class="crumb">
-          <RouterLink :to="`/books/${project.book_id}`">
-            {{ project.book_title }}
-          </RouterLink>
-        </p>
-        <header class="head">
-          <h1>
-            <LangPair
-              :source="project.source_lang"
-              :target="project.target_lang"
-            />
-          </h1>
-          <StatusMark :status="project.status" />
-        </header>
-        <p class="sub">
-          {{ project.model_id }}
-        </p>
-        <ProgressBar
-          :done="project.segments_done"
-          :failed="project.segments_failed"
-          :total="project.segments_total"
-        />
-        <ProjectFacts
-          :project="project"
-          :now="now"
-        />
-        <p
-          v-if="project.last_error"
-          class="last-error"
-        >
-          {{ project.last_error }}
-        </p>
-
-        <div class="controls">
-          <LinkButton
-            v-if="project.segments_done > 0"
-            :to="{ path: `/read/${project.book_id}`, query: { t: project.id } }"
-            type="primary"
-          >
-            Читать
-          </LinkButton>
-          <NButton
-            v-if="canPause"
-            class="pause"
-            @click="act(pauseTranslation)"
-          >
-            Приостановить
-          </NButton>
-          <NButton
-            v-if="canResume"
-            class="resume"
-            type="primary"
-            secondary
-            @click="act(resumeTranslation, true)"
-          >
-            Продолжить
-          </NButton>
-          <ConfirmButton
-            v-if="canCancel"
-            label="Отменить перевод"
-            confirm-label="Точно отменить?"
-            @confirm="act(cancelTranslation)"
+      <div class="top">
+        <section class="summary card">
+          <p class="crumb">
+            <RouterLink :to="`/books/${project.book_id}`">
+              {{ project.book_title }}
+            </RouterLink>
+          </p>
+          <header class="head">
+            <h1>
+              <LangPair
+                :source="project.source_lang"
+                :target="project.target_lang"
+              />
+            </h1>
+            <StatusMark :status="project.status" />
+          </header>
+          <p class="sub">
+            {{ project.model_id }}
+          </p>
+          <ProgressBar
+            :done="project.segments_done"
+            :failed="project.segments_failed"
+            :total="project.segments_total"
           />
-        </div>
-        <ErrorAlert :message="actionError" />
-      </section>
+          <ProjectFacts
+            :project="project"
+            :now="now"
+          />
+          <p
+            v-if="project.last_error"
+            class="last-error"
+          >
+            {{ project.last_error }}
+          </p>
 
-      <ExportPanel
-        :book-id="project.book_id"
-        :translation-id="project.id"
-      />
+          <div class="controls">
+            <LinkButton
+              v-if="project.segments_done > 0"
+              :to="{ path: `/read/${project.book_id}`, query: { t: project.id } }"
+              type="primary"
+            >
+              Читать
+            </LinkButton>
+            <NButton
+              v-if="canPause"
+              class="pause"
+              @click="act(pauseTranslation)"
+            >
+              Приостановить
+            </NButton>
+            <NButton
+              v-if="canResume"
+              class="resume"
+              type="primary"
+              secondary
+              @click="act(resumeTranslation, true)"
+            >
+              Продолжить
+            </NButton>
+            <ConfirmButton
+              v-if="canCancel"
+              label="Отменить перевод"
+              confirm-label="Точно отменить?"
+              @confirm="act(cancelTranslation)"
+            />
+          </div>
+          <ErrorAlert :message="actionError" />
+        </section>
+
+        <ExportPanel
+          :book-id="project.book_id"
+          :translation-id="project.id"
+        />
+      </div>
 
       <section class="segments card">
         <h2>Фрагменты</h2>
@@ -305,9 +307,17 @@ const readerLink = (s: Segment) => ({
   align-content: start;
 }
 
+/* Сводка и экспорт — рядом, фрагменты — под ними во всю ширину. */
+.top {
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+  gap: var(--space-5);
+}
+
 .summary {
   display: grid;
   gap: var(--space-3);
+  align-content: start;
 }
 
 .crumb {
@@ -434,6 +444,12 @@ h2 {
 
 .more {
   margin-top: var(--space-4);
+}
+
+@media (max-width: 64rem) {
+  .top {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 @media (max-width: 40rem) {
