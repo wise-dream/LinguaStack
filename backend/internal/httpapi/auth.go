@@ -115,7 +115,7 @@ func (s *server) login(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, loginFailedMessage)
 		return
 	}
-	ctx, ip := r.Context(), s.clientIP(r)
+	ctx, ip := r.Context(), s.byIP(r)
 
 	failures, err := security.RecentFailures(ctx, s.DB, email, ip, s.Cfg.LoginWindow)
 	if err != nil {

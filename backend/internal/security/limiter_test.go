@@ -70,3 +70,11 @@ func TestClientIPTrustedProxy(t *testing.T) {
 	}
 	require.Equal(t, "203.0.113.5", ClientIP("203.0.113.5:4000", []string{"1.2.3.4"}, nil), "без доверенных прокси")
 }
+
+func TestRateKey(t *testing.T) {
+	require.Equal(t, "2001:db8:1:2::/64", RateKey("2001:db8:1:2:aaaa::1"))
+	require.Equal(t, RateKey("2001:db8:1:2:aaaa::1"), RateKey("2001:db8:1:2:bbbb:cccc:dddd:eeee"))
+	require.NotEqual(t, RateKey("2001:db8:1:2::1"), RateKey("2001:db8:1:3::1"))
+	require.Equal(t, "203.0.113.5", RateKey("203.0.113.5"))
+	require.Equal(t, "не адрес", RateKey("не адрес"))
+}

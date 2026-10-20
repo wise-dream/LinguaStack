@@ -27,7 +27,7 @@ type emailChange struct {
 // форма входа. Неверный пароль — 403, а не 401: сессия жива, и клиент не
 // должен выкидывать пользователя на страницу входа.
 func (s *server) verifyCurrentPassword(w http.ResponseWriter, r *http.Request, user *models.User, password string) bool {
-	ctx, ip := r.Context(), s.clientIP(r)
+	ctx, ip := r.Context(), s.byIP(r)
 	failures, err := security.RecentFailures(ctx, s.DB, user.Email, ip, s.Cfg.LoginWindow)
 	if err != nil {
 		internalError(w, r, err)

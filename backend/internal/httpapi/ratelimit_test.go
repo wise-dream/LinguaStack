@@ -91,3 +91,59 @@ func TestHealthNotLimited(t *testing.T) {
 		require.Equal(t, http.StatusOK, c.do(http.MethodGet, "/api/health", nil).Status)
 	}
 }
+
+// Книга HTML с картинкой в data: — у книги появляется ресурс embedded/img-0001.png.
+const htmlWithImage = `<!doctype html><html><head><title>Img</title></head><body><h1>Ch</h1><p>Text.</p>` +
+	`<p><img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEElEQVR4nGP4zwAE/xkgFAAb8gP91pbyKwAAAABJRU5ErkJggg==" alt="dot"></p></body></html>`
+
+func TestBookAssetsNotLimited(t *testing.T) {
+	// Глава со множеством картинок грузит их разом: лимит запросов не должен
+	// оставлять читалку с битыми иллюстрациями.
+	env := newTestEnvWith(t, func(d *httpapi.Deps) {
+		d.Cfg.RateLimitRPS, d.Cfg.RateLimitBurst = glacial, 3
+	})
+	c := env.signedIn(t, "img@example.com")
+	b := uploadBook(t, c, "book.html", htmlWithImage)
+	for range 10 {
+		require.Equal(t, http.StatusOK, c.do(http.MethodGet, "/api/books/"+b.ID+"/assets/embedded/img-0001.png", nil).Status)
+	}
+	require.Equal(t, http.StatusOK, c.do(http.MethodGet, "/api/books", nil).Status)
+	require.Equal(t, http.StatusOK, c.do(http.MethodGet, "/api/books", nil).Status)
+	require.Equal(t, http.StatusTooManyRequests, c.do(http.MethodGet, "/api/books", nil).Status, "остальное ограничено")
+}
+
+func TestRegisterIPv6GroupedBy64(t *testing.T) {
+	// У клиента IPv6 обычно целая сеть /64: по одному адресу лимит
+	// обходился бы перебором адресов.
+	env := newTestEnvWith(t, func(d *httpapi.Deps) {
+		d.Cfg.RegisterPerHour = 1
+		d.Cfg.TrustedProxies = []netip.Prefix{netip.MustParsePrefix("127.0.0.0/8"), netip.MustParsePrefix("::1/128")}
+	})
+	c := env.client(t)
+	reg := func(email, xff string) int {
+		return c.do(http.MethodPost, "/api/auth/register",
+			map[string]string{"email": email, "password": testPassword},
+			[2]string{"X-Forwarded-For", xff}).Status
+	}
+	require.Equal(t, http.StatusCreated, reg("v1@example.com", "2001:db8:1:2::1"))
+	require.Equal(t, http.StatusTooManyRequests, reg("v2@example.com", "2001:db8:1:2:ffff::9"), "та же /64")
+	require.Equal(t, http.StatusCreated, reg("v3@example.com", "2001:db8:1:3::1"), "другая /64")
+}
+
+func TestLoginAttemptsGroupedBy64(t *testing.T) {
+	env := newTestEnvWith(t, func(d *httpapi.Deps) {
+		d.Cfg.LoginMaxAttempts = 2
+		d.Cfg.TrustedProxies = []netip.Prefix{netip.MustParsePrefix("127.0.0.0/8"), netip.MustParsePrefix("::1/128")}
+	})
+	env.signedIn(t, "brute@example.com")
+	c := env.client(t)
+	login := func(password, xff string) int {
+		return c.do(http.MethodPost, "/api/auth/login",
+			map[string]string{"email": "brute@example.com", "password": password},
+			[2]string{"X-Forwarded-For", xff}).Status
+	}
+	require.Equal(t, http.StatusUnauthorized, login("guess-number-one", "2001:db8:9:9::1"))
+	require.Equal(t, http.StatusUnauthorized, login("guess-number-two", "2001:db8:9:9::2"))
+	require.Equal(t, http.StatusTooManyRequests, login(testPassword, "2001:db8:9:9::3"), "новый адрес той же /64 — не новые попытки")
+	require.Equal(t, http.StatusOK, login(testPassword, "2001:db8:9:a::1"), "другая сеть входит")
+}

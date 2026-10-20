@@ -39,6 +39,10 @@ func (s *server) clientIP(r *http.Request) string {
 	return security.ClientIP(r.RemoteAddr, r.Header.Values("X-Forwarded-For"), s.Cfg.TrustedProxies)
 }
 
+// byIP — ключ лимита по адресу клиента (IPv6 — по сети /64): и для
+// корзин, и для журнала попыток входа.
+func (s *server) byIP(r *http.Request) string { return security.RateKey(s.clientIP(r)) }
+
 // byUser — ключ лимита по пользователю; маршрут уже прошёл requireUser.
 func byUser(r *http.Request) string { return UserFromContext(r.Context()).ID.String() }
 

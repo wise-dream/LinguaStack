@@ -84,7 +84,8 @@ func (rt *router) admin(pattern string, h http.HandlerFunc) {
 }
 
 // stream — маршрут со входом без лимита частоты: поток событий открыт,
-// пока открыта вкладка, и переподключается сам.
+// пока открыта вкладка, и переподключается сам; картинки книги глава
+// грузит десятками разом, а отдать файл дёшево.
 func (rt *router) stream(pattern string, h http.HandlerFunc) { rt.add(pattern, true, h) }
 
 // NewServer возвращает маршрутизатор со всеми эндпоинтами.
@@ -123,10 +124,10 @@ func buildRoutes(s *server) *router {
 	rt := &router{mux: http.NewServeMux(), s: s}
 
 	rt.public("GET /api/health", s.health)
-	rt.public("POST /api/auth/register", limited(s.limits.register, s.clientIP, tooManyRegisters, s.register))
+	rt.public("POST /api/auth/register", limited(s.limits.register, s.byIP, tooManyRegisters, s.register))
 	rt.public("POST /api/auth/login", s.login)
 	rt.public("POST /api/auth/logout", s.logout)
-	rt.public("POST /api/auth/password-reset", limited(s.limits.reset, s.clientIP, tooManyResets, s.requestPasswordReset))
+	rt.public("POST /api/auth/password-reset", limited(s.limits.reset, s.byIP, tooManyResets, s.requestPasswordReset))
 	rt.public("POST /api/auth/password-reset/confirm", s.confirmPasswordReset)
 	rt.protected("GET /api/me", s.me)
 	rt.protected("PATCH /api/me", s.changeEmail)
@@ -138,7 +139,7 @@ func buildRoutes(s *server) *router {
 	rt.protected("DELETE /api/books/{id}", s.deleteBook)
 	rt.protected("GET /api/books/{id}/toc", s.getTOC)
 	rt.protected("GET /api/books/{id}/chapters/{index}", s.getChapter)
-	rt.protected("GET /api/books/{id}/assets/{path...}", s.getAsset)
+	rt.stream("GET /api/books/{id}/assets/{path...}", s.getAsset)
 	rt.protected("GET /api/books/{id}/search", s.searchBook)
 	rt.protected("GET /api/books/{id}/position", s.getPosition)
 	rt.protected("PUT /api/books/{id}/position", s.putPosition)

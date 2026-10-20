@@ -124,6 +124,17 @@ func ClientIP(remoteAddr string, forwardedFor []string, trusted []netip.Prefix) 
 	return client.String()
 }
 
+// RateKey — ключ лимита по адресу клиента. IPv6 сводится к сети /64:
+// провайдер выдаёт клиенту целую сеть, и по одному адресу лимит обходился
+// бы перебором адресов. Негодная строка возвращается как есть.
+func RateKey(ip string) string {
+	addr, err := netip.ParseAddr(ip)
+	if err != nil || addr.Unmap().Is4() {
+		return ip
+	}
+	return netip.PrefixFrom(addr, 64).Masked().String()
+}
+
 func isTrusted(addr netip.Addr, trusted []netip.Prefix) bool {
 	for _, p := range trusted {
 		if p.Contains(addr) {
