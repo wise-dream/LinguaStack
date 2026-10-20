@@ -90,13 +90,18 @@ func run() error {
 		slog.Warn("LINGUASTACK_SECRET_KEY не задан: конфигурации провайдеров с ключами API недоступны")
 	}
 
+	mailer, err := buildMailer(cfg)
+	if err != nil {
+		return err
+	}
+
 	stopping, stopStreams := context.WithCancel(context.Background())
 	defer stopStreams()
 	server := &http.Server{
 		Addr: cfg.HTTPAddr,
 		Handler: httpapi.NewServer(httpapi.Deps{
 			Cfg: cfg, DB: gdb, Store: fileStore, Importers: importers.Default(cfg), Secrets: secrets,
-			Stopping: stopping,
+			Mailer: mailer, Stopping: stopping,
 		}),
 		ReadHeaderTimeout: 10 * time.Second,
 	}

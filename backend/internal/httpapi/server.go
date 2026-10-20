@@ -12,6 +12,7 @@ import (
 	"github.com/vnovels/linguastack/internal/config"
 	"github.com/vnovels/linguastack/internal/db/models"
 	"github.com/vnovels/linguastack/internal/importers"
+	"github.com/vnovels/linguastack/internal/mail"
 	"github.com/vnovels/linguastack/internal/metrics"
 	"github.com/vnovels/linguastack/internal/providers"
 	"github.com/vnovels/linguastack/internal/security"
@@ -32,6 +33,8 @@ type Deps struct {
 	BuildProvider func(cfg models.ProviderConfig, apiKey string) (providers.Provider, error)
 	// SSEInterval — частота опроса прогресса для потока событий.
 	SSEInterval time.Duration
+	// Mailer — отправка писем (сброс пароля); nil — почта не настроена.
+	Mailer mail.Sender
 	// Metrics — реестр метрик api; nil — создаётся по DB.
 	Metrics *metrics.API
 	// Stopping отменяется в начале остановки сервера: потоки событий по
@@ -123,6 +126,8 @@ func buildRoutes(s *server) *router {
 	rt.public("POST /api/auth/register", limited(s.limits.register, s.clientIP, tooManyRegisters, s.register))
 	rt.public("POST /api/auth/login", s.login)
 	rt.public("POST /api/auth/logout", s.logout)
+	rt.public("POST /api/auth/password-reset", limited(s.limits.reset, s.clientIP, tooManyResets, s.requestPasswordReset))
+	rt.public("POST /api/auth/password-reset/confirm", s.confirmPasswordReset)
 	rt.protected("GET /api/me", s.me)
 	rt.protected("PATCH /api/me", s.changeEmail)
 	rt.protected("POST /api/me/password", s.changePassword)
@@ -172,6 +177,7 @@ func buildRoutes(s *server) *router {
 	rt.admin("GET /api/admin/overview", s.adminOverview)
 	rt.admin("GET /api/admin/users", s.adminListUsers)
 	rt.admin("PATCH /api/admin/users/{id}", s.adminPatchUser)
+	rt.admin("POST /api/admin/users/{id}/password-reset", s.adminResetLink)
 
 	rt.protected("PATCH /api/segments/{id}", s.patchSegment)
 	rt.protected("POST /api/segments/{id}/retry", s.retrySegment)

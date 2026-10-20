@@ -101,6 +101,16 @@ type Settings struct {
 	// не отдаёт. Доступ — тем же токеном.
 	WorkerMetricsAddr string `env:"LINGUASTACK_WORKER_METRICS_ADDR"`
 
+	// Почта для ссылок сброса пароля (необязательно). TLS: starttls (по
+	// умолчанию), tls (порт 465) или none — только для релея на том же хосте.
+	SMTPHost         string        `env:"LINGUASTACK_SMTP_HOST"`
+	SMTPPort         int           `env:"LINGUASTACK_SMTP_PORT" envDefault:"587"`
+	SMTPUsername     string        `env:"LINGUASTACK_SMTP_USERNAME"`
+	SMTPPassword     string        `env:"LINGUASTACK_SMTP_PASSWORD"`
+	SMTPFrom         string        `env:"LINGUASTACK_SMTP_FROM"`
+	SMTPTLS          string        `env:"LINGUASTACK_SMTP_TLS" envDefault:"starttls"`
+	PasswordResetTTL time.Duration `env:"LINGUASTACK_PASSWORD_RESET_TTL" envDefault:"1h"`
+
 	// --- Telegram, дополнение §17 ---
 	// Токен — секрет развёртывания (ТЗ §9). Без токена и имени бот
 	// выключен, а api отвечает enabled: false.

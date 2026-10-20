@@ -125,5 +125,6 @@ func TestPublicRoutesAreOnlyTheExpectedOnes(t *testing.T) {
 	}
 	require.ElementsMatch(t, []string{
 		"GET /api/health", "POST /api/auth/register", "POST /api/auth/login", "POST /api/auth/logout",
+		"POST /api/auth/password-reset", "POST /api/auth/password-reset/confirm",
 	}, public)
 }

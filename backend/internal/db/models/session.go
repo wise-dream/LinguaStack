@@ -22,3 +22,11 @@ type LoginAttempt struct {
 	IP        string `gorm:"column:ip;not null"`
 	Succeeded bool   `gorm:"not null"`
 }
+
+// PasswordReset — одноразовый код сброса пароля; хранится хеш.
+type PasswordReset struct {
+	TokenHash []byte    `gorm:"primaryKey"`
+	UserID    uuid.UUID `gorm:"type:uuid"`
+	ExpiresAt time.Time
+	CreatedAt time.Time
+}
