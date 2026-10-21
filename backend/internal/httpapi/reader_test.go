@@ -3,6 +3,7 @@ package httpapi_test
 import (
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -13,13 +14,29 @@ import (
 
 type searchBody struct {
 	Results []struct {
-		ChapterIndex int    `json:"chapter_index"`
-		NodeID       string `json:"node_id"`
-		In           string `json:"in"`
-		Snippet      string `json:"snippet"`
+		ChapterIndex int      `json:"chapter_index"`
+		NodeID       string   `json:"node_id"`
+		In           string   `json:"in"`
+		Snippet      string   `json:"snippet"`
+		Hits         []string `json:"hits"`
 	} `json:"results"`
-	Truncated bool `json:"truncated"`
+	Total      int    `json:"total"`
+	Truncated  bool   `json:"truncated"`
+	Suggestion string `json:"suggestion"`
 }
+
+// snippets — отрывки результатов с одной стороны (original или translation).
+func (b searchBody) snippets(in string) []string {
+	var out []string
+	for _, r := range b.Results {
+		if r.In == in {
+			out = append(out, r.Snippet)
+		}
+	}
+	return out
+}
+
+func q(s string) string { return "q=" + url.QueryEscape(s) }
 
 func search(t *testing.T, c *apiClient, bookID, query string) (int, searchBody) {
 	t.Helper()
@@ -76,16 +93,17 @@ func TestSearchQueryLength(t *testing.T) {
 	}
 }
 
-func TestSearchLimit50SetsTruncated(t *testing.T) {
+func TestSearchLimit100CountsAll(t *testing.T) {
 	e := newTranslationEnv(t, nil)
 	var b strings.Builder
 	b.WriteString("# T\n\n")
-	for i := range 60 {
+	for i := range 120 {
 		fmt.Fprintf(&b, "Кот номер %d.\n\n", i)
 	}
 	bookID := e.book(t, b.String())
-	_, body := search(t, e.c, bookID, "q=%D0%BA%D0%BE%D1%82") // «кот»
-	require.Len(t, body.Results, 50)
+	_, body := search(t, e.c, bookID, q("кот"))
+	require.Len(t, body.Results, 100)
+	require.Equal(t, 120, body.Total, "общее число — все совпадения, не только показанные")
 	require.True(t, body.Truncated)
 	require.Contains(t, body.Results[0].Snippet, "номер 0.", "порядок — порядок чтения")
 }
@@ -177,4 +195,76 @@ func TestPositionTranslationDeletedBecomesNull(t *testing.T) {
 	e.c.do(http.MethodGet, "/api/books/"+bookID+"/position", nil).JSON(t, &got)
 	require.Nil(t, got.TranslationID, "удалённый перевод не ломает позицию")
 	require.Equal(t, "parallel", got.Mode)
+}
+
+const cats = "# Глава\n\nКошки спали на крыше.\n\nПёс лаял во дворе."
+
+func TestSearchWordForms(t *testing.T) {
+	// Формы слова: язык оригинала без метаданных угадан по алфавиту.
+	e := newTranslationEnv(t, nil)
+	bookID := e.book(t, cats)
+	_, body := search(t, e.c, bookID, q("кошка"))
+	require.Equal(t, []string{"Кошки спали на крыше."}, body.snippets("original"))
+	require.Equal(t, 1, body.Total)
+	require.Equal(t, []string{"Кошки"}, body.Results[0].Hits, "найденное слово — для подсветки")
+}
+
+func TestSearchWordsAnyOrderAndPhrase(t *testing.T) {
+	e := newTranslationEnv(t, nil)
+	bookID := e.book(t, cats)
+	found := func(query string) []string {
+		status, body := search(t, e.c, bookID, q(query))
+		require.Equal(t, http.StatusOK, status, query)
+		return body.snippets("original")
+	}
+	require.Equal(t, []string{"Кошки спали на крыше."}, found("крыша кошки"), "слова в любом порядке")
+	require.Empty(t, found("кошки двор"), "все слова — в одном блоке")
+	require.Equal(t, []string{"Кошки спали на крыше."}, found(`"спали на крыше"`), "фраза в кавычках")
+	require.Empty(t, found(`"крыше спали"`), "фраза — в своём порядке")
+	require.Equal(t, []string{"Кошки спали на крыше."}, found("«спали на крыше»"))
+	require.Equal(t, []string{"Пёс лаял во дворе."}, found("лая"), "последнее слово — начало слова")
+}
+
+func TestSearchTranslationUsesTargetLanguage(t *testing.T) {
+	// Перевод ищется по формам языка перевода, оригинал — по своему
+	// языку (здесь украинский: без словаря форм, только точные слова).
+	e := newTranslationEnv(t, nil)
+	bookID := e.book(t, cats)
+	r := e.create(t, bookID, map[string]any{"provider_config_id": e.ollamaConfig(t), "source_lang": "uk"})
+	require.Equal(t, http.StatusCreated, r.Status, "тело: %s", r.Body)
+	var p projectBody
+	r.JSON(t, &p)
+	e.runWorker(t)
+
+	_, body := search(t, e.c, bookID, q("кошку")+"&translation_id="+p.ID)
+	require.Equal(t, []string{"RU:Кошки спали на крыше."}, body.snippets("translation"))
+	require.Empty(t, body.snippets("original"))
+}
+
+func TestSearchSuggestsOnTypo(t *testing.T) {
+	e := newTranslationEnv(t, nil)
+	bookID := e.book(t, cats)
+	_, body := search(t, e.c, bookID, q("кошкм спали"))
+	require.Zero(t, body.Total)
+	require.Equal(t, "кошки спали", body.Suggestion)
+
+	_, body = search(t, e.c, bookID, q("зебра"))
+	require.Empty(t, body.Suggestion, "непохожему слову подсказки нет")
+}
+
+func TestSearchFallsBackToSubstring(t *testing.T) {
+	// Кусок слова или кода, которого нет среди слов, ищется подстрокой.
+	e := newTranslationEnv(t, nil)
+	bookID := e.book(t, "# T\n\nCall fmt.Println(x) twice.\n\nNothing here.")
+	_, body := search(t, e.c, bookID, q("rintln("))
+	require.Equal(t, []string{"Call fmt.Println(x) twice."}, body.snippets("original"))
+	require.Equal(t, []string{"rintln("}, body.Results[0].Hits)
+}
+
+func TestSearchCJKBySubstring(t *testing.T) {
+	// В китайском и японском слова не разделены пробелами: только подстрока.
+	e := newTranslationEnv(t, nil)
+	bookID := e.book(t, "# T\n\n我喜欢猫。\n\n狗在跑。")
+	_, body := search(t, e.c, bookID, q("喜欢"))
+	require.Equal(t, []string{"我喜欢猫。"}, body.snippets("original"))
 }

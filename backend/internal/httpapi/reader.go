@@ -5,13 +5,12 @@ import (
 	"net/http"
 	"slices"
 	"strings"
-	"unicode"
 	"unicode/utf8"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 
-	"github.com/vnovels/linguastack/internal/cdm"
+	"github.com/vnovels/linguastack/internal/booksearch"
 	"github.com/vnovels/linguastack/internal/db/models"
 	"github.com/vnovels/linguastack/internal/store"
 )
@@ -19,25 +18,14 @@ import (
 const (
 	searchMinRunes   = 2
 	searchMaxRunes   = 200
-	searchMaxResults = 50
-	snippetRadius    = 60
+	searchMaxResults = 100
 	maxNodeIDLength  = 64
 )
 
 var readModes = []string{models.ReadParallel, models.ReadOriginal, models.ReadTranslation}
 
-type searchResult struct {
-	ChapterIndex int    `json:"chapter_index"`
-	NodeID       string `json:"node_id"`
-	In           string `json:"in"`
-	Snippet      string `json:"snippet"`
-
-	order, ordinal int // порядок чтения: глава в оглавлении, затем блок
-}
-
-// searchBook — поиск по тексту книги и одного её перевода (ТЗ §8.3).
-// Порядок результатов — порядок чтения: после ручной перестановки глав
-// index главы с ним не совпадает.
+// searchBook — поиск по тексту книги и одного её перевода (ТЗ §8.3,
+// дополнение §19). Порядок результатов — порядок чтения.
 func (s *server) searchBook(w http.ResponseWriter, r *http.Request) {
 	book, ok := loadOwned[models.Book](s, w, r, "id")
 	if !ok {
@@ -57,50 +45,12 @@ func (s *server) searchBook(w http.ResponseWriter, r *http.Request) {
 		}
 		project = p
 	}
-
-	order := map[int]int{}
-	var results []searchResult
-	needle := foldRunes(q)
-	n := 0
-	walk(book.CDM.Data.Chapters, func(ch *cdm.Chapter) {
-		order[ch.Index] = n
-		n++
-		for i, b := range ch.Blocks {
-			if snippet, hit := matchSnippet(b.Text, needle); hit && len(results) <= searchMaxResults {
-				results = append(results, searchResult{ChapterIndex: ch.Index, NodeID: b.NodeID, In: "original",
-					Snippet: snippet, order: order[ch.Index], ordinal: i})
-			}
-		}
-	})
-	if project != nil {
-		var segs []models.TranslationSegment
-		err := s.DB.WithContext(r.Context()).
-			Where("project_id = ? AND translated_text ILIKE ? ESCAPE '\\'", project.ID, "%"+escapeLike(q)+"%").
-			Order("chapter_index, ordinal").Limit(searchMaxResults + 1).Find(&segs).Error
-		if err != nil {
-			internalError(w, r, err)
-			return
-		}
-		for _, seg := range segs {
-			snippet, _ := matchSnippet(*seg.TranslatedText, needle)
-			results = append(results, searchResult{ChapterIndex: seg.ChapterIndex, NodeID: seg.NodeID, In: "translation",
-				Snippet: snippet, order: order[seg.ChapterIndex], ordinal: seg.Ordinal})
-		}
+	res, err := booksearch.Search(r.Context(), s.DB, booksearch.Params{Book: book, Project: project, Query: q, Limit: searchMaxResults})
+	if err != nil {
+		internalError(w, r, err)
+		return
 	}
-	slices.SortStableFunc(results, func(a, b searchResult) int {
-		if a.order != b.order {
-			return a.order - b.order
-		}
-		return a.ordinal - b.ordinal
-	})
-	truncated := len(results) > searchMaxResults
-	if truncated {
-		results = results[:searchMaxResults]
-	}
-	if results == nil {
-		results = []searchResult{}
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"results": results, "truncated": truncated})
+	writeJSON(w, http.StatusOK, res)
 }
 
 // bookProject — перевод пользователя, принадлежащий этой книге.
@@ -115,54 +65,6 @@ func (s *server) bookProject(r *http.Request, book *models.Book, raw string) (*m
 	}
 	return p, true
 }
-
-func walk(chapters []cdm.Chapter, visit func(*cdm.Chapter)) {
-	for i := range chapters {
-		visit(&chapters[i])
-		walk(chapters[i].Children, visit)
-	}
-}
-
-// foldRunes — строчные буквы по одной на символ: так позиция совпадения в
-// свёрнутом тексте совпадает с позицией в исходном (strings.ToLower может
-// менять длину).
-func foldRunes(s string) []rune {
-	out := []rune(s)
-	for i, r := range out {
-		out[i] = unicode.ToLower(r)
-	}
-	return out
-}
-
-// matchSnippet ищет needle без учёта регистра и возвращает фрагмент вокруг
-// первого совпадения.
-func matchSnippet(text string, needle []rune) (string, bool) {
-	runes := []rune(text)
-	folded := foldRunes(text)
-	at := -1
-	for i := 0; i+len(needle) <= len(folded); i++ {
-		if slices.Equal(folded[i:i+len(needle)], needle) {
-			at = i
-			break
-		}
-	}
-	if at < 0 {
-		return "", false
-	}
-	start, end := max(0, at-snippetRadius), min(len(runes), at+len(needle)+snippetRadius)
-	snippet := string(runes[start:end])
-	if start > 0 {
-		snippet = "…" + snippet
-	}
-	if end < len(runes) {
-		snippet += "…"
-	}
-	return snippet, true
-}
-
-var likeEscaper = strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
-
-func escapeLike(s string) string { return likeEscaper.Replace(s) }
 
 type positionIn struct {
 	ChapterIndex  int     `json:"chapter_index"`
