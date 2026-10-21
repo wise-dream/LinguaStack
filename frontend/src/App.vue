@@ -1,13 +1,16 @@
 <script setup lang="ts">
-import { NButton, NConfigProvider, dateRuRU, ruRU } from 'naive-ui'
+import { NButton, NConfigProvider, darkTheme, dateRuRU, ruRU } from 'naive-ui'
 import { watchEffect } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import AppHeader from './components/AppHeader.vue'
+import ThemeSwitch from './components/ThemeSwitch.vue'
 import { useSession } from './session'
 import { themeOverrides } from './styles/theme'
+import { useTheme } from './theme'
 
 const session = useSession()
+const theme = useTheme()
 const route = useRoute()
 const router = useRouter()
 
@@ -24,11 +27,13 @@ async function logout() {
 <template>
   <NConfigProvider
     abstract
-    :theme-overrides="themeOverrides"
+    :theme="theme.dark.value ? darkTheme : null"
+    :theme-overrides="theme.dark.value ? themeOverrides.dark : themeOverrides.light"
     :locale="ruRU"
     :date-locale="dateRuRU"
   >
     <AppHeader v-if="session.me.value">
+      <ThemeSwitch />
       <span class="who">{{ session.me.value.email }}</span>
       <NButton
         quaternary
@@ -45,7 +50,7 @@ async function logout() {
 <style scoped>
 .who {
   color: var(--muted);
-  margin-right: var(--space-3);
+  margin: 0 var(--space-3) 0 var(--space-2);
 }
 
 /* На телефоне адрес почты съедает строку шапки — остаётся «Выйти». */

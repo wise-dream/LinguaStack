@@ -58,6 +58,6 @@ const elapsed = computed(() => {
 }
 
 .warn {
-  color: #6b5600;
+  color: var(--warn);
 }
 </style>

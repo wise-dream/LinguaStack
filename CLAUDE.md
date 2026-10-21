@@ -60,6 +60,12 @@ SCREENSHOTS=1 npm run e2e   # снимки в test-results/screens/ для ви�
   удобнее). Цвета, шрифты и отступы — токены `src/styles/tokens.css`; тема
   Naive — `src/styles/theme.ts`, тест сверяет её с токенами. Компонент Naive
   без импорта не замечают ни `vue-tsc`, ни линтер — только тесты.
+* Две темы: тёмная — блок `:root[data-theme='dark']` в `tokens.css` и
+  `palettes.dark` в `theme.ts`; новый цветовой токен — в оба блока (тест
+  ловит пропуск), цвет в компоненте — только через токен. `data-theme`
+  ставят `public/theme-init.js` (до отрисовки; встроенный скрипт запрещает
+  CSP) и `src/theme.ts`. Снимки тёмной темы — временный конфиг Playwright с
+  `colorScheme: 'dark'`.
 * Текст книги и перевода попадает в `v-html` только через `renderInline`
   (`src/lib/inline.ts` — сначала экранирует); правило `vue/no-v-html`
   включено, исключения — с комментарием-обоснованием.

@@ -34,7 +34,7 @@ const notes = computed(() => {
   line-height: 1.4;
   padding-left: var(--space-2);
   border-left: 2px solid var(--highlight);
-  color: #5c4a00;
+  color: var(--warn);
 }
 
 .proof.error {

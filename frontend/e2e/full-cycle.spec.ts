@@ -273,3 +273,29 @@ test('администрирование', async ({ page }) => {
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)
   expect(overflow).toBeLessThanOrEqual(0)
 })
+
+test('тема: как в системе и выбранная вручную', async ({ page }, info) => {
+  const theme = () => page.evaluate(() => document.documentElement.dataset.theme)
+  const paper = () => page.evaluate(() => getComputedStyle(document.body).backgroundColor)
+
+  await page.emulateMedia({ colorScheme: 'dark' })
+  await register(page, `e2e-theme-${info.project.name}-${Date.now()}@example.com`)
+  expect(await theme()).toBe('dark')
+  expect(await paper()).toBe('rgb(18, 22, 28)')
+
+  // Выбор переживает перезагрузку и важнее системы.
+  await page.getByRole('button', { name: 'Тема: как в системе' }).click()
+  await page.locator('.n-popselect-menu').getByText('Светлая', { exact: true }).click()
+  expect(await theme()).toBe('light')
+  await page.reload()
+  await expect(page.getByRole('button', { name: 'Тема: светлая' })).toBeVisible()
+  expect(await theme()).toBe('light')
+  expect(await paper()).toBe('rgb(244, 246, 243)')
+
+  // «Как в системе» снова следит за системой, в том числе на лету.
+  await page.getByRole('button', { name: 'Тема: светлая' }).click()
+  await page.locator('.n-popselect-menu').getByText('Как в системе', { exact: true }).click()
+  expect(await theme()).toBe('dark')
+  await page.emulateMedia({ colorScheme: 'light' })
+  await expect.poll(theme).toBe('light')
+})

@@ -118,7 +118,7 @@ input:not([type='checkbox'], [type='radio'], [type='file'], .n-input__input-el):
 textarea:not(.n-input__textarea-el):focus-visible {
   outline: none;
   border-color: var(--ink-original);
-  box-shadow: 0 0 0 2px rgb(27 36 64 / 20%);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--ink-original) 20%, transparent);
 }
 
 input[type='checkbox'],

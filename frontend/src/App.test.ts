@@ -1,15 +1,22 @@
 import { mount, flushPromises } from '@vue/test-utils'
+import { NConfigProvider, NPopselect, darkTheme } from 'naive-ui'
 import { describe, expect, it } from 'vitest'
+import { nextTick } from 'vue'
 import { createMemoryHistory } from 'vue-router'
 
 import App from './App.vue'
 import type { User } from './api/types'
 import { createAppRouter } from './router'
 import { SESSION, createSession } from './session'
+import { themeOverrides } from './styles/theme'
+import { THEME, createTheme, type Theme } from './theme'
+
+/** Тема без браузера: не трогает <html> и localStorage общего jsdom. */
+const isolatedTheme = () => createTheme({ storage: null, media: null, root: document.createElement('html') })
 
 const user: User = { id: 'u1', email: 'reader@example.com', role: 'user', created_at: '2026-10-19T00:00:00Z' }
 
-async function mountAt(path: string, signedIn = true, who: User = user) {
+async function mountAt(path: string, signedIn = true, who: User = user, theme: Theme = isolatedTheme()) {
   const session = createSession({
     me: async () => {
       if (!signedIn) throw new Error('нет сессии')
@@ -23,7 +30,9 @@ async function mountAt(path: string, signedIn = true, who: User = user) {
   const router = createAppRouter(createMemoryHistory())
   await router.push(path)
   await router.isReady()
-  const wrapper = mount(App, { global: { plugins: [router], provide: { [SESSION as symbol]: session } } })
+  const wrapper = mount(App, {
+    global: { plugins: [router], provide: { [SESSION as symbol]: session, [THEME as symbol]: theme } },
+  })
   await flushPromises()
   return wrapper
 }
@@ -51,7 +60,7 @@ describe('оболочка приложения', () => {
   it('показывает, кто вошёл', async () => {
     const wrapper = await mountAt('/')
     expect(wrapper.text()).toContain('reader@example.com')
-    expect(wrapper.find('button').text()).toBe('Выйти')
+    expect(wrapper.findAll('button').map((b) => b.text())).toContain('Выйти')
   })
 
   it('библиотека остаётся текущим разделом на странице книги', async () => {
@@ -67,5 +76,41 @@ describe('администрирование', () => {
     expect(admin.findAll('nav a').map((a) => a.text())).toContain('Администрирование')
     const plain = await mountAt('/')
     expect(plain.findAll('nav a').map((a) => a.text())).not.toContain('Администрирование')
+  })
+})
+
+describe('тема оформления', () => {
+  it('переключатель в шапке; Naive UI получает тёмную тему', async () => {
+    const theme = isolatedTheme()
+    const wrapper = await mountAt('/', true, user, theme)
+    const button = wrapper.find('button.theme-switch')
+    expect(button.attributes('aria-label')).toBe('Тема: как в системе')
+    const provider = wrapper.findComponent(NConfigProvider)
+    expect(provider.props('theme')).toBeNull()
+    expect(provider.props('themeOverrides')).toBe(themeOverrides.light)
+
+    wrapper.findComponent(NPopselect).vm.$emit('update:value', 'dark')
+    await nextTick()
+    expect(theme.choice.value).toBe('dark')
+    expect(provider.props('theme')).toBe(darkTheme)
+    expect(provider.props('themeOverrides')).toBe(themeOverrides.dark)
+    expect(button.attributes('aria-label')).toBe('Тема: тёмная')
+  })
+
+  it('варианты: как в системе, светлая, тёмная', async () => {
+    const wrapper = await mountAt('/')
+    const options = wrapper.findComponent(NPopselect).props('options') as { label: string; value: string }[]
+    expect(options.map((o) => [o.value, o.label])).toEqual([
+      ['system', 'Как в системе'],
+      ['light', 'Светлая'],
+      ['dark', 'Тёмная'],
+    ])
+  })
+
+  it('тема без входа тоже действует', async () => {
+    const theme = isolatedTheme()
+    theme.set('dark')
+    const wrapper = await mountAt('/login', false, user, theme)
+    expect(wrapper.findComponent(NConfigProvider).props('theme')).toBe(darkTheme)
   })
 })

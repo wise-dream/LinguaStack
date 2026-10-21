@@ -1,7 +1,9 @@
 /* Дизайн-токены LinguaStack. Идея — билингвальное издание: две краски для
    двух текстов (оригинал и перевод) на холодной бумаге и корректорский
-   красный для замечаний на полях. */
+   красный для замечаний на полях. Тёмная тема — блок ниже, его включает
+   data-theme на <html> (src/theme.ts). */
 :root {
+  color-scheme: light;
   --paper: #f4f6f3;
   --paper-raised: #fbfcfa;
   /* Карточки, поля ввода и шапка — чистый лист поверх бумаги страницы. */
@@ -14,6 +16,8 @@
   /* Граница карточек и строк таблиц — тише линейки полей. */
   --rule-soft: #e3e7e1;
   --muted: #5e6a66;
+  /* Предупреждения текстом: охра, читаемая на бумаге. */
+  --warn: #6b5600;
 
   --font-book: 'Literata Variable', 'Literata', Georgia, 'Times New Roman', serif;
   --font-ui: 'Golos Text Variable', 'Golos Text', system-ui, -apple-system, 'Segoe UI', sans-serif;
@@ -38,6 +42,8 @@
   --radius: 6px;
   --radius-card: 10px;
   --shadow-card: 0 1px 2px rgb(27 36 64 / 5%), 0 1px 1px rgb(27 36 64 / 3%);
+  /* Всплывающие панели (поиск в читалке) поверх текста. */
+  --shadow-pop: 0 8px 24px rgb(27 36 64 / 12%);
   --measure: 68ch;
   /* Граница страницы: шапка, панель читалки и контент выровнены по ней.
      На очень широком мониторе — не шире 110rem, иначе строки расползаются. */
@@ -45,4 +51,25 @@
   /* Отступ, который выравнивает содержимое полосы во всю ширину (шапки,
      панели) по границе страницы. */
   --page-inset: max(var(--space-4), calc((100% - var(--page-width)) / 2));
+}
+
+/* Ночная палитра: то же издание при лампе. Значения повторяет palettes.dark
+   в theme.ts; тест следит, чтобы у каждого цветового токена здесь было
+   своё тёмное значение. */
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --paper: #12161c;
+  --paper-raised: #171c23;
+  --surface: #1c2229;
+  --ink-original: #d5dce8;
+  --ink-translation: #8fd0c0;
+  --proof: #f28b82;
+  --highlight: #d9b44a;
+  --rule: #4a5461;
+  --rule-soft: #29303a;
+  --muted: #9aa4a0;
+  --warn: #e0c25c;
+  /* На тёмной бумаге тень видна, только если она гуще. */
+  --shadow-card: 0 1px 2px rgb(0 0 0 / 35%), 0 1px 1px rgb(0 0 0 / 20%);
+  --shadow-pop: 0 8px 24px rgb(0 0 0 / 50%);
 }

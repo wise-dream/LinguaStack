@@ -115,7 +115,7 @@ function go(r: SearchResult) {
   background: var(--paper-raised);
   border: 1px solid var(--rule);
   border-radius: var(--radius);
-  box-shadow: 0 8px 24px rgb(27 36 64 / 12%);
+  box-shadow: var(--shadow-pop);
 }
 
 ol {
