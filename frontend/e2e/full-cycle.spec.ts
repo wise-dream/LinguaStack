@@ -44,6 +44,8 @@ async function pick(page: Page, scope: Page | Locator, label: string, option: st
 
 // На узком экране разделы и аккаунт спрятаны в меню под кнопкой «Меню».
 async function openMenu(page: Page) {
+  // isVisible не ждёт: сразу после входа шапки ещё может не быть.
+  await expect(page.locator('header.app-header')).toBeVisible()
   const burger = page.getByRole('button', { name: 'Меню' })
   if ((await burger.isVisible()) && (await burger.getAttribute('aria-expanded')) !== 'true') await burger.click()
 }
@@ -274,6 +276,12 @@ test('смена пароля и «Забыли пароль?»', async ({ page 
 
 test('администрирование', async ({ page }) => {
   // Администратора заводит e2e/run-stack.sh командой api -set-role.
+  // Вход отвечает с задержкой, как на медленном сервере (в CI так и было):
+  // помощники шапки должны дождаться её, а не успевать раньше.
+  await page.route('**/api/auth/login', async (route) => {
+    await new Promise((r) => setTimeout(r, 1500))
+    await route.continue()
+  })
   await page.goto('/login')
   await page.getByLabel('Электронная почта').fill('admin@e2e.example')
   await page.getByLabel('Пароль').fill('e2e admin password')
