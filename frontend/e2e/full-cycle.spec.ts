@@ -42,6 +42,22 @@ async function pick(page: Page, scope: Page | Locator, label: string, option: st
   await page.locator('.n-base-select-menu').getByText(option, { exact: true }).click()
 }
 
+// На узком экране разделы и аккаунт спрятаны в меню под кнопкой «Меню».
+async function openMenu(page: Page) {
+  const burger = page.getByRole('button', { name: 'Меню' })
+  if ((await burger.isVisible()) && (await burger.getAttribute('aria-expanded')) !== 'true') await burger.click()
+}
+
+async function go(page: Page, section: string) {
+  await openMenu(page)
+  await page.getByRole('navigation', { name: 'Разделы' }).getByRole('link', { name: section }).click()
+}
+
+async function logout(page: Page) {
+  await openMenu(page)
+  await page.getByRole('button', { name: 'Выйти' }).click()
+}
+
 async function register(page: Page, email: string) {
   await page.goto('/register')
   await page.getByLabel('Электронная почта').fill(email)
@@ -56,7 +72,7 @@ test('импорт → перевод → экспорт → чтение', asyn
   await shot(page, 'library-empty')
 
   // Подключение тестовой модели.
-  await page.getByRole('link', { name: 'Модели' }).click()
+  await go(page, 'Модели')
   await pick(page, page, 'Провайдер', 'Тестовый провайдер (только для сквозных тестов)')
   await page.getByLabel('Название').fill('Тестовая модель')
   await page.getByRole('button', { name: 'Добавить подключение' }).click()
@@ -66,7 +82,7 @@ test('импорт → перевод → экспорт → чтение', asyn
   expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(0)
 
   // Загрузка книги и оглавление.
-  await page.getByRole('link', { name: 'Библиотека' }).click()
+  await go(page, 'Библиотека')
   await page.getByRole('link', { name: 'Загрузить книгу' }).first().click()
   await page.locator('input[type=file]').setInputFiles({ name: 'alice.md', mimeType: 'text/markdown', buffer: Buffer.from(BOOK) })
   await expect(page.getByText('Глава вторая')).toBeVisible()
@@ -186,7 +202,7 @@ test('импорт HTML', async ({ page }, info) => {
   await shot(page, 'import-html')
 
   // Книга без переводов: из читалки и из библиотеки — прямо к новому переводу.
-  await page.getByRole('link', { name: 'Библиотека' }).click()
+  await go(page, 'Библиотека')
   const row = page.locator('tr', { hasText: 'Web Book' })
   await row.getByRole('link', { name: 'Читать' }).click()
   await expect(page.getByRole('link', { name: 'Перевести книгу' })).toBeVisible()
@@ -194,7 +210,7 @@ test('импорт HTML', async ({ page }, info) => {
   expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(0)
   await page.getByRole('link', { name: 'Перевести книгу' }).click()
   await expect(page.getByRole('heading', { name: 'Новый перевод' })).toBeVisible()
-  await page.getByRole('link', { name: 'Библиотека' }).click()
+  await go(page, 'Библиотека')
   await expect(row.getByRole('link', { name: 'Перевести' })).toBeVisible()
   await shot(page, 'library-book')
   await row.getByRole('link', { name: 'Перевести' }).click()
@@ -206,7 +222,7 @@ test('импорт HTML', async ({ page }, info) => {
 test('настройки Telegram', async ({ page }, info) => {
   const email = `e2e-tg-${info.project.name}-${Date.now()}@example.com`
   await register(page, email)
-  await page.getByRole('link', { name: 'Настройки' }).click()
+  await go(page, 'Настройки')
   await expect(page.getByRole('heading', { name: 'Настройки', level: 1 })).toBeVisible()
   await expect(page.locator('main').getByText(email)).toBeVisible()
   await page.getByRole('button', { name: 'Привязать Telegram' }).click()
@@ -221,7 +237,7 @@ test('смена пароля и «Забыли пароль?»', async ({ page 
   const email = `e2e-pw-${info.project.name}-${Date.now()}@example.com`
   const next = 'brand new password 42'
   await register(page, email)
-  await page.getByRole('link', { name: 'Настройки' }).click()
+  await go(page, 'Настройки')
 
   const form = page.locator('form.password-form')
   await form.getByLabel('Текущий пароль').fill('not my password at all')
@@ -236,7 +252,7 @@ test('смена пароля и «Забыли пароль?»', async ({ page 
   expect(overflow).toBeLessThanOrEqual(0)
 
   // Выход и вход: старый пароль больше не подходит, новый — да.
-  await page.getByRole('button', { name: 'Выйти' }).click()
+  await logout(page)
   await expect(page.getByRole('heading', { name: 'Вход' })).toBeVisible()
   await page.getByLabel('Электронная почта').fill(email)
   await page.getByLabel('Пароль').fill('correct horse battery staple')
@@ -247,7 +263,7 @@ test('смена пароля и «Забыли пароль?»', async ({ page 
   await expect(page.getByRole('heading', { name: 'Загрузите первую книгу' })).toBeVisible()
 
   // «Забыли пароль?» отвечает одинаково — есть аккаунт или нет.
-  await page.getByRole('button', { name: 'Выйти' }).click()
+  await logout(page)
   await page.getByRole('link', { name: 'Забыли пароль?' }).click()
   await expect(page.getByRole('heading', { name: 'Восстановление доступа' })).toBeVisible()
   await page.getByLabel('Электронная почта').fill(email)
@@ -262,7 +278,7 @@ test('администрирование', async ({ page }) => {
   await page.getByLabel('Электронная почта').fill('admin@e2e.example')
   await page.getByLabel('Пароль').fill('e2e admin password')
   await page.getByRole('button', { name: 'Войти' }).click()
-  await page.getByRole('link', { name: 'Администрирование' }).click()
+  await go(page, 'Администрирование')
   await expect(page.getByRole('heading', { name: 'Обзор' })).toBeVisible()
   await expect(page.locator('section.overview')).toContainText('Ollama сервера')
   const self = page.locator('tbody', { hasText: 'admin@e2e.example' })
@@ -284,10 +300,12 @@ test('тема: как в системе и выбранная вручную', 
   expect(await paper()).toBe('rgb(18, 22, 28)')
 
   // Выбор переживает перезагрузку и важнее системы.
+  await openMenu(page)
   await page.getByRole('button', { name: 'Тема: как в системе' }).click()
   await page.locator('.n-popselect-menu').getByText('Светлая', { exact: true }).click()
   expect(await theme()).toBe('light')
   await page.reload()
+  await openMenu(page)
   await expect(page.getByRole('button', { name: 'Тема: светлая' })).toBeVisible()
   expect(await theme()).toBe('light')
   expect(await paper()).toBe('rgb(244, 246, 243)')
@@ -298,4 +316,23 @@ test('тема: как в системе и выбранная вручную', 
   expect(await theme()).toBe('dark')
   await page.emulateMedia({ colorScheme: 'light' })
   await expect.poll(theme).toBe('light')
+})
+
+test('шапка: на узком экране разделы — в меню', async ({ page }, info) => {
+  await register(page, `e2e-menu-${info.project.name}-${Date.now()}@example.com`)
+  const nav = page.getByRole('navigation', { name: 'Разделы' })
+  const burger = page.getByRole('button', { name: 'Меню' })
+  if (info.project.name !== 'mobile') {
+    await expect(burger).toBeHidden()
+    await expect(nav).toBeVisible()
+    return
+  }
+  await expect(nav).toBeHidden()
+  await burger.click()
+  await expect(nav).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Выйти' })).toBeVisible()
+  await shot(page, 'menu')
+  await nav.getByRole('link', { name: 'Переводы' }).click()
+  await expect(nav).toBeHidden()
+  await expect(page.getByRole('heading', { name: 'Переводы', level: 1 })).toBeVisible()
 })

@@ -1,6 +1,6 @@
 import { mount, flushPromises } from '@vue/test-utils'
 import { NConfigProvider, NPopselect, darkTheme } from 'naive-ui'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { nextTick } from 'vue'
 import { createMemoryHistory } from 'vue-router'
 
@@ -112,5 +112,54 @@ describe('тема оформления', () => {
     theme.set('dark')
     const wrapper = await mountAt('/login', false, user, theme)
     expect(wrapper.findComponent(NConfigProvider).props('theme')).toBe(darkTheme)
+  })
+})
+
+describe('меню на телефоне', () => {
+  it('кнопка «Меню» раскрывает разделы и аккаунт и прячет их обратно', async () => {
+    const wrapper = await mountAt('/')
+    const burger = wrapper.find('button.burger')
+    expect(burger.attributes('aria-label')).toBe('Меню')
+    expect(burger.attributes('aria-expanded')).toBe('false')
+    const menu = wrapper.find(`#${burger.attributes('aria-controls')}`)
+    expect(menu.classes()).not.toContain('open')
+    expect(menu.find('nav').exists()).toBe(true)
+    expect(menu.text()).toContain('reader@example.com')
+    expect(menu.text()).toContain('Выйти')
+
+    await burger.trigger('click')
+    expect(burger.attributes('aria-expanded')).toBe('true')
+    expect(menu.classes()).toContain('open')
+
+    await burger.trigger('click')
+    expect(burger.attributes('aria-expanded')).toBe('false')
+  })
+
+  it('переход в раздел закрывает меню', async () => {
+    const wrapper = await mountAt('/')
+    await wrapper.find('button.burger').trigger('click')
+    await wrapper.findAll('nav a').find((a) => a.text() === 'Переводы')!.trigger('click')
+    await flushPromises()
+    expect(wrapper.find('button.burger').attributes('aria-expanded')).toBe('false')
+  })
+
+  it('Escape закрывает меню и возвращает фокус на кнопку', async () => {
+    const wrapper = await mountAt('/')
+    const burger = wrapper.find('button.burger')
+    const focus = vi.spyOn(burger.element as HTMLButtonElement, 'focus')
+    await burger.trigger('click')
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+    await nextTick()
+    expect(burger.attributes('aria-expanded')).toBe('false')
+    expect(focus).toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('нажатие мимо меню закрывает его', async () => {
+    const wrapper = await mountAt('/')
+    expect(wrapper.find('.scrim').exists()).toBe(false)
+    await wrapper.find('button.burger').trigger('click')
+    await wrapper.find('.scrim').trigger('click')
+    expect(wrapper.find('button.burger').attributes('aria-expanded')).toBe('false')
   })
 })

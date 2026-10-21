@@ -52,11 +52,4 @@ async function logout() {
   color: var(--muted);
   margin: 0 var(--space-3) 0 var(--space-2);
 }
-
-/* На телефоне адрес почты съедает строку шапки — остаётся «Выйти». */
-@media (max-width: 40rem) {
-  .who {
-    display: none;
-  }
-}
 </style>

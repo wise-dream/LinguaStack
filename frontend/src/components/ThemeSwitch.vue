@@ -72,6 +72,21 @@ function choose(value: ThemeChoice) {
           />
         </template>
       </svg>
+      <span class="theme-label">{{ label }}</span>
     </NButton>
   </NPopselect>
 </template>
+
+<style scoped>
+/* В шапке — только значок; в меню на узком экране — со словами. */
+.theme-label {
+  display: none;
+  margin-left: var(--space-2);
+}
+
+@media (max-width: 56rem) {
+  .theme-label {
+    display: inline;
+  }
+}
+</style>
