@@ -160,11 +160,15 @@ test('импорт → перевод → экспорт → чтение', asyn
   await alice.locator('textarea').press('Control+Enter')
   await expect(alice.locator('.translation')).toHaveText('Алиса начала очень уставать.')
 
-  // Поиск находит правку в переводе.
-  await page.getByPlaceholder('Поиск по книге').fill('уставать')
+  // Поиск находит правку в переводе — в другой форме слова.
+  await page.getByPlaceholder('Поиск по книге').fill('уставала')
   await page.getByPlaceholder('Поиск по книге').press('Enter')
-  await page.locator('.search-results button').first().click()
+  await expect(page.locator('.search-results .summary')).toHaveText('Найдено 1 совпадение')
+  await expect(page.locator('.search-results mark')).toHaveText('уставать')
+  await shot(page, 'search')
+  await page.locator('.search-results button.hit').first().click()
   await expect(alice).toHaveClass(/found/)
+  await expect(page.locator('.stepper output')).toHaveText('1 из 1')
 
   // Вторая глава и возврат к ней после перезагрузки (позиция на сервере).
   if (info.project.name === 'mobile') await page.getByRole('button', { name: 'Оглавление' }).click()

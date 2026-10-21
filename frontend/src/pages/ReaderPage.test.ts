@@ -164,10 +164,25 @@ describe('читалка (ТЗ §8.3)', () => {
     expect(row().find('[role=alert]').text()).toBe('Повторить можно, когда перевод не выполняется')
   })
 
-  it('поиск переходит к главе и подсвечивает фрагмент', async () => {
+  it('поиск переходит к главе, отмечает фрагмент и подсвечивает слова', async () => {
+    const highlights = new Map<string, { ranges: Range[] }>()
+    vi.stubGlobal('CSS', { escape: (s: string) => s, highlights })
+    vi.stubGlobal('Highlight', class {
+      ranges: Range[]
+      constructor(...ranges: Range[]) {
+        this.ranges = ranges
+      }
+    })
     const { w, router } = await mountReader('/read/b1?t=p1&ch=0', {
       'GET /api/books/b1/search': {
-        body: { results: [{ chapter_index: 1, node_id: 'ch0001/b0004', in: 'original', snippet: 'The Rabbit ran.' }], truncated: false },
+        body: {
+          results: [
+            { chapter_index: 1, node_id: 'ch0001/b0004', in: 'original', snippet: 'The Rabbit ran.', hits: ['Rabbit'] },
+            { chapter_index: 1, node_id: 'ch0001/b0001', in: 'translation', snippet: 'Алиса очень устала.', hits: ['устала'] },
+          ],
+          total: 2,
+          truncated: false,
+        },
       },
     })
     await w.find('input[type=search]').setValue('rabbit')
@@ -177,6 +192,19 @@ describe('читалка (ТЗ §8.3)', () => {
     await flushPromises()
     expect(router.currentRoute.value.query.ch).toBe('1')
     expect(w.find('[data-node="ch0001/b0004"]').classes()).toContain('found')
+    const painted = () => highlights.get('search-hit')?.ranges.map((r) => r.toString())
+    expect(painted()).toEqual(['Rabbit'])
+
+    // Следующая находка — в той же главе, в переводе.
+    await w.find('button[aria-label="Следующее совпадение"]').trigger('click')
+    await flushPromises()
+    expect(w.find('[data-node="ch0001/b0001"]').classes()).toContain('found')
+    expect(painted()).toEqual(['устала'])
+
+    // Переход по оглавлению снимает подсветку.
+    await w.findAll('nav.reader-toc button').find((b) => b.text() === 'Глава 1')!.trigger('click')
+    await flushPromises()
+    expect(highlights.has('search-hit')).toBe(false)
   })
 
   it('без главы в адресе открывается сохранённая позиция', async () => {

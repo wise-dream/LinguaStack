@@ -228,11 +228,18 @@ export interface SearchResult {
   node_id: string
   in: 'original' | 'translation'
   snippet: string
+  /** Найденные слова, как они стоят в тексте, — для подсветки. */
+  hits: string[]
 }
 
 export interface SearchResponse {
+  /** Первые совпадения в порядке чтения. */
   results: SearchResult[]
+  /** Все совпадения, не только показанные. */
+  total: number
   truncated: boolean
+  /** Запрос с исправленной опечаткой — когда ничего не нашлось. */
+  suggestion?: string
 }
 
 export type ExportFormat = 'epub' | 'markdown' | 'docx' | 'html' | 'txt'

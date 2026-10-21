@@ -18,6 +18,7 @@ import LinkButton from '../components/LinkButton.vue'
 import SelectField from '../components/SelectField.vue'
 import ReaderColumns from '../reader/ReaderColumns.vue'
 import ReaderSearch from '../reader/ReaderSearch.vue'
+import { clearHits, hitRanges, paintHits } from '../reader/highlight'
 import SegmentRow from '../reader/SegmentRow.vue'
 
 const route = useRoute()
@@ -31,6 +32,8 @@ const chapter = ref<Chapter | null>(null)
 const segments = ref<Map<string, Segment>>(new Map())
 const mode = ref<ReadMode>('parallel')
 const found = ref('')
+// Находка поиска, слова которой подсвечены в тексте.
+const hit = ref<SearchResult | null>(null)
 const error = ref('')
 const tocOpen = ref(false)
 
@@ -102,6 +105,7 @@ async function loadChapter() {
   if (target) {
     found.value = target
     document.querySelector(`[data-node="${CSS.escape(target)}"]`)?.scrollIntoView({ block: 'start' })
+    paintHit()
   } else if (restore) {
     document.querySelector(`[data-node="${CSS.escape(restore)}"]`)?.scrollIntoView({ block: 'start' })
   } else {
@@ -134,10 +138,12 @@ onMounted(async () => {
 function openChapter(index: number) {
   tocOpen.value = false
   found.value = ''
+  forgetHit()
   void router.push({ query: { ...route.query, ch: String(index), n: undefined } })
 }
 
 function setTranslation(id: string) {
+  forgetHit()
   void router.replace({ query: { ...route.query, t: id || undefined, n: undefined } })
 }
 
@@ -149,10 +155,26 @@ function setMode(m: ReadMode) {
 
 function goTo(r: SearchResult) {
   found.value = r.node_id
+  hit.value = r
   void router.push({ query: { ...route.query, ch: String(r.chapter_index), n: r.node_id } })
   if (r.chapter_index === chapterIndex.value) {
     document.querySelector(`[data-node="${CSS.escape(r.node_id)}"]`)?.scrollIntoView({ block: 'start' })
+    paintHit()
   }
+  // Другая глава: подсветит loadChapter, когда текст будет на странице.
+}
+
+// Слова находки подсвечиваются в своей колонке: в оригинале или переводе.
+function paintHit() {
+  const h = hit.value
+  const cell = h && document.querySelector(`[data-node="${CSS.escape(h.node_id)}"] .${h.in}`)
+  if (h && cell && h.node_id === found.value) paintHits(hitRanges(cell, h.hits))
+  else clearHits()
+}
+
+function forgetHit() {
+  hit.value = null
+  clearHits()
 }
 
 function updateSegment(s: Segment) {
@@ -185,6 +207,7 @@ function observeRows() {
 const flush = () => saver.flush()
 onMounted(() => window.addEventListener('pagehide', flush))
 onBeforeUnmount(() => {
+  clearHits()
   window.removeEventListener('pagehide', flush)
   observer?.disconnect()
   saver.flush()

@@ -210,3 +210,14 @@ input[type='radio'] {
 .page > h1 {
   margin-bottom: var(--space-5);
 }
+
+/* Найденные поиском слова в тексте книги (src/reader/highlight.ts). */
+::highlight(search-hit) {
+  background-color: color-mix(in srgb, var(--highlight) 55%, transparent);
+}
+
+/* У полей поиска крестик очистки свой (clearable у NInput): родной крестик
+   браузера был бы вторым. */
+input[type='search']::-webkit-search-cancel-button {
+  appearance: none;
+}
