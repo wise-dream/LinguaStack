@@ -62,6 +62,8 @@ test('импорт → перевод → экспорт → чтение', asyn
   await page.getByRole('button', { name: 'Добавить подключение' }).click()
   await expect(page.getByText('Тестовая модель', { exact: true })).toBeVisible()
   await shot(page, 'providers')
+  // Длинное название провайдера в списке не распирает страницу вбок.
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(0)
 
   // Загрузка книги и оглавление.
   await page.getByRole('link', { name: 'Библиотека' }).click()
