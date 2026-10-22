@@ -18,6 +18,8 @@ import (
 // с тем кодом, который им проверяют.
 type Fake struct {
 	// Scenario: echo, prefix, protocol_violation, drops_placeholder,
+	// drops_placeholder_until_told (теряет метки, пока запрос не назовёт
+	// потерянные), mangles_marker (последнюю метку пишет «⟧N⟧»),
 	// rate_limited, timeout, refusal, empty.
 	Scenario string
 	Prefix   string // для prefix и protocol_violation после восстановления
@@ -186,6 +188,19 @@ func (f *Fake) complete(ctx context.Context, modelID string, req CompletionReque
 			text = f.Prefix + text
 		case "drops_placeholder":
 			text = f.Prefix + fakeMarkerRe.ReplaceAllString(text, "")
+		case "drops_placeholder_until_told":
+			if strings.Contains(req.User, "lost these protected markers") {
+				text = f.Prefix + text
+			} else {
+				text = f.Prefix + fakeMarkerRe.ReplaceAllString(text, "")
+			}
+		case "mangles_marker":
+			// Как qwen3:8b на ссылках: закрывающая метка — «⟧N⟧».
+			text = f.Prefix + text
+			if locs := fakeMarkerRe.FindAllStringIndex(text, -1); len(locs) > 0 {
+				last := locs[len(locs)-1]
+				text = text[:last[0]] + "⟧" + strings.TrimPrefix(text[last[0]:last[1]], "⟦") + text[last[1]:]
+			}
 		case "empty":
 			text = ""
 		}

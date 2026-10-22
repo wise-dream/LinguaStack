@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"unicode/utf8"
 
 	"github.com/vnovels/linguastack/internal/cdm"
@@ -128,9 +129,16 @@ func (j *batchJob) attempt(ctx context.Context, b Batch, attempts int) (retry []
 
 	lastReason := ""
 	var lastFindings []Finding
+	// feedback — что именно было не так в прошлом ответе (потерянные
+	// метки): общее «соблюдай формат» слабая модель пропускает и повторяет
+	// ту же ошибку во всех попытках.
+	feedback := ""
 	for try := 0; try < attempts; try++ {
 		prompt := BuildUserPrompt(masked)
-		if try > 0 {
+		switch {
+		case feedback != "":
+			prompt = feedback + prompt
+		case try > 0:
 			prompt = formatReminder + prompt
 		}
 		res, err := j.svc.provider.Complete(ctx, j.svc.modelID, providers.CompletionRequest{
@@ -185,8 +193,11 @@ func (j *batchJob) attempt(ctx context.Context, b Batch, attempts int) (retry []
 		}
 
 		var bad []int
+		feedback = ""
 		for i, seg := range b.Segments {
-			translatedMasked := parsed[i+1]
+			// Испорченную метку («⟧2⟧» вместо «⟦2⟧») чиним до проверки:
+			// перевод цел, а повтор слабая модель часто портит так же.
+			translatedMasked := cdm.RepairMarkers(masks[i].Text, parsed[i+1])
 			translated := cdm.Unmask(translatedMasked, masks[i].Placeholders)
 			findings := ValidateSegment(ValidationInput{
 				Source: seg.Text, Translation: translated,
@@ -197,6 +208,9 @@ func (j *batchJob) attempt(ctx context.Context, b Batch, attempts int) (retry []
 				bad = append(bad, i)
 				lastFindings = findings
 				lastReason = "Перевод не прошёл проверку.\nПоследний ответ модели:\n" + clip(translatedMasked)
+				if n == 1 {
+					feedback = markerFeedback(masks[i].Text, translatedMasked)
+				}
 				continue
 			}
 			j.out.Results[seg.NodeID] = SegmentOutcome{
@@ -216,6 +230,26 @@ func (j *batchJob) attempt(ctx context.Context, b Batch, attempts int) (retry []
 	}
 	j.fail(b.Segments[0], lastFindings, lastReason)
 	return nil, nil
+}
+
+// markerFeedback — подсказка для повтора одного сегмента: какие метки
+// модель потеряла или выдумала. "" — с метками всё в порядке.
+func markerFeedback(masked, translated string) string {
+	var mismatch *cdm.PlaceholderMismatchError
+	if !errors.As(cdm.VerifyPlaceholders(masked, translated), &mismatch) {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("IMPORTANT: your previous translation of this segment was rejected.")
+	if len(mismatch.Missing) > 0 {
+		b.WriteString(" It lost these protected markers: " + strings.Join(mismatch.Missing, " ") + ".")
+	}
+	if len(mismatch.Extra) > 0 {
+		b.WriteString(" It added markers that are not in the source: " + strings.Join(mismatch.Extra, " ") + ".")
+	}
+	b.WriteString(" Copy every marker from the source into the translation exactly once and unchanged — ⟦, the number, ⟧ —" +
+		" even when you rephrase the sentence. Two markers around words (a link) must stay around their translation.\n\n")
+	return b.String()
 }
 
 func (j *batchJob) fail(seg SegmentRef, findings []Finding, reason string) {

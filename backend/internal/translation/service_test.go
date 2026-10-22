@@ -151,6 +151,33 @@ func TestDroppedPlaceholderIsError(t *testing.T) {
 	require.Contains(t, findingCodes(r.Findings), "placeholder_mismatch")
 }
 
+func TestMangledLinkMarkerRepaired(t *testing.T) {
+	// Модель написала закрывающую метку ссылки как «⟧2⟧»: перевод цел,
+	// метка однозначна — чинится без повторного запроса.
+	fake := providers.NewFake("mangles_marker")
+	out, err := run(t, fake, "See [the docs](https://x.io/a) now.")
+	require.NoError(t, err)
+	r := result(t, out, 0)
+	require.NotNil(t, r.Translated)
+	require.Equal(t, "RU:See [the docs](https://x.io/a) now.", *r.Translated)
+	require.Equal(t, 1, fake.CallCount())
+}
+
+func TestRetryNamesLostMarkers(t *testing.T) {
+	// Повтор говорит модели, какую метку она потеряла: слабая модель иначе
+	// повторяет ту же ошибку во всех попытках.
+	fake := providers.NewFake("drops_placeholder_until_told")
+	out, err := run(t, fake, "Call `run()` now.")
+	require.NoError(t, err)
+	r := result(t, out, 0)
+	require.NotNil(t, r.Translated, "второй ответ с меткой принят")
+	require.Equal(t, "RU:Call `run()` now.", *r.Translated)
+	calls := fake.Calls()
+	require.Len(t, calls, 2)
+	require.NotContains(t, calls[0].User, "lost these protected markers")
+	require.Contains(t, calls[1].User, "lost these protected markers: ⟦1⟧")
+}
+
 func findingCodes(f []translation.Finding) []string {
 	out := make([]string, len(f))
 	for i, x := range f {

@@ -6,6 +6,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"unicode"
 	"unicode/utf8"
 )
 
@@ -214,3 +215,87 @@ func countMarkers(text string) map[string]int {
 	}
 	return counts
 }
+
+// RepairMarkers чинит метки, которые модель записала с ошибкой: «⟧2⟧»,
+// «⟦2» или «2⟧» вместо «⟦2⟧» — а одиночную скобку ставит на место
+// единственной потерянной метки. Чинится только метка, которой не хватает
+// в ответе: так перевод слабой модели не отвергается из-за одной скобки, а
+// выдуманную или лишнюю метку по-прежнему ловит VerifyPlaceholders.
+// Неоднозначный случай (две потерянные метки на одну скобку) не трогается.
+func RepairMarkers(masked, translated string) string {
+	missing := countMarkers(masked)
+	for k, n := range countMarkers(translated) {
+		missing[k] -= n
+	}
+	lost := 0
+	for _, n := range missing {
+		lost += max(n, 0)
+	}
+	if lost == 0 {
+		return translated
+	}
+	take := func(num string) bool {
+		key := string(markerOpen) + num + string(markerClose)
+		if missing[key] <= 0 {
+			return false
+		}
+		missing[key]--
+		lost--
+		return true
+	}
+
+	var b strings.Builder
+	var orphans []int // позиции одиночных скобок в b
+	prevDigit := false
+	for i := 0; i < len(translated); {
+		rest := translated[i:]
+		if m := markerRe.FindStringIndex(rest); m != nil && m[0] == 0 {
+			b.WriteString(rest[:m[1]])
+			i += m[1]
+			prevDigit = false
+			continue
+		}
+		if m := brokenMarkerRe.FindStringSubmatchIndex(rest); m != nil {
+			var num string
+			bare := false
+			switch {
+			case m[2] >= 0: // ⟧N⟧
+				num = rest[m[2]:m[3]]
+			case m[4] >= 0: // ⟦N
+				num = rest[m[4]:m[5]]
+			default: // N⟧
+				num, bare = rest[m[6]:m[7]], true
+			}
+			// «N⟧» — только с начала числа: из «12⟧» не выйдет «1⟦2⟧».
+			if (!bare || !prevDigit) && take(num) {
+				b.WriteString(string(markerOpen) + num + string(markerClose))
+				i += m[1]
+				prevDigit = false
+				continue
+			}
+		}
+		r, size := utf8.DecodeRuneInString(rest)
+		if r == markerOpen || r == markerClose {
+			orphans = append(orphans, b.Len())
+		}
+		b.WriteString(rest[:size])
+		prevDigit = unicode.IsDigit(r)
+		i += size
+	}
+	out := b.String()
+	if lost != 1 || len(orphans) != 1 {
+		return out
+	}
+	for k, n := range missing {
+		if n > 0 {
+			at := orphans[0]
+			_, size := utf8.DecodeRuneInString(out[at:])
+			return out[:at] + k + out[at+size:]
+		}
+	}
+	return out
+}
+
+// brokenMarkerRe — испорченная метка: «⟧N⟧», «⟦N» без закрывающей или «N⟧»
+// без открывающей. Целые «⟦N⟧» RepairMarkers пропускает раньше.
+var brokenMarkerRe = regexp.MustCompile(`^(?:⟧(\d+)⟧|⟦(\d+)|(\d+)⟧)`)
