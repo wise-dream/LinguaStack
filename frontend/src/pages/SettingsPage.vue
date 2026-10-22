@@ -4,8 +4,9 @@
 // уведомлений.
 import { NButton, NSwitch } from 'naive-ui'
 import { onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { useRouter } from 'vue-router'
 
-import { changeEmail, changePassword } from '../api/auth'
+import { changeEmail, changePassword, deleteAccount } from '../api/auth'
 import { errorMessage } from '../api/client'
 import { getTelegram, linkTelegram, patchTelegram, unlinkTelegram } from '../api/telegram'
 import type { TelegramLink, TelegramSettings, TelegramState } from '../api/types'
@@ -18,6 +19,7 @@ import { useSession } from '../session'
 const POLL_MS = 3000
 
 const session = useSession()
+const router = useRouter()
 const telegram = ref<TelegramState | null>(null)
 const link = ref<TelegramLink | null>(null)
 const error = ref('')
@@ -28,6 +30,7 @@ let stopped = false
 // Формы профиля: у каждой своя ошибка и своё «готово».
 const password = reactive({ current: '', next: '', error: '', done: '', busy: false })
 const email = reactive({ value: '', current: '', error: '', done: '', busy: false })
+const removal = reactive({ password: '', error: '', busy: false })
 
 async function submitPassword() {
   Object.assign(password, { error: '', done: '', busy: true })
@@ -51,6 +54,19 @@ async function submitEmail() {
     email.error = errorMessage(e)
   } finally {
     email.busy = false
+  }
+}
+
+async function removeAccount() {
+  Object.assign(removal, { error: '', busy: true })
+  try {
+    await deleteAccount(removal.password)
+    session.forget()
+    await router.replace({ path: '/login', query: { deleted: '1' } })
+  } catch (e) {
+    removal.error = errorMessage(e)
+  } finally {
+    removal.busy = false
   }
 }
 
@@ -246,6 +262,41 @@ async function unlink() {
               </NButton>
             </template>
           </template>
+        </section>
+
+        <section
+          class="delete-account card"
+          aria-labelledby="delete-title"
+        >
+          <h2 id="delete-title">
+            Удаление аккаунта
+          </h2>
+          <p class="muted">
+            Удалятся книги, переводы, экспорты, подключения к моделям и привязка Telegram.
+            Отменить нельзя.
+          </p>
+          <form
+            class="delete-form"
+            novalidate
+            @submit.prevent
+          >
+            <TextField
+              v-model="removal.password"
+              label="Текущий пароль"
+              name="delete_password"
+              type="password"
+              autocomplete="current-password"
+              required
+            />
+            <ErrorAlert :message="removal.error" />
+            <ConfirmButton
+              class="delete"
+              label="Удалить аккаунт"
+              confirm-label="Точно удалить аккаунт?"
+              :disabled="removal.busy || !removal.password"
+              @confirm="removeAccount"
+            />
+          </form>
         </section>
       </div>
       <div class="col">

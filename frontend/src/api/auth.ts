@@ -18,6 +18,10 @@ export const changePassword = (currentPassword: string, newPassword: string) =>
 export const changeEmail = (email: string, currentPassword: string) =>
   request<User>('PATCH', '/api/me', { email, current_password: currentPassword })
 
+/** Удаление аккаунта со всеми данными; сессия гаснет на сервере. */
+export const deleteAccount = (currentPassword: string) =>
+  request<void>('DELETE', '/api/me', { current_password: currentPassword })
+
 /** Ответ одинаков для любого адреса: аккаунт не выдаётся. */
 export const requestPasswordReset = (email: string) =>
   request<{ message: string }>('POST', '/api/auth/password-reset', { email })

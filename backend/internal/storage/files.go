@@ -372,6 +372,15 @@ func (s *FileStore) DeleteExport(userID, bookID, exportID uuid.UUID, ext string)
 	return nil
 }
 
+// DeleteUser удаляет все файлы пользователя: книги, ресурсы, экспорты.
+// Идемпотентно, как DeleteBook.
+func (s *FileStore) DeleteUser(userID uuid.UUID) error {
+	if err := os.RemoveAll(filepath.Join(s.root, userID.String())); err != nil {
+		return fmt.Errorf("удаление файлов пользователя: %w", err)
+	}
+	return nil
+}
+
 // DeleteBook удаляет все файлы книги (ТЗ §13). Идемпотентно: отсутствие
 // каталога — не ошибка, иначе повторная чистка срывается.
 func (s *FileStore) DeleteBook(userID, bookID uuid.UUID) error {

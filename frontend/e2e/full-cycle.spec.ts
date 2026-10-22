@@ -364,3 +364,20 @@ test('шапка: на узком экране разделы — в меню', 
   await expect(nav).toBeHidden()
   await expect(page.getByRole('heading', { name: 'Переводы', level: 1 })).toBeVisible()
 })
+
+test('удаление аккаунта', async ({ page }, info) => {
+  const email = `e2e-delete-${info.project.name}-${Date.now()}@example.com`
+  await register(page, email)
+  await go(page, 'Настройки')
+  const section = page.locator('section.delete-account')
+  await section.getByLabel('Текущий пароль').fill('correct horse battery staple')
+  await section.getByRole('button', { name: 'Удалить аккаунт' }).click()
+  await shot(page, 'settings-delete')
+  await section.getByRole('button', { name: 'Точно удалить аккаунт?' }).click()
+  await expect(page.getByRole('status')).toHaveText('Аккаунт и все его данные удалены.')
+
+  await page.getByLabel('Электронная почта').fill(email)
+  await page.getByLabel('Пароль').fill('correct horse battery staple')
+  await page.getByRole('button', { name: 'Войти' }).click()
+  await expect(page.getByRole('alert')).toHaveText('Неверный адрес или пароль')
+})

@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"errors"
+	"log/slog"
 	"net/http"
 
 	"gorm.io/gorm"
@@ -114,4 +115,54 @@ func (s *server) changeEmail(w http.ResponseWriter, r *http.Request) {
 	}
 	user.Email = email
 	writeJSON(w, http.StatusOK, user)
+}
+
+type accountDeletion struct {
+	CurrentPassword string `json:"current_password"`
+}
+
+// deleteAccount удаляет аккаунт со всеми данными (GDPR, дополнение §18):
+// строки уходят каскадом от users, журнал попыток входа — по адресу,
+// файлы — каталогом пользователя в хранилище. Задачи worker-а теряют
+// аренду и останавливаются сами.
+func (s *server) deleteAccount(w http.ResponseWriter, r *http.Request) {
+	var in accountDeletion
+	if !decodeJSON(w, r, &in) {
+		return
+	}
+	user := UserFromContext(r.Context())
+	if !s.verifyCurrentPassword(w, r, user, in.CurrentPassword) {
+		return
+	}
+	if user.Role == models.RoleAdmin {
+		var others int64
+		err := s.DB.WithContext(r.Context()).Model(&models.User{}).
+			Where("role = ? AND is_active AND id <> ?", models.RoleAdmin, user.ID).Count(&others).Error
+		if err != nil {
+			internalError(w, r, err)
+			return
+		}
+		if others == 0 {
+			writeError(w, http.StatusConflict,
+				"Вы единственный администратор — сначала назначьте администратором кого-то ещё")
+			return
+		}
+	}
+	err := s.DB.WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("email = ?", user.Email).Delete(&models.LoginAttempt{}).Error; err != nil {
+			return err
+		}
+		return tx.Delete(&models.User{}, "id = ?", user.ID).Error
+	})
+	if err != nil {
+		internalError(w, r, err)
+		return
+	}
+	// Строк уже нет: сбой с файлами не возвращает аккаунт, он остаётся в
+	// журнале, чтобы дочистить каталог руками.
+	if err := s.Store.DeleteUser(user.ID); err != nil {
+		slog.Error("файлы удалённого аккаунта не удалены", "user", user.ID, "error", err)
+	}
+	http.SetCookie(w, s.sessionCookie("", -1))
+	w.WriteHeader(http.StatusNoContent)
 }

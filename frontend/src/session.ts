@@ -52,9 +52,14 @@ export function createSession(api: AuthApi = authApi) {
     try {
       await api.logout()
     } finally {
-      me.value = null
-      known = true
+      forget()
     }
+  }
+
+  /** Сессии больше нет (аккаунт удалён): без запроса к серверу. */
+  function forget() {
+    me.value = null
+    known = true
   }
 
   /** Страж маршрутов и реакция на истёкшую сессию. */
@@ -79,7 +84,7 @@ export function createSession(api: AuthApi = authApi) {
     })
   }
 
-  return { me, load, login, register, logout, install }
+  return { me, load, login, register, logout, forget, install }
 }
 
 export type Session = ReturnType<typeof createSession>

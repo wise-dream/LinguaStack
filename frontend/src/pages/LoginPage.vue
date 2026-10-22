@@ -29,6 +29,13 @@ async function submit(email: string, password: string) {
       >
         Пароль изменён. Войдите с новым паролем.
       </p>
+      <p
+        v-else-if="route.query.deleted"
+        role="status"
+        class="notice"
+      >
+        Аккаунт и все его данные удалены.
+      </p>
     </template>
     <template #after-submit>
       <RouterLink

@@ -131,6 +131,7 @@ func buildRoutes(s *server) *router {
 	rt.public("POST /api/auth/password-reset/confirm", s.confirmPasswordReset)
 	rt.protected("GET /api/me", s.me)
 	rt.protected("PATCH /api/me", s.changeEmail)
+	rt.protected("DELETE /api/me", s.deleteAccount)
 	rt.protected("POST /api/me/password", s.changePassword)
 
 	rt.protected("POST /api/books", limited(s.limits.uploads, byUser, tooManyUploads, s.uploadBook))

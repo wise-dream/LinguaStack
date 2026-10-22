@@ -98,3 +98,10 @@ describe('вход после сброса пароля', () => {
     expect(wrapper.find('[role=status]').text()).toBe('Пароль изменён. Войдите с новым паролем.')
   })
 })
+
+describe('вход после удаления аккаунта', () => {
+  it('сообщение, что аккаунт и данные удалены', async () => {
+    const { wrapper } = await mountPage(LoginPage, api({}), '/login?deleted=1')
+    expect(wrapper.find('[role=status]').text()).toBe('Аккаунт и все его данные удалены.')
+  })
+})

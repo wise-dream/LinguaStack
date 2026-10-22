@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createMemoryHistory, createRouter } from 'vue-router'
 
 import type { TelegramState } from '../api/types'
+import { SESSION, createSession } from '../session'
 import { stubApi } from '../test/fakeApi'
 import SettingsPage from './SettingsPage.vue'
 
@@ -25,9 +26,10 @@ async function mountSettings(routes: Parameters<typeof stubApi>[0]) {
     routes: [{ path: '/:p(.*)*', component: SettingsPage, meta: { title: '' } }],
   })
   await router.push('/settings')
-  const w = mount(SettingsPage, { global: { plugins: [router] } })
+  const session = createSession()
+  const w = mount(SettingsPage, { global: { plugins: [router], provide: { [SESSION as symbol]: session } } })
   await flushPromises()
-  return { w, calls }
+  return { w, calls, router, session }
 }
 
 describe('настройки', () => {
@@ -166,5 +168,46 @@ describe('профиль', () => {
     })
     expect(w.find('section.account dd').text()).toBe('new@example.com')
     expect(form.find('[role=status]').text()).toContain('Почта изменена')
+  })
+})
+
+describe('удаление аккаунта', () => {
+  const telegramOff = { 'GET /api/telegram': { body: state({ enabled: false, bot_username: undefined }) } }
+
+  it('объясняет, что удалится, и спрашивает подтверждение', async () => {
+    const { w, calls } = await mountSettings(telegramOff)
+    const section = w.find('section.delete-account')
+    expect(section.text()).toContain('книги, переводы')
+    expect(section.text()).toContain('Отменить нельзя')
+    await section.find('input[name=delete_password]').setValue('right-password-1')
+    await section.find('button.delete').trigger('click')
+    expect(calls.some((c) => c.method === 'DELETE')).toBe(false)
+    expect(section.find('button.delete').text()).toBe('Точно удалить аккаунт?')
+  })
+
+  it('неверный пароль показан, аккаунт на месте', async () => {
+    const { w, router } = await mountSettings({
+      ...telegramOff,
+      'DELETE /api/me': { status: 403, body: { error: 'Неверный текущий пароль' } },
+    })
+    const section = w.find('section.delete-account')
+    await section.find('input[name=delete_password]').setValue('wrong-password-1')
+    await section.find('button.delete').trigger('click')
+    await section.find('button.delete').trigger('click')
+    await flushPromises()
+    expect(section.find('[role=alert]').text()).toBe('Неверный текущий пароль')
+    expect(router.currentRoute.value.path).toBe('/settings')
+  })
+
+  it('после удаления — на страницу входа, сессии нет', async () => {
+    const { w, calls, router, session } = await mountSettings({ ...telegramOff, 'DELETE /api/me': { status: 204 } })
+    const section = w.find('section.delete-account')
+    await section.find('input[name=delete_password]').setValue('right-password-1')
+    await section.find('button.delete').trigger('click')
+    await section.find('button.delete').trigger('click')
+    await flushPromises()
+    expect(calls.find((c) => c.method === 'DELETE')?.body).toEqual({ current_password: 'right-password-1' })
+    expect(session.me.value).toBeNull()
+    expect(router.currentRoute.value.fullPath).toBe('/login?deleted=1')
   })
 })
