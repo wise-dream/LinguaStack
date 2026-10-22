@@ -1,10 +1,13 @@
 import { ApiError, parseResponse, request } from './client'
 import { query } from './query'
-import type { Book, BookEstimate, Chapter, TocEntry } from './types'
+import type { Book, BookEstimate, Chapter, LibraryBook, TocEntry } from './types'
 
 const book = (id: string) => `/api/books/${encodeURIComponent(id)}`
 
 export const listBooks = () => request<Book[]>('GET', '/api/books')
+
+/** Общая библиотека: книги всех пользователей с переводами (дополнение §9). */
+export const getLibrary = () => request<LibraryBook[]>('GET', '/api/library')
 
 export const getBook = (id: string) => request<Book>('GET', book(id))
 

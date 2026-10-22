@@ -30,6 +30,28 @@ export interface Book {
   translatable: number
   issues: ImportIssue[]
   created_at: string
+  /** Книгу загрузил тот, кто смотрит: только он её меняет (общая библиотека). */
+  owned: boolean
+}
+
+/** Книга общей библиотеки с её переводами (дополнение §9). */
+export interface LibraryBook {
+  id: string
+  title: string
+  author?: string
+  language?: string
+  source_format: string
+  created_at: string
+  owned: boolean
+  translations: {
+    id: string
+    source_lang: string
+    target_lang: string
+    model_id: string
+    status: ProjectStatus
+    segments_done: number
+    segments_total: number
+  }[]
 }
 
 export interface TocEntry {
@@ -84,6 +106,8 @@ export interface Usage {
 }
 
 export interface Project extends Usage {
+  /** Перевод того, кто смотрит: только он им управляет. */
+  owned: boolean
   id: string
   book_id: string
   book_title: string

@@ -325,6 +325,7 @@ onBeforeUnmount(() => {
               :mode="effectiveMode"
               :book-id="bookId"
               :found="found === b.node_id"
+              :editable="project?.owned ?? false"
               @update="updateSegment"
             />
           </ReaderColumns>

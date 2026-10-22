@@ -34,7 +34,10 @@ async function logout() {
   >
     <AppHeader v-if="session.me.value">
       <ThemeSwitch />
-      <span class="who">{{ session.me.value.email }}</span>
+      <span
+        class="who"
+        :title="session.me.value.email"
+      >{{ session.me.value.email }}</span>
       <NButton
         quaternary
         size="small"

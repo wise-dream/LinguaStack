@@ -12,13 +12,15 @@ import { renderInline } from '../lib/inline'
 import ErrorAlert from '../components/ErrorAlert.vue'
 import ProofMark from './ProofMark.vue'
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   block: Block
   segment?: Segment
   mode: ReadMode
   bookId: string
   found?: boolean
-}>()
+  /** Свой перевод: можно править и повторять. Чужой из общей библиотеки — только читать. */
+  editable?: boolean
+}>(), { segment: undefined, found: false, editable: true })
 const emit = defineEmits<{ update: [segment: Segment] }>()
 
 const spanTypes = ['code_block', 'math_block', 'image', 'thematic_break', 'raw_html']
@@ -184,7 +186,7 @@ async function retry() {
       >
         <ProofMark :segment="segment" />
         <div
-          v-if="!editing"
+          v-if="!editing && editable"
           class="actions"
         >
           <NButton

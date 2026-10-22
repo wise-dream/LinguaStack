@@ -52,7 +52,7 @@ async function openMenu(page: Page) {
 
 async function go(page: Page, section: string) {
   await openMenu(page)
-  await page.getByRole('navigation', { name: 'Разделы' }).getByRole('link', { name: section }).click()
+  await page.getByRole('navigation', { name: 'Разделы' }).getByRole('link', { name: section, exact: true }).click()
 }
 
 async function logout(page: Page) {
@@ -216,6 +216,18 @@ test('импорт → перевод → экспорт → чтение', asyn
   } else {
     expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(0)
   }
+
+  // Общая библиотека: другой пользователь читает эту книгу, но не правит.
+  await logout(page)
+  await register(page, `e2e-reader-${info.project.name}-${Date.now()}@example.com`)
+  await go(page, 'Общая библиотека')
+  await expect(page.getByRole('heading', { name: 'Общая библиотека', level: 1 })).toBeVisible()
+  const shared = page.locator('[data-book]', { hasText: 'Глава первая' }).filter({ has: page.locator('[data-translation]') }).first()
+  await expect(shared.locator('.mine')).toHaveCount(0)
+  await shot(page, 'shared')
+  await shared.getByRole('link', { name: 'Читать' }).first().click()
+  await expect(page.locator('.translation', { hasText: 'RU:Call' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Править' })).toHaveCount(0)
 })
 
 // Импорт HTML: главы по заголовкам, картинка из data: — ресурс книги.

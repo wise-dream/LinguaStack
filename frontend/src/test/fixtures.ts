@@ -15,12 +15,14 @@ export function book(overrides: Partial<Book> = {}): Book {
     translatable: 873,
     issues: [],
     created_at: '2026-10-16T19:31:28Z',
+    owned: true,
     ...overrides,
   }
 }
 
 export function project(overrides: Partial<Project> = {}): Project {
   return {
+    owned: true,
     id: 'p1',
     book_id: 'b1',
     book_title: 'Приключения Алисы в Стране чудес',

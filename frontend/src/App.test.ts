@@ -41,7 +41,7 @@ describe('оболочка приложения', () => {
   it('показывает разделы и отмечает текущий', async () => {
     const wrapper = await mountAt('/translations')
     const links = wrapper.findAll('nav a')
-    expect(links.map((a) => a.text())).toEqual(['Библиотека', 'Переводы', 'Модели', 'Настройки'])
+    expect(links.map((a) => a.text())).toEqual(['Библиотека', 'Общая библиотека', 'Переводы', 'Модели', 'Настройки'])
     const current = links.filter((a) => a.attributes('aria-current') === 'page')
     expect(current.map((a) => a.text())).toEqual(['Переводы'])
   })

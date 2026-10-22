@@ -22,3 +22,12 @@ describe('строка читалки', () => {
     expect(w.classes()).not.toContain('revealed')
   })
 })
+
+describe('чужой перевод', () => {
+  it('без правки и повтора: менять может только владелец', () => {
+    const w = mount(SegmentRow, { props: { block, segment, mode: 'parallel', bookId: 'b1', editable: false } })
+    expect(w.find('button.edit').exists()).toBe(false)
+    expect(w.find('button.retry').exists()).toBe(false)
+    expect(w.text()).toContain('Алиса.')
+  })
+})

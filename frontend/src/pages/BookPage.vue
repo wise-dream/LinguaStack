@@ -60,7 +60,8 @@ async function removeExport(j: ExportJob) {
   }
 }
 
-const canResume = (p: Project) => p.status === 'paused' || p.status === 'failed'
+// Продолжить — только свой перевод: чужая книга из общей библиотеки — читать и скачивать.
+const canResume = (p: Project) => p.owned && (p.status === 'paused' || p.status === 'failed')
 
 async function resume(p: Project) {
   rowError.value = { ...rowError.value, [p.id]: '' }
@@ -106,6 +107,7 @@ async function resume(p: Project) {
         </NDescriptions>
         <div class="actions">
           <LinkButton
+            v-if="book.owned"
             :to="`/books/${book.id}/translate`"
             type="primary"
           >

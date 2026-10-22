@@ -220,3 +220,19 @@ describe('поиск фрагмента по тексту', () => {
     expect(last().get('q')).toBeNull()
   })
 })
+
+describe('чужой перевод из общей библиотеки', () => {
+  it('читать, искать и скачивать можно; управлять и повторять — нет', async () => {
+    const { w } = await mountDetail({
+      'GET /api/translations/p1': { body: project({ owned: false, status: 'failed', segments_failed: 2 }) },
+      'GET /api/translations/p1/segments': { body: [segment({ status: 'failed', translated_text: null, severity: 'error' })] },
+      'GET /api/books/b1/exports': { body: [] },
+    })
+    for (const cls of ['pause', 'resume', 'retry-problems', 'retry']) {
+      expect(w.find(`button.${cls}`).exists(), cls).toBe(false)
+    }
+    expect(w.text()).not.toContain('Отменить перевод')
+    expect(w.find('section.export').exists()).toBe(true)
+    expect(w.find('form.segment-search').exists()).toBe(true)
+  })
+})

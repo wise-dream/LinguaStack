@@ -88,3 +88,16 @@ describe('страница книги', () => {
     expect(calls.find((c) => c.path === '/api/translations')?.url).toBe('/api/translations?book_id=b1')
   })
 })
+
+describe('чужая книга из общей библиотеки', () => {
+  it('читать и скачивать можно, переводить и продолжать — нет', async () => {
+    const { w } = await mountBook({
+      ...base,
+      'GET /api/books/b1': { body: book({ owned: false }) },
+      'GET /api/translations': { body: [project({ owned: false, status: 'paused', segments_done: 10 })] },
+    })
+    expect(w.text()).not.toContain('Новый перевод')
+    expect(w.find('a[href="/read/b1"]').text()).toBe('Читать оригинал')
+    expect(w.find('button.resume').exists()).toBe(false)
+  })
+})

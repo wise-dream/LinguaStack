@@ -228,3 +228,15 @@ describe('читалка (ТЗ §8.3)', () => {
     expect(w.text()).toContain('First chapter.')
   })
 })
+
+describe('чужой перевод в читалке', () => {
+  it('читается, но без правки и повтора', async () => {
+    const { w } = await mountReader('/read/b1?t=p1&ch=1', {
+      'GET /api/translations': { body: [project({ owned: false })] },
+    })
+    const row = w.find('[data-node="ch0001/b0001"]')
+    expect(row.text()).toContain('Алиса очень устала.')
+    expect(row.find('button.edit').exists()).toBe(false)
+    expect(row.find('button.retry').exists()).toBe(false)
+  })
+})

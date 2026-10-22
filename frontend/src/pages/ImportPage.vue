@@ -101,6 +101,10 @@ async function saveOrder() {
             </NButton>
           </NUploadDragger>
         </NUpload>
+        <p class="shared-note">
+          Книга и её переводы будут видны всем пользователям сервиса: их смогут читать и скачивать.
+          Менять и удалять их можете только вы.
+        </p>
 
         <div
           v-if="progress !== null"
@@ -226,6 +230,12 @@ async function saveOrder() {
 </template>
 
 <style scoped>
+.shared-note {
+  margin: var(--space-3) 0 0;
+  font-size: var(--step--1);
+  color: var(--muted);
+}
+
 /* Слева — загрузка, справа — разобранная книга или памятка по форматам. */
 .layout {
   display: grid;

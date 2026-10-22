@@ -3,7 +3,7 @@ import { createRouter, createWebHistory, type RouterHistory } from 'vue-router'
 import LoginPage from './pages/LoginPage.vue'
 
 /** Раздел навигации, к которому относится страница. */
-export type Section = 'library' | 'translations' | 'providers' | 'settings' | 'admin'
+export type Section = 'library' | 'shared' | 'translations' | 'providers' | 'settings' | 'admin'
 
 declare module 'vue-router' {
   interface RouteMeta {
@@ -26,6 +26,7 @@ export function createAppRouter(history: RouterHistory = createWebHistory()) {
       { path: '/reset-password', component: () => import('./pages/ResetPasswordPage.vue'), meta: { title: 'Новый пароль', public: true } },
       { path: '/terms', component: () => import('./pages/TermsPage.vue'), meta: { title: 'Условия и конфиденциальность', public: true } },
       { path: '/', component: () => import('./pages/LibraryPage.vue'), meta: { title: 'Библиотека', section: 'library' } },
+      { path: '/shared', component: () => import('./pages/SharedLibraryPage.vue'), meta: { title: 'Общая библиотека', section: 'shared' } },
       { path: '/import', component: () => import('./pages/ImportPage.vue'), meta: { title: 'Загрузка книги', section: 'library' } },
       { path: '/books/:id', component: () => import('./pages/BookPage.vue'), meta: { title: 'Книга', section: 'library' } },
       { path: '/books/:id/translate', component: () => import('./pages/TranslationSetupPage.vue'), meta: { title: 'Новый перевод', section: 'library' } },

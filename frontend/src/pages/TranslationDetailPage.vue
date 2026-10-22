@@ -65,13 +65,16 @@ watch(progress.event, (e) => {
   if (statusChanged) void loadSegments(true)
 })
 
-const canPause = computed(() => project.value?.status === 'running' || project.value?.status === 'queued')
-const canResume = computed(() => project.value?.status === 'paused' || project.value?.status === 'failed')
+// Управлять переводом может только владелец: чужой из общей библиотеки —
+// читать, искать и скачивать (дополнение §9).
+const owned = computed(() => !!project.value?.owned)
+const canPause = computed(() => owned.value && (project.value?.status === 'running' || project.value?.status === 'queued'))
+const canResume = computed(() => owned.value && (project.value?.status === 'paused' || project.value?.status === 'failed'))
 // Фрагменты с ошибками и предупреждениями — заново одной кнопкой, когда
 // перевод стоит: идущий уже взял список фрагментов (сервер ответил бы 409).
 const problems = computed(() => (project.value?.segments_failed ?? 0) + (project.value?.warnings_count ?? 0))
 const canRetryProblems = computed(
-  () => problems.value > 0 && !!project.value && ['completed', 'completed_with_warnings', 'failed', 'paused'].includes(project.value.status),
+  () => owned.value && problems.value > 0 && !!project.value && ['completed', 'completed_with_warnings', 'failed', 'paused'].includes(project.value.status),
 )
 const retryNotice = ref('')
 const retryError = ref('')
@@ -92,7 +95,7 @@ async function retryAllProblems() {
 }
 
 // Упавший перевод тоже можно отменить: он ждёт «Продолжить».
-const canCancel = computed(() => !!project.value && (!isTerminal(project.value.status) || project.value.status === 'failed'))
+const canCancel = computed(() => owned.value && !!project.value && (!isTerminal(project.value.status) || project.value.status === 'failed'))
 
 function filterQuery(f: Filter): SegmentFilter {
   const q = searched.value || undefined
@@ -349,6 +352,7 @@ const readerLink = (s: Segment) => ({
                 Открыть в читалке
               </LinkButton>
               <NButton
+                v-if="owned"
                 class="retry"
                 size="small"
                 text

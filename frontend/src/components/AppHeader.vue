@@ -10,6 +10,7 @@ const session = useSession()
 
 const common: { section: Section; to: string; label: string }[] = [
   { section: 'library', to: '/', label: 'Библиотека' },
+  { section: 'shared', to: '/shared', label: 'Общая библиотека' },
   { section: 'translations', to: '/translations', label: 'Переводы' },
   { section: 'providers', to: '/settings/providers', label: 'Модели' },
   { section: 'settings', to: '/settings', label: 'Настройки' },
@@ -137,12 +138,16 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onKeydown))
   display: contents;
 }
 
+/* Тесно — разделы переходят на вторую строку целиком, а не по словам. */
 nav {
   display: flex;
+  flex-wrap: wrap;
   gap: var(--space-1);
+  min-width: 0;
 }
 
 nav a {
+  white-space: nowrap;
   text-decoration: none;
   color: var(--muted);
   padding: var(--space-1) var(--space-3);
@@ -165,6 +170,13 @@ nav a[aria-current='page'] {
   margin-left: auto;
   display: flex;
   align-items: center;
+  min-width: 0;
+}
+
+.slot > :slotted(.who) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .burger,
@@ -250,9 +262,6 @@ nav a[aria-current='page'] {
     max-width: 100%;
     margin: 0;
     padding-inline: var(--space-3);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
   }
 
   .scrim {
