@@ -243,7 +243,7 @@ func TestKindModels(t *testing.T) {
 	r := c.do(http.MethodGet, "/api/providers/anthropic/models", nil)
 	require.Equal(t, http.StatusOK, r.Status)
 	r.JSON(t, &models)
-	require.Equal(t, "claude-opus-5-5", models[0].ModelID)
+	require.Equal(t, "claude-haiku-5-5", models[0].ModelID, "по умолчанию — самая дешёвая")
 
 	// Список моделей OpenAI-совместимого сервиса зависит от адреса и ключа.
 	require.Equal(t, http.StatusUnprocessableEntity, c.do(http.MethodGet, "/api/providers/openai_compatible/models", nil).Status)

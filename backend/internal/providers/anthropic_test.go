@@ -287,7 +287,9 @@ func TestAnthropicCatalog(t *testing.T) {
 		require.False(t, m.SupportsTemperature, "%s: temperature вызывает 400", m.ModelID)
 		require.NotNil(t, m.InputCostPerMTok, m.ModelID)
 	}
-	require.Equal(t, []string{"claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5"}, ids, "по умолчанию — Opus 5.5")
+	// Первая — по умолчанию: самая дешёвая. Книга на Opus стоит в десятки
+	// раз дороже, и не заглянувший в список не должен платить за неё.
+	require.Equal(t, []string{"claude-haiku-5-5", "claude-sonnet-5-5", "claude-opus-5-5"}, ids, "по умолчанию — Haiku 5.5")
 	dated := regexp.MustCompile(`-\d{8}$`)
 	for _, id := range ids {
 		require.False(t, dated.MatchString(id), "суффиксы даты запрещены: %s", id)

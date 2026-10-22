@@ -1,5 +1,6 @@
 import { ApiError, parseResponse, request } from './client'
-import type { Book, Chapter, TocEntry } from './types'
+import { query } from './query'
+import type { Book, BookEstimate, Chapter, TocEntry } from './types'
 
 const book = (id: string) => `/api/books/${encodeURIComponent(id)}`
 
@@ -8,6 +9,10 @@ export const listBooks = () => request<Book[]>('GET', '/api/books')
 export const getBook = (id: string) => request<Book>('GET', book(id))
 
 export const deleteBook = (id: string) => request<void>('DELETE', book(id))
+
+/** Примерный объём перевода книги на язык tgt — для цены рядом с моделью. */
+export const estimateTranslation = (id: string, source: string, target: string) =>
+  request<BookEstimate>('GET', `${book(id)}/estimate${query({ source_lang: source, target_lang: target })}`)
 
 export const getTOC = async (id: string) =>
   (await request<{ chapters: TocEntry[] }>('GET', `${book(id)}/toc`)).chapters

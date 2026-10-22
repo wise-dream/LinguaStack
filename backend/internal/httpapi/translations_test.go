@@ -656,3 +656,23 @@ func TestSSEStopsWhenClientDisconnects(t *testing.T) {
 	require.Contains(t, events[0], `"status":"queued"`)
 	// Закрытие сервера в Cleanup зависло бы, если обработчик не заметил отключения.
 }
+
+func TestTranslationEstimate(t *testing.T) {
+	// Объём перевода книги в токенах — интерфейс показывает по нему цену
+	// рядом с выбором модели (дополнение §20).
+	e := newTranslationEnv(t, nil)
+	bookID := e.book(t, "# Глава\n\nAlice was beginning to get very tired.\n\n```go\ncode()\n```\n\nThe Rabbit ran away.")
+	var est struct {
+		SourceChars  int `json:"source_chars"`
+		InputTokens  int `json:"input_tokens"`
+		OutputTokens int `json:"output_tokens"`
+	}
+	r := e.c.do(http.MethodGet, "/api/books/"+bookID+"/estimate?target_lang=ru", nil)
+	require.Equal(t, http.StatusOK, r.Status, "тело: %s", r.Body)
+	r.JSON(t, &est)
+	require.Equal(t, len("Глава")/2+len("Alice was beginning to get very tired.")+len("The Rabbit ran away."), est.SourceChars, "код не считается")
+	require.Positive(t, est.InputTokens)
+	require.Greater(t, est.OutputTokens, est.SourceChars, "русский у Claude дороже символа на токен")
+
+	require.Equal(t, http.StatusUnprocessableEntity, e.c.do(http.MethodGet, "/api/books/"+bookID+"/estimate?target_lang=xx", nil).Status)
+}

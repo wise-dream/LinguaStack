@@ -56,11 +56,13 @@ type anthropicModel struct {
 	fallback bool // поддерживает серверный fallback (у Haiku 5.5 его нет)
 }
 
-// anthropicCatalog — модели для выбора; первая — по умолчанию.
+// anthropicCatalog — модели для выбора; первая — по умолчанию. Первой стоит
+// самая дешёвая: книга на Opus обходится в десятки раз дороже, а цену
+// перевода интерфейс показывает рядом с выбором модели.
 var anthropicCatalog = []anthropicModel{
-	{id: "claude-opus-5-5", name: "Claude Opus 5.5", fallback: true},
-	{id: "claude-sonnet-5-5", name: "Claude Sonnet 5.5", fallback: true},
 	{id: "claude-haiku-5-5", name: "Claude Haiku 5.5"},
+	{id: "claude-sonnet-5-5", name: "Claude Sonnet 5.5", fallback: true},
+	{id: "claude-opus-5-5", name: "Claude Opus 5.5", fallback: true},
 }
 
 // NewAnthropic создаёт адаптер. opts — для тестов (адрес, HTTP-клиент).

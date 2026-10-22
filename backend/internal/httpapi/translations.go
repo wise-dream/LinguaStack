@@ -338,6 +338,26 @@ func (s *server) resumeTranslation(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// translationEstimate — примерный объём перевода книги в токенах
+// (дополнение §20). Цену по нему считает интерфейс: цены моделей у него
+// есть в списке моделей подключения.
+func (s *server) translationEstimate(w http.ResponseWriter, r *http.Request) {
+	book, ok := loadOwned[models.Book](s, w, r, "id")
+	if !ok {
+		return
+	}
+	tgt := r.URL.Query().Get("target_lang")
+	if !translation.IsKnownLanguage(tgt) {
+		writeError(w, http.StatusUnprocessableEntity, "Неизвестный язык перевода")
+		return
+	}
+	src := r.URL.Query().Get("source_lang")
+	if src == "" {
+		src = "auto"
+	}
+	writeJSON(w, http.StatusOK, translation.Estimate(book.CDM.Data, src, tgt, s.Cfg.MaxBatchSegments, s.Cfg.MaxBatchChars))
+}
+
 // errNothingToRetry — в проекте нет сегментов с ошибками и предупреждениями.
 var errNothingToRetry = errors.New("нечего переводить заново")
 

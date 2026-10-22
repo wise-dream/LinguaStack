@@ -6,11 +6,11 @@ import { NAlert, NButton, NRadio, NRadioGroup } from 'naive-ui'
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
-import { getBook } from '../api/books'
+import { estimateTranslation, getBook } from '../api/books'
 import { errorMessage } from '../api/client'
 import { configModels, listProviderConfigs } from '../api/providers'
 import { createTranslation, getTranslationOptions } from '../api/translations'
-import type { Book, Determinism, ModelCaps, ProviderConfig, TranslationOptions } from '../api/types'
+import type { Book, BookEstimate, Determinism, ModelCaps, ProviderConfig, TranslationOptions } from '../api/types'
 import ErrorAlert from '../components/ErrorAlert.vue'
 import GlossaryEditor from '../components/GlossaryEditor.vue'
 import LinkButton from '../components/LinkButton.vue'
@@ -78,6 +78,33 @@ const languages = computed(() => {
 const langOption = (code: string) => ({ label: capitalize(languageName(code)), value: code })
 const configOptions = computed(() => configs.value.map((c) => ({ label: c.name, value: c.id })))
 const modelOptions = computed(() => models.value.map((m) => ({ label: m.display_name || m.model_id, value: m.model_id })))
+
+// Примерная цена книги (дополнение §20): объём в токенах считает сервер по
+// настоящим запросам, цены — у модели. Модели без цены (Ollama на сервере,
+// свой OpenAI-совместимый сервис) — без строки. Оценка не пришла — страница
+// работает без неё: это подсказка.
+const estimate = ref<BookEstimate | null>(null)
+watch(
+  () => [form.source_lang, form.target_lang] as const,
+  async ([source, target]) => {
+    estimate.value = null
+    if (!target) return
+    try {
+      estimate.value = await estimateTranslation(bookId, source, target)
+    } catch {
+      estimate.value = null
+    }
+  },
+  { immediate: true },
+)
+const priceText = computed(() => {
+  const m = model.value
+  const e = estimate.value
+  if (!m || !e || m.input_cost_per_mtok == null || m.output_cost_per_mtok == null) return ''
+  const usd = (e.input_tokens * m.input_cost_per_mtok + e.output_tokens * m.output_cost_per_mtok) / 1e6
+  const price = usd < 0.01 ? 'Меньше $0.01' : `Примерно $${usd.toFixed(2)}`
+  return `${price} за книгу — оценка по объёму текста`
+})
 const sourceOptions = computed(() => [langOption('auto'), ...languages.value.map(langOption)])
 const targetOptions = computed(() => languages.value.map(langOption))
 
@@ -193,6 +220,12 @@ async function submit() {
               filterable
             />
           </div>
+          <p
+            v-if="priceText"
+            class="estimate"
+          >
+            {{ priceText }}
+          </p>
           <ErrorAlert :message="modelsError" />
           <NAlert
             v-if="egress === 'allowed'"
@@ -315,6 +348,12 @@ async function submit() {
 form {
   display: grid;
   gap: var(--space-5);
+}
+
+.estimate {
+  margin: calc(-1 * var(--space-2)) 0 0;
+  font-size: var(--step--1);
+  color: var(--muted);
 }
 
 .pair {

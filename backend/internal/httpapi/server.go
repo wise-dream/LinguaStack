@@ -169,6 +169,7 @@ func buildRoutes(s *server) *router {
 	rt.protected("POST /api/translations/{id}/resume", s.resumeTranslation)
 	rt.protected("POST /api/translations/{id}/cancel", s.cancelTranslation)
 	rt.protected("POST /api/translations/{id}/retry-problems", s.retryProblems)
+	rt.protected("GET /api/books/{id}/estimate", s.translationEstimate)
 	rt.protected("GET /api/translations/{id}/segments", s.listSegments)
 	rt.stream("GET /api/translations/{id}/events", s.translationEvents)
 

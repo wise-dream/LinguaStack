@@ -209,6 +209,13 @@ export interface ModelCaps {
   output_cost_per_mtok?: number
 }
 
+/** Примерный объём перевода книги в токенах (дополнение §20). */
+export interface BookEstimate {
+  source_chars: number
+  input_tokens: number
+  output_tokens: number
+}
+
 export interface Health {
   available: boolean
   detail?: string

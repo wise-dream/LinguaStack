@@ -126,3 +126,44 @@ describe('глоссарий', () => {
     ])).toEqual({ lease: 'аренда', queue: 'очередь' })
   })
 })
+
+describe('примерная цена перевода', () => {
+  const priced = {
+    'GET /api/provider-configs/c2/models': {
+      body: [
+        { model_id: 'claude-haiku-5-5', display_name: 'Claude Haiku 5.5', supports_temperature: false, supports_system_prompt: true, input_cost_per_mtok: 0.1, output_cost_per_mtok: 0.5 },
+        { model_id: 'claude-opus-5-5', display_name: 'Claude Opus 5.5', supports_temperature: false, supports_system_prompt: true, input_cost_per_mtok: 4, output_cost_per_mtok: 20 },
+      ],
+    },
+    'GET /api/books/b1/estimate': { body: { source_chars: 1_000_000, input_tokens: 1_000_000, output_tokens: 1_400_000 } },
+  }
+
+  it('у модели с ценами — цена книги по оценке объёма; другая модель — своя цена', async () => {
+    const { w, calls } = await mountSetup(priced)
+    await choose(w, 'provider_config_id', 'c2')
+    await flushPromises()
+    // Haiku: 1 млн × $0.10 + 1,4 млн × $0.50.
+    expect(w.find('.estimate').text()).toBe('Примерно $0.80 за книгу — оценка по объёму текста')
+    const asked = calls.filter((c) => c.path === '/api/books/b1/estimate').at(-1)!
+    expect(new URL(asked.url, 'http://x').searchParams.get('target_lang')).toBe('ru')
+
+    await choose(w, 'model_id', 'claude-opus-5-5')
+    await flushPromises()
+    // Opus: 1 млн × $4 + 1,4 млн × $20.
+    expect(w.find('.estimate').text()).toContain('$32.00')
+  })
+
+  it('у модели без цены (Ollama на сервере) — цены нет', async () => {
+    const { w } = await mountSetup(priced)
+    expect(selected(w, 'provider_config_id')).toBe('c1')
+    expect(w.find('.estimate').exists()).toBe(false)
+  })
+
+  it('оценка не пришла — страница работает без цены', async () => {
+    const { w } = await mountSetup({ ...priced, 'GET /api/books/b1/estimate': { status: 500, body: { error: 'сбой' } } })
+    await choose(w, 'provider_config_id', 'c2')
+    await flushPromises()
+    expect(w.find('.estimate').exists()).toBe(false)
+    expect(w.text()).not.toContain('сбой')
+  })
+})
