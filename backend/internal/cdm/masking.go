@@ -136,6 +136,69 @@ func Mask(text string) Masked {
 	return Masked{Text: out, Placeholders: m.placeholders}
 }
 
+var (
+	// inlineCodeAnyRe — инлайн-код по тем же правилам, что у Mask, одним
+	// проходом: ``…`` раньше `…`.
+	inlineCodeAnyRe = regexp.MustCompile("``[^\n]+?``|`[^`\n]+`")
+	// inlineCodeValueRe — значение маркера, которое целиком инлайн-код.
+	inlineCodeValueRe = regexp.MustCompile("^(?:``[^\n]+``|`[^`\n]+`)$")
+)
+
+// InlineCode — инлайн-код текста вместе с обратными кавычками, в порядке
+// появления. Блоки ``` в счёт не идут, как и в Mask.
+func InlineCode(text string) []string {
+	return inlineCodeAnyRe.FindAllString(fencedRe.ReplaceAllString(text, " "), -1)
+}
+
+// MaskKeepingCode — Mask, у которого инлайн-код остаётся в тексте как есть,
+// в обратных кавычках, а остальное — под метками. Это последняя ступень
+// перевода одного фрагмента (дополнение §3): метку на месте кода слабая
+// модель выбрасывает — для неё это пустое место в предложении, — а сам код
+// переносит. Сохранность такого кода проверяется по InlineCode, а не по
+// меткам.
+//
+// Оставшиеся метки перенумерованы сплошь с 1 в прежнем порядке — значение
+// метки по-прежнему ссылается только на меньшие номера (Unmask). Код с
+// меткой внутри (экранированная скобка) остаётся под меткой.
+func MaskKeepingCode(text string) Masked {
+	m := Mask(text)
+	keys := make([]string, 0, len(m.Placeholders))
+	for k := range m.Placeholders {
+		keys = append(keys, k)
+	}
+	slices.SortFunc(keys, func(a, b string) int { return markerNumber(a) - markerNumber(b) })
+
+	renamed := make(map[string]string, len(keys)) // старая метка → новая метка или сам код
+	kept := make([]string, 0, len(keys))
+	for _, k := range keys {
+		v := m.Placeholders[k]
+		if inlineCodeValueRe.MatchString(v) && !strings.HasPrefix(v, "```") && !strings.ContainsAny(v, "⟦⟧") {
+			renamed[k] = v
+			continue
+		}
+		kept = append(kept, k)
+		renamed[k] = string(markerOpen) + strconv.Itoa(len(kept)) + string(markerClose)
+	}
+	// Один проход: подставленный код меток не содержит, новые номера
+	// повторно не сканируются.
+	rewrite := func(s string) string {
+		return markerRe.ReplaceAllStringFunc(s, func(k string) string {
+			if r, ok := renamed[k]; ok {
+				return r
+			}
+			return k
+		})
+	}
+	out := Masked{Text: rewrite(m.Text)}
+	if len(kept) > 0 {
+		out.Placeholders = make(map[string]string, len(kept))
+		for _, k := range kept {
+			out.Placeholders[renamed[k]] = rewrite(m.Placeholders[k])
+		}
+	}
+	return out
+}
+
 func markerNumber(key string) int {
 	sub := markerRe.FindStringSubmatch(key)
 	if sub == nil {

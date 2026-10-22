@@ -143,12 +143,54 @@ func TestCallerCancellationIsNotTreatedAsTimeout(t *testing.T) {
 }
 
 func TestDroppedPlaceholderIsError(t *testing.T) {
-	out, err := run(t, providers.NewFake("drops_placeholder"), "Call `run()` now.")
+	// Модель теряет и метку, и код на виду: после всех ступеней — ошибка,
+	// и замечание называет сам код, а не номер метки.
+	fake := providers.NewFake("drops_placeholder")
+	out, err := run(t, fake, "Call `run()` now.")
 	require.NoError(t, err)
 	r := result(t, out, 0)
 	require.Equal(t, translation.Error, r.Severity)
 	require.Nil(t, r.Translated, "текст без кода не должен уйти в экспорт как перевод")
-	require.Contains(t, findingCodes(r.Findings), "placeholder_mismatch")
+	require.Contains(t, findingCodes(r.Findings), "code_changed")
+	calls := fake.Calls()
+	require.Len(t, calls, 5, "три попытки с меткой и две с кодом на виду")
+	require.Contains(t, calls[4].User, "lost or changed this code: `run()`")
+}
+
+func TestLostCodeMarkerRetriedWithCodeInSight(t *testing.T) {
+	// Как qwen3:8b на «is an `OP_CALL` that»: метку на месте кода модель
+	// выбрасывает при любой подсказке, а сам код переносит. Последняя
+	// ступень показывает код как есть и проверяет его по тексту.
+	fake := providers.NewFake("drops_placeholder_keeps_code")
+	out, err := run(t, fake, "The next instruction is an `OP_CALL` that unpacks it.")
+	require.NoError(t, err)
+	r := result(t, out, 0)
+	require.NotNil(t, r.Translated)
+	require.Equal(t, "RU:The next instruction is an `OP_CALL` that unpacks it.", *r.Translated)
+	calls := fake.Calls()
+	require.Len(t, calls, 4)
+	for _, c := range calls[:3] {
+		require.NotContains(t, c.User, "`OP_CALL`", "сначала — код под меткой (ТЗ §5.3)")
+	}
+	require.Contains(t, calls[3].User, "`OP_CALL`")
+}
+
+func TestBatchSegmentWithLostCodeMarkerSalvaged(t *testing.T) {
+	fake := providers.NewFake("drops_placeholder_keeps_code")
+	out, err := run(t, fake, "Plain text here.", "Call `run()` now.")
+	require.NoError(t, err)
+	require.Equal(t, "RU:Plain text here.", *result(t, out, 0).Translated)
+	require.Equal(t, "RU:Call `run()` now.", *result(t, out, 1).Translated)
+	require.Equal(t, 4, fake.CallCount(), "батч, две попытки фрагмента с меткой, одна с кодом на виду")
+}
+
+func TestCodeInSightOnlyAfterLostMarkers(t *testing.T) {
+	// Пустой ответ к меткам отношения не имеет: код на виду не поможет.
+	fake := providers.NewFake("empty")
+	out, err := run(t, fake, "Call `run()` now.")
+	require.NoError(t, err)
+	require.Nil(t, result(t, out, 0).Translated)
+	require.Equal(t, 3, fake.CallCount())
 }
 
 func TestMangledLinkMarkerRepaired(t *testing.T) {

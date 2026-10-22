@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"unicode/utf8"
 
@@ -18,6 +19,8 @@ import (
 //
 //  1. повтор батча с усиленным напоминанием о формате;
 //  2. по одному сегменту — медленнее, но почти не ломается;
+//     2а. сегмент потерял метки, а в нём есть инлайн-код — повтор с кодом
+//     на виду (codeInSight);
 //  3. сегмент — ошибка с сохранённым последним ответом модели; книга
 //     продолжает переводиться.
 //
@@ -88,9 +91,12 @@ func (s *Service) TranslateBatch(ctx context.Context, b Batch, system string, de
 	out := BatchOutcome{Results: make(map[string]SegmentOutcome, len(b.Segments))}
 	job := &batchJob{svc: s, out: &out, system: system, det: det, src: src, tgt: tgt}
 
-	retry, err := job.attempt(ctx, b, s.opts.BatchRetries+1)
+	retry, err := job.attempt(ctx, b, s.opts.BatchRetries+1, cdm.Mask)
 	if err != nil {
 		return out, err
+	}
+	if len(b.Segments) == 1 {
+		return out, job.codeInSight(ctx, b)
 	}
 	for _, i := range retry {
 		single := Batch{Segments: []SegmentRef{b.Segments[i]}, ContextBefore: b.ContextBefore, ContextAfter: b.ContextAfter}
@@ -100,22 +106,42 @@ func (s *Service) TranslateBatch(ctx context.Context, b Batch, system string, de
 		if i+1 < len(b.Segments) {
 			single.ContextAfter = head(b.Segments[i+1].Text, contextChars)
 		}
-		if _, err := job.attempt(ctx, single, s.opts.SingletonAttempts); err != nil {
+		if _, err := job.attempt(ctx, single, s.opts.SingletonAttempts, cdm.Mask); err != nil {
+			return out, err
+		}
+		if err := job.codeInSight(ctx, single); err != nil {
 			return out, err
 		}
 	}
 	return out, nil
 }
 
-// attempt делает до attempts запросов для батча. Для батча из нескольких
-// сегментов возвращает индексы тех, что надо перевести поодиночке; для
-// одного сегмента всегда записывает итог сам.
-func (j *batchJob) attempt(ctx context.Context, b Batch, attempts int) (retry []int, err error) {
+// codeInSight — последняя ступень для одного сегмента (дополнение §3): он
+// не прошёл проверку из-за потерянных меток, а в нём есть инлайн-код, —
+// ещё попытки с кодом на виду (cdm.MaskKeepingCode). Метку на месте кода
+// слабая модель выбрасывает — для неё это пустое место в предложении, — а
+// сам код переносит; сохранность кода сверяет ValidateSegment.
+func (j *batchJob) codeInSight(ctx context.Context, b Batch) error {
+	seg := b.Segments[0]
+	r := j.out.Results[seg.NodeID]
+	lostMarkers := slices.ContainsFunc(r.Findings, func(f Finding) bool { return f.Code == "placeholder_mismatch" })
+	if r.Translated != nil || !lostMarkers || len(cdm.InlineCode(cdm.MaskKeepingCode(seg.Text).Text)) == 0 {
+		return nil
+	}
+	_, err := j.attempt(ctx, b, j.svc.opts.SingletonAttempts, cdm.MaskKeepingCode)
+	return err
+}
+
+// attempt делает до attempts запросов для батча; mask закрывает метками
+// защищённые фрагменты. Для батча из нескольких сегментов возвращает
+// индексы тех, что надо перевести поодиночке; для одного сегмента всегда
+// записывает итог сам.
+func (j *batchJob) attempt(ctx context.Context, b Batch, attempts int, mask func(string) cdm.Masked) (retry []int, err error) {
 	n := len(b.Segments)
 	masks := make([]cdm.Masked, n)
 	masked := Batch{Segments: make([]SegmentRef, n), ContextBefore: b.ContextBefore, ContextAfter: b.ContextAfter}
 	for i, seg := range b.Segments {
-		masks[i] = ProtectEnvelope(cdm.Mask(seg.Text))
+		masks[i] = ProtectEnvelope(mask(seg.Text))
 		masked.Segments[i] = seg
 		masked.Segments[i].Text = masks[i].Text
 	}
@@ -130,8 +156,8 @@ func (j *batchJob) attempt(ctx context.Context, b Batch, attempts int) (retry []
 	lastReason := ""
 	var lastFindings []Finding
 	// feedback — что именно было не так в прошлом ответе (потерянные
-	// метки): общее «соблюдай формат» слабая модель пропускает и повторяет
-	// ту же ошибку во всех попытках.
+	// метки или код): общее «соблюдай формат» слабая модель пропускает и
+	// повторяет ту же ошибку во всех попытках.
 	feedback := ""
 	for try := 0; try < attempts; try++ {
 		prompt := BuildUserPrompt(masked)
@@ -209,7 +235,7 @@ func (j *batchJob) attempt(ctx context.Context, b Batch, attempts int) (retry []
 				lastFindings = findings
 				lastReason = "Перевод не прошёл проверку.\nПоследний ответ модели:\n" + clip(translatedMasked)
 				if n == 1 {
-					feedback = markerFeedback(masks[i].Text, translatedMasked)
+					feedback = retryFeedback(masks[i].Text, translatedMasked)
 				}
 				continue
 			}
@@ -232,23 +258,33 @@ func (j *batchJob) attempt(ctx context.Context, b Batch, attempts int) (retry []
 	return nil, nil
 }
 
-// markerFeedback — подсказка для повтора одного сегмента: какие метки
-// модель потеряла или выдумала. "" — с метками всё в порядке.
-func markerFeedback(masked, translated string) string {
+// retryFeedback — подсказка для повтора одного сегмента: какие метки
+// модель потеряла или выдумала и какой код на виду потеряла или изменила.
+// "" — с метками и кодом всё в порядке.
+func retryFeedback(masked, translated string) string {
 	var mismatch *cdm.PlaceholderMismatchError
-	if !errors.As(cdm.VerifyPlaceholders(masked, translated), &mismatch) {
+	markers := errors.As(cdm.VerifyPlaceholders(masked, translated), &mismatch)
+	code := lostCode(masked, translated)
+	if !markers && len(code) == 0 {
 		return ""
 	}
 	var b strings.Builder
 	b.WriteString("IMPORTANT: your previous translation of this segment was rejected.")
-	if len(mismatch.Missing) > 0 {
-		b.WriteString(" It lost these protected markers: " + strings.Join(mismatch.Missing, " ") + ".")
+	if markers {
+		if len(mismatch.Missing) > 0 {
+			b.WriteString(" It lost these protected markers: " + strings.Join(mismatch.Missing, " ") + ".")
+		}
+		if len(mismatch.Extra) > 0 {
+			b.WriteString(" It added markers that are not in the source: " + strings.Join(mismatch.Extra, " ") + ".")
+		}
+		b.WriteString(" Copy every marker from the source into the translation exactly once and unchanged — ⟦, the number, ⟧ —" +
+			" even when you rephrase the sentence. Two markers around words (a link) must stay around their translation.")
 	}
-	if len(mismatch.Extra) > 0 {
-		b.WriteString(" It added markers that are not in the source: " + strings.Join(mismatch.Extra, " ") + ".")
+	if len(code) > 0 {
+		b.WriteString(" It lost or changed this code: " + strings.Join(code, " ") + "." +
+			" Copy every `code` span from the source into the translation unchanged, with its backticks.")
 	}
-	b.WriteString(" Copy every marker from the source into the translation exactly once and unchanged — ⟦, the number, ⟧ —" +
-		" even when you rephrase the sentence. Two markers around words (a link) must stay around their translation.\n\n")
+	b.WriteString("\n\n")
 	return b.String()
 }
 

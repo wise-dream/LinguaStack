@@ -2,6 +2,7 @@ package cdm_test
 
 import (
 	"errors"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -136,6 +137,15 @@ func FuzzMaskRoundTrip(f *testing.F) {
 		if s := strayBrackets(m); s != "" {
 			t.Fatalf("в маске остались литеральные скобки %q: %q", s, m.Text)
 		}
+		k := cdm.MaskKeepingCode(text)
+		if got := cdm.Unmask(k.Text, k.Placeholders); got != text {
+			t.Fatalf("round-trip с кодом на виду нарушен:\nисходник %q\nмаска    %q\nвышло    %q", text, k.Text, got)
+		}
+		for i := 1; i <= len(k.Placeholders); i++ {
+			if _, ok := k.Placeholders["⟦"+strconv.Itoa(i)+"⟧"]; !ok {
+				t.Fatalf("номера меток не сплошные: %v", k.Placeholders)
+			}
+		}
 	})
 }
 
@@ -210,4 +220,37 @@ func TestRepairMarkers(t *testing.T) {
 	// Несколько подряд испорченных закрывающих — каждая на своё место.
 	three := "with ⟦1⟧chunks⟦2⟧ and the ⟦3⟧VM⟦4⟧"
 	require.Equal(t, "с ⟦1⟧кусками⟦2⟧ и ⟦3⟧ВМ⟦4⟧", cdm.RepairMarkers(three, "с ⟦1⟧кусками⟧2⟧ и ⟦3⟧ВМ⟧4⟧"))
+}
+
+func TestMaskKeepingCodeShowsInlineCode(t *testing.T) {
+	// Последняя ступень перевода фрагмента (дополнение §3): код на виду,
+	// ссылки и прочее — по-прежнему под метками, номера сплошные с 1.
+	m := cdm.MaskKeepingCode("The next instruction is an `OP_CALL` that reads [the guide](https://x.io/a).")
+	require.Equal(t, "The next instruction is an `OP_CALL` that reads ⟦1⟧the guide⟦2⟧.", m.Text)
+	require.Equal(t, map[string]string{"⟦1⟧": "[", "⟦2⟧": "](https://x.io/a)"}, m.Placeholders)
+
+	// Тег внутри кода — часть кода, а не HTML: под метку не уходит.
+	m = cdm.MaskKeepingCode("Use ``a ` b`` and `<br>` here.")
+	require.Equal(t, "Use ``a ` b`` and `<br>` here.", m.Text)
+	require.Empty(t, m.Placeholders)
+}
+
+func TestMaskKeepingCodeRoundTrip(t *testing.T) {
+	for _, text := range []string{
+		"Вызовите `get_user()` затем `save()`.",
+		"Литерал ⟦1⟧ в тексте и код `x`.",
+		"Код со скобкой `a⟦b` остаётся под меткой.",
+		"Ссылка с кодом [`run()`](https://x.io) внутри.",
+		"Фрагмент ```\nfenced\n``` и `inline`.",
+		"Без кода [ссылка](https://x.io).",
+	} {
+		m := cdm.MaskKeepingCode(text)
+		require.Equal(t, text, cdm.Unmask(m.Text, m.Placeholders), "исходник %q, маска %q", text, m.Text)
+	}
+}
+
+func TestInlineCode(t *testing.T) {
+	require.Equal(t, []string{"``a ` b``", "`run()`", "`x`"}, cdm.InlineCode("Use ``a ` b`` then `run()` and `x`."))
+	require.Equal(t, []string{"`y`"}, cdm.InlineCode("Fenced ```\ncode\n``` then `y`."))
+	require.Empty(t, cdm.InlineCode("No code, ⟦1⟧ only."))
 }

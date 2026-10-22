@@ -49,3 +49,28 @@ func deref(s *string) string {
 	}
 	return *s
 }
+
+// TestLiveOllamaKeepsInlineCode — абзац с беты, на котором qwen3:8b терял
+// метку кода во всех попытках (дополнение §4, «код на виду»).
+func TestLiveOllamaKeepsInlineCode(t *testing.T) {
+	if os.Getenv("LINGUASTACK_LIVE_OLLAMA") != "1" {
+		t.Skip("живой Ollama не включён (LINGUASTACK_LIVE_OLLAMA=1)")
+	}
+	ollama := providers.NewOllama("http://localhost:11434", http.DefaultClient,
+		providers.OllamaOptions{NumCtx: 8192, Timeout: 5 * time.Minute})
+	svc := translation.NewService(ollama, "qwen3:8b", translation.ServiceOptions{})
+	batch := batchOf("But, also like last chapter, it’s pretty slow. Again, we’re heap allocating an ObjBoundMethod " +
+		"for each super call even though most of the time the very next instruction is an `OP_CALL` that immediately " +
+		"unpacks that bound method, invokes it, and then discards it. In fact, this is even more likely to be true for " +
+		"super calls than for regular method calls. At least with method calls there is a chance that the user is " +
+		"actually invoking a function stored in a field. With super calls, you’re *always* looking up a method. " +
+		"The only question is whether you invoke it immediately or not.")
+	system := translation.BuildSystemPrompt("en", "ru", "technical", nil)
+
+	out, err := svc.TranslateBatch(t.Context(), batch, system, providers.Strict, "en", "ru")
+	require.NoError(t, err)
+	r := result(t, out, 0)
+	t.Logf("вызовов модели: %d; %s %v → %q", out.ProviderCalls, r.Severity, findingCodes(r.Findings), deref(r.Translated))
+	require.NotEqual(t, translation.Error, r.Severity, r.Err)
+	require.Contains(t, *r.Translated, "`OP_CALL`")
+}

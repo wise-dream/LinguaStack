@@ -96,6 +96,13 @@ func ValidateSegment(in ValidationInput) []Finding {
 		add("placeholder_mismatch", Error, msg)
 	}
 
+	// Код на виду (ступень MaskKeepingCode, дополнение §3) метки не
+	// стерегут: каждый `…` исходника обязан дойти до перевода байт в байт.
+	// Под метками кода в замаскированном тексте нет — проверка пуста.
+	if lost := lostCode(in.MaskedSource, in.MaskedTranslation); len(lost) > 0 {
+		add("code_changed", Error, "Код в обратных кавычках потерян или изменён: "+strings.Join(lost, ", ")+".")
+	}
+
 	if a, b := len(linkRe.FindAllString(in.Source, -1)), len(linkRe.FindAllString(in.Translation, -1)); a != b {
 		add("link_count_mismatch", Error, fmt.Sprintf("Число ссылок и изображений изменилось: было %d, стало %d.", a, b))
 	}
@@ -126,6 +133,24 @@ func ValidateSegment(in ValidationInput) []Finding {
 		add("heading_level_changed", Warning, "Уровень заголовка изменился.")
 	}
 	return out
+}
+
+// lostCode — инлайн-код исходника, которого нет в переводе (с учётом
+// повторов). Лишний код в переводе не в счёт: это разметка, а не порча.
+func lostCode(source, translation string) []string {
+	have := map[string]int{}
+	for _, c := range cdm.InlineCode(translation) {
+		have[c]++
+	}
+	var lost []string
+	for _, c := range cdm.InlineCode(source) {
+		if have[c] > 0 {
+			have[c]--
+			continue
+		}
+		lost = append(lost, c)
+	}
+	return lost
 }
 
 // countMarkup считает токен; одиночная * — без учёта входящих в **.

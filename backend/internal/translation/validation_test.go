@@ -145,3 +145,43 @@ func TestSeverityJSON(t *testing.T) {
 	require.NoError(t, err)
 	require.JSONEq(t, `{"code":"x","severity":"warning","message":"m"}`, string(raw))
 }
+
+// validateKeepingCode — проверка ответа на ступени «код на виду»: модель
+// видела инлайн-код как есть, метками закрыто остальное.
+func validateKeepingCode(source, translated string) []translation.Finding {
+	m := cdm.MaskKeepingCode(source)
+	return translation.ValidateSegment(translation.ValidationInput{
+		Source: source, Translation: translated, MaskedSource: m.Text, MaskedTranslation: maskedLike(m, translated),
+		SourceLang: "en", TargetLang: "ru", Type: cdm.Paragraph,
+	})
+}
+
+func TestVisibleCodeLostOrChangedIsError(t *testing.T) {
+	src := "The next instruction is an `OP_CALL` that unpacks the method."
+	require.Empty(t, validateKeepingCode(src, "Следующая инструкция — `OP_CALL`, она распаковывает метод."))
+
+	lost := codeFinding(t, validateKeepingCode(src, "Следующая инструкция сразу распаковывает метод."))
+	require.Equal(t, translation.Error, lost.Severity)
+	require.Contains(t, lost.Message, "`OP_CALL`")
+
+	changed := codeFinding(t, validateKeepingCode(src, "Следующая инструкция — `OP_ВЫЗОВ`, она распаковывает метод."))
+	require.Equal(t, translation.Error, changed.Severity)
+}
+
+func codeFinding(t *testing.T, findings []translation.Finding) translation.Finding {
+	t.Helper()
+	for _, f := range findings {
+		if f.Code == "code_changed" {
+			return f
+		}
+	}
+	t.Fatalf("нет code_changed среди %v", codes(findings))
+	return translation.Finding{}
+}
+
+func TestExtraCodeSpanIsNotCodeChange(t *testing.T) {
+	// Слово, которое модель взяла в обратные кавычки, кода не портит —
+	// это только разметка (предупреждение markup_mismatch).
+	got := validateKeepingCode("Call `run()` on super calls.", "Вызовите `run()` для вызовов `super`.")
+	require.NotContains(t, codes(got), "code_changed")
+}

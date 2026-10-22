@@ -17,7 +17,9 @@ import (
 // парсером пакета перевода: тестовый двойник не должен разделять ошибки
 // с тем кодом, который им проверяют.
 type Fake struct {
-	// Scenario: echo, prefix, protocol_violation, drops_placeholder,
+	// Scenario: echo, prefix, protocol_violation, drops_placeholder (теряет
+	// метки и инлайн-код на виду), drops_placeholder_keeps_code (теряет
+	// метки, а код на виду переносит — как qwen3:8b),
 	// drops_placeholder_until_told (теряет метки, пока запрос не назовёт
 	// потерянные), mangles_marker (последнюю метку пишет «⟧N⟧»),
 	// rate_limited, timeout, refusal, empty.
@@ -89,7 +91,10 @@ func render(segs []fakeSegment) string {
 	return b.String()
 }
 
-var fakeMarkerRe = regexp.MustCompile(`⟦\d+⟧`)
+var (
+	fakeMarkerRe = regexp.MustCompile(`⟦\d+⟧`)
+	fakeCodeRe   = regexp.MustCompile("`[^`\n]+`")
+)
 
 func (f *Fake) Complete(ctx context.Context, modelID string, req CompletionRequest) (CompletionResult, error) {
 	if f.Delay > 0 {
@@ -187,6 +192,8 @@ func (f *Fake) complete(ctx context.Context, modelID string, req CompletionReque
 		case "prefix", "protocol_violation":
 			text = f.Prefix + text
 		case "drops_placeholder":
+			text = f.Prefix + fakeCodeRe.ReplaceAllString(fakeMarkerRe.ReplaceAllString(text, ""), "")
+		case "drops_placeholder_keeps_code":
 			text = f.Prefix + fakeMarkerRe.ReplaceAllString(text, "")
 		case "drops_placeholder_until_told":
 			if strings.Contains(req.User, "lost these protected markers") {
