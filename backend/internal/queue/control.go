@@ -38,13 +38,31 @@ func Pause(ctx context.Context, db *gorm.DB, projectID, ownerID uuid.UUID) (*mod
 		})
 }
 
-// Resume продолжает с места: и после паузы, и после сбоя провайдера.
+// Resume доводит перевод до конца: продолжает с места после паузы и сбоя
+// провайдера и заново переводит упавшие сегменты — те, что исчерпали
+// попытки модели. Без этого проект «ошибка» из-за упавших сегментов
+// завершался бы сразу с той же ошибкой: worker берёт только ожидающие.
 func Resume(ctx context.Context, db *gorm.DB, projectID, ownerID uuid.UUID, maxAttempts int) (*models.TranslationProject, error) {
 	return transition(ctx, db, projectID, ownerID, []string{models.ProjectPaused, models.ProjectFailed},
 		models.ProjectQueued, func(tx *gorm.DB, p *models.TranslationProject) error {
+			if err := RetryFailed(ctx, tx, p.ID); err != nil {
+				return err
+			}
 			_, err := Enqueue(ctx, tx, p, 0, maxAttempts)
 			return err
 		})
+}
+
+// RetryFailed возвращает упавшие сегменты проекта в ожидание со свежим
+// счётом попыток, как «Перевести заново» у одного сегмента.
+func RetryFailed(ctx context.Context, tx *gorm.DB, projectID uuid.UUID) error {
+	err := tx.WithContext(ctx).Model(&models.TranslationSegment{}).
+		Where("project_id = ? AND status = ?", projectID, models.SegmentFailed).
+		Updates(map[string]any{"status": models.SegmentPending, "attempts": 0, "last_error": "", "updated_at": time.Now().UTC()}).Error
+	if err != nil {
+		return fmt.Errorf("повтор упавших сегментов: %w", err)
+	}
+	return RefreshCounters(ctx, tx, projectID, Usage{})
 }
 
 // Cancel отменяет перевод; сделанное сохраняется.

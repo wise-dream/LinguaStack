@@ -278,6 +278,28 @@ func TestResumeFailedProjectContinues(t *testing.T) {
 	require.Equal(t, "completed", e.get(t, p.ID).Status)
 }
 
+func TestResumeRetriesFailedSegments(t *testing.T) {
+	// Модель во всех попытках портила защищённый фрагмент — проект
+	// «ошибка». «Продолжить» (в вебе и в Telegram — один код) переводит
+	// такие фрагменты заново, а не завершается сразу с той же ошибкой.
+	e := newTranslationEnv(t, nil)
+	p := e.project(t, e.book(t, "# Ch\n\nCall `run()` now.\n\nPlain text."))
+	e.fake.Scenario = "drops_placeholder"
+	e.runWorker(t)
+	require.Equal(t, "failed", e.get(t, p.ID).Status)
+
+	e.fake.Scenario = "prefix"
+	require.Equal(t, http.StatusOK, e.c.do(http.MethodPost, "/api/translations/"+p.ID+"/resume", nil).Status)
+	for _, seg := range e.segments(t, p.ID) {
+		require.NotEqual(t, "failed", seg.Status, "упавший фрагмент снова ждёт перевода: %s", seg.NodeID)
+	}
+	e.runWorker(t)
+	require.Equal(t, "completed", e.get(t, p.ID).Status)
+	for _, seg := range e.segments(t, p.ID) {
+		require.Equal(t, "completed", seg.Status, seg.NodeID)
+	}
+}
+
 func TestCompletedProjectCannotBeCancelledOrPaused(t *testing.T) {
 	e := newTranslationEnv(t, nil)
 	p := e.project(t, e.book(t, "# Ch\n\nOne."))
