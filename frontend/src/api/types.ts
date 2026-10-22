@@ -43,15 +43,24 @@ export interface LibraryBook {
   source_format: string
   created_at: string
   owned: boolean
-  translations: {
-    id: string
-    source_lang: string
-    target_lang: string
-    model_id: string
-    status: ProjectStatus
-    segments_done: number
-    segments_total: number
-  }[]
+  translations: LibraryTranslation[]
+}
+
+export interface LibraryTranslation {
+  id: string
+  source_lang: string
+  target_lang: string
+  model_id: string
+  status: ProjectStatus
+  segments_done: number
+  segments_total: number
+}
+
+/** Порция библиотеки: next — курсор следующей, его нет — книги кончились. */
+export interface LibraryPage {
+  books: LibraryBook[]
+  total: number
+  next?: string
 }
 
 export interface TocEntry {

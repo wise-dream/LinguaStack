@@ -1,46 +1,28 @@
 <script setup lang="ts">
-// Библиотека (ТЗ §8.2): опись книг пользователя с переводами каждой.
+// Библиотека (ТЗ §8.2): опись книг пользователя с переводами каждой —
+// порциями и с поиском по названию и автору (дополнение §9).
 import { NEmpty, NSpin, NTable } from 'naive-ui'
-import { computed, onMounted, ref } from 'vue'
 
-import { deleteBook, listBooks } from '../api/books'
+import { deleteBook } from '../api/books'
 import { errorMessage } from '../api/client'
-import { listTranslations } from '../api/translations'
-import type { Book, Project } from '../api/types'
+import type { LibraryBook } from '../api/types'
 import ConfirmButton from '../components/ConfirmButton.vue'
 import ErrorAlert from '../components/ErrorAlert.vue'
 import LangPair from '../components/LangPair.vue'
+import LibrarySearch from '../components/LibrarySearch.vue'
 import LinkButton from '../components/LinkButton.vue'
+import LoadMore from '../components/LoadMore.vue'
 import StatusMark from '../components/StatusMark.vue'
 import { formatDate, formatName } from '../lib/format'
+import { useLibrary } from '../lib/library'
 
-const books = ref<Book[] | null>(null)
-const translations = ref<Project[]>([])
-const error = ref('')
+const { q, shown, books, total, next, loading, error, search, more, removed } = useLibrary(true)
 
-const byBook = computed(() => {
-  const map = new Map<string, Project[]>()
-  for (const p of translations.value) {
-    map.set(p.book_id, [...(map.get(p.book_id) ?? []), p])
-  }
-  return map
-})
-
-onMounted(async () => {
-  try {
-    const [b, t] = await Promise.all([listBooks(), listTranslations()])
-    books.value = b
-    translations.value = t
-  } catch (e) {
-    error.value = errorMessage(e)
-  }
-})
-
-async function remove(book: Book) {
+async function remove(book: LibraryBook) {
   error.value = ''
   try {
     await deleteBook(book.id)
-    books.value = (books.value ?? []).filter((b) => b.id !== book.id)
+    removed(book.id)
   } catch (e) {
     error.value = errorMessage(e)
   }
@@ -52,7 +34,7 @@ async function remove(book: Book) {
     <div class="page-head">
       <h1>Библиотека</h1>
       <LinkButton
-        v-if="books?.length"
+        v-if="books?.length || shown"
         to="/import"
         type="primary"
       >
@@ -62,6 +44,14 @@ async function remove(book: Book) {
 
     <ErrorAlert :message="error" />
 
+    <LibrarySearch
+      v-if="books?.length || shown"
+      v-model="q"
+      :shown="shown"
+      :total="total"
+      @search="search"
+    />
+
     <div
       v-if="books === null && !error"
       class="loading"
@@ -69,6 +59,13 @@ async function remove(book: Book) {
       <NSpin size="small" />
       <span class="muted">Загружаю библиотеку…</span>
     </div>
+
+    <p
+      v-else-if="books?.length === 0 && shown"
+      class="not-found muted"
+    >
+      Ничего не нашлось по запросу «{{ shown }}».
+    </p>
 
     <section
       v-else-if="books?.length === 0"
@@ -142,11 +139,11 @@ async function remove(book: Book) {
             <td>{{ formatDate(book.created_at) }}</td>
             <td>
               <ul
-                v-if="byBook.get(book.id)?.length"
+                v-if="book.translations.length"
                 class="translations"
               >
                 <li
-                  v-for="p in byBook.get(book.id)"
+                  v-for="p in book.translations"
                   :key="p.id"
                 >
                   <RouterLink :to="`/translations/${p.id}`">
@@ -186,6 +183,14 @@ async function remove(book: Book) {
         </tbody>
       </NTable>
     </div>
+
+    <LoadMore
+      v-if="next && books?.length"
+      :count="books.length"
+      :total="total"
+      :loading="loading"
+      @more="more"
+    />
   </main>
 </template>
 
@@ -198,6 +203,10 @@ async function remove(book: Book) {
 
 .empty {
   padding: var(--space-7) var(--space-5);
+}
+
+.not-found {
+  margin: 0;
 }
 
 .empty-title {

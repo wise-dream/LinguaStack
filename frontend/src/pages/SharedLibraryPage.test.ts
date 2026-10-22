@@ -17,8 +17,8 @@ const mine: LibraryBook = {
   id: 'b2', title: 'Своя книга', source_format: 'epub', created_at: '2026-10-21T10:00:00Z', owned: true, translations: [],
 }
 
-async function mountLibrary(body: LibraryBook[]) {
-  stubApi({ 'GET /api/library': { body }, 'GET /api/books/b1/exports': { body: [] } })
+async function mountLibrary(books: LibraryBook[]) {
+  stubApi({ 'GET /api/library': { body: { books, total: books.length } }, 'GET /api/books/b1/exports': { body: [] } })
   const router = createRouter({
     history: createMemoryHistory(),
     routes: [{ path: '/:p(.*)*', component: SharedLibraryPage, meta: { title: '' } }],
@@ -58,5 +58,32 @@ describe('общая библиотека', () => {
   it('книг пока нет — так и сказано', async () => {
     const w = await mountLibrary([])
     expect(w.text()).toContain('Книг пока нет')
+    expect(w.find('form[role=search]').exists()).toBe(false)
+  })
+
+  it('книги порциями: «Показать ещё» догружает следующую по курсору', async () => {
+    const calls = stubApi({
+      'GET /api/library': (c) => {
+        const after = new URL(c.url, 'http://x').searchParams.get('after')
+        return after === 'c1'
+          ? { body: { books: [mine], total: 2 } }
+          : { body: { books: [crafting], total: 2, next: 'c1' } }
+      },
+    })
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [{ path: '/:p(.*)*', component: { template: '<div />' }, meta: { title: '' } }],
+    })
+    await router.push('/shared')
+    const w = mount(SharedLibraryPage, { global: { plugins: [router] } })
+    await flushPromises()
+    expect(new URL(calls[0]!.url, 'http://x').searchParams.has('mine')).toBe(false)
+    expect(w.findAll('[data-book]')).toHaveLength(1)
+    const more = w.find('.load-more')
+    expect(more.text()).toContain('Показано 1 из 2')
+    await more.find('button').trigger('click')
+    await flushPromises()
+    expect(w.findAll('[data-book]').map((b) => b.attributes('data-book'))).toEqual(['b1', 'b2'])
+    expect(w.find('.load-more').exists(), 'книги кончились — кнопки нет').toBe(false)
   })
 })

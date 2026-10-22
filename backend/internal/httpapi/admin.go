@@ -155,7 +155,7 @@ func (s *server) loadAdminUsers(ctx context.Context, where string, args ...any) 
 
 func (s *server) adminListUsers(w http.ResponseWriter, r *http.Request) {
 	q := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("q")))
-	pattern := "%" + strings.NewReplacer(`\`, `\\`, "%", `\%`, "_", `\_`).Replace(q) + "%"
+	pattern := likePattern(q)
 	users, err := s.loadAdminUsers(r.Context(), "u.email LIKE ? ORDER BY u.created_at DESC LIMIT ?", pattern, adminUsersLimit)
 	if err != nil {
 		internalError(w, r, err)

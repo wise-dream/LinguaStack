@@ -1,4 +1,4 @@
-import type { Book, Project, ProviderConfig, ProviderKind } from '../api/types'
+import type { Book, LibraryBook, LibraryTranslation, Project, ProviderConfig, ProviderKind } from '../api/types'
 
 export function book(overrides: Partial<Book> = {}): Book {
   return {
@@ -16,6 +16,34 @@ export function book(overrides: Partial<Book> = {}): Book {
     issues: [],
     created_at: '2026-10-16T19:31:28Z',
     owned: true,
+    ...overrides,
+  }
+}
+
+/** Книга в списке библиотеки (GET /api/library) — та же «Алиса», что book(). */
+export function libraryBook(overrides: Partial<LibraryBook> = {}): LibraryBook {
+  return {
+    id: 'b1',
+    title: 'Приключения Алисы в Стране чудес',
+    author: 'Льюис Кэрролл',
+    language: 'en',
+    source_format: 'epub',
+    created_at: '2026-10-16T19:31:28Z',
+    owned: true,
+    translations: [],
+    ...overrides,
+  }
+}
+
+export function libraryTranslation(overrides: Partial<LibraryTranslation> = {}): LibraryTranslation {
+  return {
+    id: 'p1',
+    source_lang: 'en',
+    target_lang: 'ru',
+    model_id: 'fake-1',
+    status: 'completed',
+    segments_done: 873,
+    segments_total: 873,
     ...overrides,
   }
 }

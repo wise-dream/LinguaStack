@@ -284,6 +284,18 @@ test('импорт HTML', async ({ page }, info) => {
   await go(page, 'Библиотека')
   await expect(row.getByRole('link', { name: 'Перевести' })).toBeVisible()
   await shot(page, 'library-book')
+
+  // Поиск по библиотеке: по куску названия, без совпадений — так и сказано.
+  const search = page.getByRole('searchbox', { name: 'Поиск книг' })
+  await search.fill('web bo')
+  await expect(page.getByText('Найдена 1 книга')).toBeVisible()
+  await expect(row).toBeVisible()
+  await search.fill('нет такой книги')
+  await expect(page.getByText('Ничего не нашлось по запросу «нет такой книги».')).toBeVisible()
+  await expect(row).toHaveCount(0)
+  await shot(page, 'library-not-found')
+  await search.fill('')
+  await expect(row).toBeVisible()
   await row.getByRole('link', { name: 'Перевести' }).click()
   await expect(page.getByRole('heading', { name: 'Новый перевод' })).toBeVisible()
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)

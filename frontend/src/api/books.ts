@@ -1,13 +1,16 @@
 import { ApiError, parseResponse, request } from './client'
 import { query } from './query'
-import type { Book, BookEstimate, Chapter, LibraryBook, TocEntry } from './types'
+import type { Book, BookEstimate, Chapter, LibraryPage, TocEntry } from './types'
 
 const book = (id: string) => `/api/books/${encodeURIComponent(id)}`
 
-export const listBooks = () => request<Book[]>('GET', '/api/books')
-
-/** Общая библиотека: книги всех пользователей с переводами (дополнение §9). */
-export const getLibrary = () => request<LibraryBook[]>('GET', '/api/library')
+/**
+ * Порция библиотеки (дополнение §9): книги всех пользователей с переводами,
+ * mine — только свои; q — слова из названия или автора; after — курсор
+ * next прошлой порции.
+ */
+export const getLibrary = (params: { mine?: boolean; q?: string; after?: string } = {}) =>
+  request<LibraryPage>('GET', `/api/library${query({ mine: params.mine ? 1 : undefined, q: params.q, after: params.after })}`)
 
 export const getBook = (id: string) => request<Book>('GET', book(id))
 

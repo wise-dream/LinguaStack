@@ -314,23 +314,90 @@ type libraryBook struct {
 	Translations []libraryTranslation `json:"translations"`
 }
 
-// library — общая библиотека (дополнение §9): все книги всех пользователей
-// с их переводами, новые сверху. Владельцы не называются.
+// libraryOut — порция библиотеки: книги, сколько всего найдено и курсор
+// следующей порции (пусто — дальше книг нет).
+type libraryOut struct {
+	Books []libraryBook `json:"books"`
+	Total int64         `json:"total"`
+	Next  string        `json:"next,omitempty"`
+}
+
+const (
+	libraryPageSize = 24
+	libraryMaxPage  = 100
+)
+
+// library — общая библиотека (дополнение §9): книги всех пользователей
+// (mine=1 — только свои) с их переводами, новые сверху. Владельцы не
+// называются. q — слова, каждое из которых есть в названии или авторе;
+// порции по limit книг, следующая — по курсору after. Курсор — место
+// последней книги (дата загрузки и id), а не смещение: книга, загруженная
+// между порциями, не даёт ни повтора, ни пропуска.
 func (s *server) library(w http.ResponseWriter, r *http.Request) {
 	user := UserFromContext(r.Context())
+	query := r.URL.Query()
+	limit := libraryPageSize
+	if v := query.Get("limit"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 1 || n > libraryMaxPage {
+			writeError(w, http.StatusBadRequest, fmt.Sprintf("Размер порции — от 1 до %d книг", libraryMaxPage))
+			return
+		}
+		limit = n
+	}
+	filter := func(db *gorm.DB) *gorm.DB {
+		if query.Get("mine") == "1" {
+			db = db.Where("owner_id = ?", user.ID)
+		}
+		// Регистр и ё/е не различаются: «ежик» находит «Ёжик».
+		for _, word := range strings.Fields(query.Get("q")) {
+			db = db.Where(`translate(lower(title || ' ' || author), 'ё', 'е') LIKE ? ESCAPE '\'`,
+				likePattern(strings.ReplaceAll(strings.ToLower(word), "ё", "е")))
+		}
+		return db
+	}
+	page := s.DB.WithContext(r.Context()).Model(&models.Book{}).Scopes(filter)
+	if v := query.Get("after"); v != "" {
+		at, id, ok := parseLibraryCursor(v)
+		if !ok {
+			writeError(w, http.StatusBadRequest, "Неверный курсор библиотеки")
+			return
+		}
+		page = page.Where("(created_at, id) < (?, ?)", at, id)
+	}
+
+	var total int64
+	if err := s.DB.WithContext(r.Context()).Model(&models.Book{}).Scopes(filter).Count(&total).Error; err != nil {
+		internalError(w, r, err)
+		return
+	}
 	var books []models.Book
-	err := s.DB.WithContext(r.Context()).Select("id", "owner_id", "title", "author", "language", "source_format", "created_at").
-		Order("created_at DESC, id").Find(&books).Error
+	err := page.Select("id", "owner_id", "title", "author", "language", "source_format", "created_at").
+		Order("created_at DESC, id DESC").Limit(limit + 1).Find(&books).Error
 	if err != nil {
 		internalError(w, r, err)
 		return
 	}
+	out := libraryOut{Books: make([]libraryBook, 0, limit), Total: total}
+	if len(books) > limit {
+		books = books[:limit]
+		last := books[limit-1]
+		out.Next = last.CreatedAt.UTC().Format(time.RFC3339Nano) + "_" + last.ID.String()
+	}
+
+	ids := make([]uuid.UUID, len(books))
+	for i, b := range books {
+		ids[i] = b.ID
+	}
 	var projects []models.TranslationProject
-	err = s.DB.WithContext(r.Context()).Select("id", "book_id", "source_lang", "target_lang", "model_id", "status",
-		"segments_done", "segments_total", "created_at").Order("created_at DESC, id").Find(&projects).Error
-	if err != nil {
-		internalError(w, r, err)
-		return
+	if len(ids) > 0 {
+		err = s.DB.WithContext(r.Context()).Select("id", "book_id", "source_lang", "target_lang", "model_id", "status",
+			"segments_done", "segments_total", "created_at").
+			Where("book_id IN ?", ids).Order("created_at DESC, id").Find(&projects).Error
+		if err != nil {
+			internalError(w, r, err)
+			return
+		}
 	}
 	byBook := map[uuid.UUID][]libraryTranslation{}
 	for _, p := range projects {
@@ -338,17 +405,41 @@ func (s *server) library(w http.ResponseWriter, r *http.Request) {
 			TargetLang: p.TargetLang, ModelID: p.ModelID, Status: p.Status,
 			SegmentsDone: p.SegmentsDone, SegmentsTotal: p.SegmentsTotal})
 	}
-	out := make([]libraryBook, len(books))
-	for i, b := range books {
+	for _, b := range books {
 		tr := byBook[b.ID]
 		if tr == nil {
 			tr = []libraryTranslation{}
 		}
-		out[i] = libraryBook{ID: b.ID, Title: b.Title, Author: b.Author, Language: b.Language, SourceFormat: b.SourceFormat,
-			CreatedAt: b.CreatedAt.UTC(), Owned: b.OwnerID == user.ID, Translations: tr}
+		out.Books = append(out.Books, libraryBook{ID: b.ID, Title: b.Title, Author: b.Author, Language: b.Language,
+			SourceFormat: b.SourceFormat, CreatedAt: b.CreatedAt.UTC(), Owned: b.OwnerID == user.ID, Translations: tr})
 	}
 	writeJSON(w, http.StatusOK, out)
 }
+
+// parseLibraryCursor разбирает курсор library: «время_id».
+func parseLibraryCursor(v string) (time.Time, uuid.UUID, bool) {
+	rawAt, rawID, ok := strings.Cut(v, "_")
+	if !ok {
+		return time.Time{}, uuid.Nil, false
+	}
+	at, err := time.Parse(time.RFC3339Nano, rawAt)
+	if err != nil {
+		return time.Time{}, uuid.Nil, false
+	}
+	id, err := uuid.Parse(rawID)
+	if err != nil {
+		return time.Time{}, uuid.Nil, false
+	}
+	return at, id, true
+}
+
+// likePattern — подстрока для LIKE … ESCAPE '\': %, _ и \ из запроса —
+// обычные символы, а не шаблон.
+func likePattern(s string) string {
+	return "%" + likeEscaper.Replace(s) + "%"
+}
+
+var likeEscaper = strings.NewReplacer(`\`, `\\`, "%", `\%`, "_", `\_`)
 
 func (s *server) projectConfig(r *http.Request, p *models.TranslationProject) *models.ProviderConfig {
 	cfg, err := store.Owned[models.ProviderConfig](r.Context(), s.DB, p.ProviderConfigID, p.OwnerID)

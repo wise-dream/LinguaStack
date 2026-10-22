@@ -1,31 +1,23 @@
 <script setup lang="ts">
 // Общая библиотека (дополнение §9): книги всех пользователей с их
-// переводами — читать и скачивать. Менять может только тот, кто загрузил.
+// переводами — читать и скачивать, порциями и с поиском по названию и
+// автору. Менять может только тот, кто загрузил.
 import { NButton, NEmpty } from 'naive-ui'
-import { onMounted, ref } from 'vue'
+import { ref } from 'vue'
 
-import { getLibrary } from '../api/books'
-import { errorMessage } from '../api/client'
-import type { LibraryBook } from '../api/types'
 import ErrorAlert from '../components/ErrorAlert.vue'
 import ExportPanel from '../components/ExportPanel.vue'
 import LangPair from '../components/LangPair.vue'
+import LibrarySearch from '../components/LibrarySearch.vue'
 import LinkButton from '../components/LinkButton.vue'
+import LoadMore from '../components/LoadMore.vue'
 import StatusMark from '../components/StatusMark.vue'
 import { formatName, formatNumber } from '../lib/format'
+import { useLibrary } from '../lib/library'
 
-const books = ref<LibraryBook[] | null>(null)
-const error = ref('')
+const { q, shown, books, total, next, loading, error, search, more } = useLibrary(false)
 /** Перевод, у которого раскрыта панель скачивания. */
 const downloading = ref('')
-
-onMounted(async () => {
-  try {
-    books.value = await getLibrary()
-  } catch (e) {
-    error.value = errorMessage(e)
-  }
-})
 
 function toggle(id: string) {
   downloading.value = downloading.value === id ? '' : id
@@ -37,8 +29,22 @@ function toggle(id: string) {
     <h1>Общая библиотека</h1>
     <ErrorAlert :message="error" />
 
+    <LibrarySearch
+      v-if="books?.length || shown"
+      v-model="q"
+      :shown="shown"
+      :total="total"
+      @search="search"
+    />
+
+    <p
+      v-if="books && !books.length && shown"
+      class="muted"
+    >
+      Ничего не нашлось по запросу «{{ shown }}».
+    </p>
     <section
-      v-if="books && !books.length"
+      v-else-if="books && !books.length"
       class="empty card"
     >
       <NEmpty description="Книг пока нет." />
@@ -117,6 +123,14 @@ function toggle(id: string) {
         </LinkButton>
       </section>
     </div>
+
+    <LoadMore
+      v-if="next && books?.length"
+      :count="books.length"
+      :total="total"
+      :loading="loading"
+      @more="more"
+    />
   </main>
 </template>
 

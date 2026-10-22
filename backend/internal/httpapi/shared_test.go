@@ -39,12 +39,9 @@ func TestSharedLibraryListsEveryonesBooks(t *testing.T) {
 	owner, reader, p := sharedSetup(t)
 	mine := uploadBook(t, reader, "mine.md", "# Своя\n\nТекст.")
 
-	var lib []libraryBody
-	r := reader.do(http.MethodGet, "/api/library", nil)
-	require.Equal(t, http.StatusOK, r.Status)
-	r.JSON(t, &lib)
+	lib := getLibrary(t, reader, nil)
 	byID := map[string]libraryBody{}
-	for _, b := range lib {
+	for _, b := range lib.Books {
 		byID[b.ID] = b
 	}
 	require.Contains(t, byID, p.BookID)
@@ -54,9 +51,7 @@ func TestSharedLibraryListsEveryonesBooks(t *testing.T) {
 	require.True(t, byID[mine.ID].Owned, "своя книга тоже в общей библиотеке")
 
 	// Владелец видит книгу читателя так же.
-	var ownerLib []libraryBody
-	owner.c.do(http.MethodGet, "/api/library", nil).JSON(t, &ownerLib)
-	require.Len(t, ownerLib, 2)
+	require.Len(t, getLibrary(t, owner.c, nil).Books, 2)
 }
 
 func TestSharedBookReadableByOthers(t *testing.T) {
