@@ -268,3 +268,39 @@ func TestSearchCJKBySubstring(t *testing.T) {
 	_, body := search(t, e.c, bookID, q("喜欢"))
 	require.Equal(t, []string{"我喜欢猫。"}, body.snippets("original"))
 }
+
+func TestSegmentsFilteredByText(t *testing.T) {
+	// Найти фрагмент перевода по тексту оригинала или перевода — по тем же
+	// правилам, что поиск в читалке; вместе с фильтрами ошибок.
+	e := newTranslationEnv(t, nil)
+	bookID := e.book(t, "# Глава\n\nКошки спали на крыше.\n\nПёс лаял во дворе.\n\nCall fmt.Println(x) twice.")
+	r := e.create(t, bookID, map[string]any{"provider_config_id": e.ollamaConfig(t), "source_lang": "uk"})
+	require.Equal(t, http.StatusCreated, r.Status, "тело: %s", r.Body)
+	var p projectBody
+	r.JSON(t, &p)
+	e.runWorker(t)
+
+	found := func(query string) []string {
+		t.Helper()
+		var segs []segmentBody
+		resp := e.c.do(http.MethodGet, "/api/translations/"+p.ID+"/segments?"+query, nil)
+		require.Equal(t, http.StatusOK, resp.Status, "%s: %s", query, resp.Body)
+		resp.JSON(t, &segs)
+		out := make([]string, len(segs))
+		for i, s := range segs {
+			out[i] = s.SourceText
+		}
+		return out
+	}
+	require.Equal(t, []string{"Кошки спали на крыше."}, found(q("кошку")), "формы слов перевода")
+	require.Equal(t, []string{"Пёс лаял во дворе."}, found(q("лаял")))
+	require.Equal(t, []string{"Call fmt.Println(x) twice."}, found(q("rintln(")), "кусок кода — подстрокой")
+	require.Empty(t, found(q("зебра")))
+
+	segs := e.segments(t, p.ID)
+	require.NoError(t, e.db.Model(&models.TranslationSegment{}).Where("id = ?", segs[2].ID).Update("severity", "warning").Error)
+	require.Equal(t, []string{"Пёс лаял во дворе."}, found(q("лаял")+"&severity=warning"))
+	require.Empty(t, found(q("кошку")+"&severity=warning"))
+
+	require.Equal(t, http.StatusUnprocessableEntity, e.c.do(http.MethodGet, "/api/translations/"+p.ID+"/segments?q=a", nil).Status)
+}

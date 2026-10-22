@@ -15,6 +15,7 @@ import (
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 
+	"github.com/vnovels/linguastack/internal/booksearch"
 	"github.com/vnovels/linguastack/internal/db/models"
 	"github.com/vnovels/linguastack/internal/providers"
 	"github.com/vnovels/linguastack/internal/queue"
@@ -484,6 +485,29 @@ func (s *server) listSegments(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		q = q.Where("severity = ?", severity)
+	}
+	// Поиск по тексту оригинала и перевода — те же правила, что в читалке
+	// (дополнение §19): найти фрагмент, чтобы поправить или повторить его.
+	if text := strings.TrimSpace(r.URL.Query().Get("q")); text != "" {
+		if n := utf8.RuneCountInString(text); n < searchMinRunes || n > searchMaxRunes {
+			writeError(w, http.StatusUnprocessableEntity, "Запрос — от 2 до 200 символов")
+			return
+		}
+		book, err := store.Owned[models.Book](r.Context(), s.DB, p.BookID, p.OwnerID)
+		if err != nil {
+			internalError(w, r, err)
+			return
+		}
+		nodes, err := booksearch.Nodes(r.Context(), s.DB, booksearch.Params{Book: book, Project: p, Query: text})
+		if err != nil {
+			internalError(w, r, err)
+			return
+		}
+		if len(nodes) == 0 {
+			writeJSON(w, http.StatusOK, []segmentOut{})
+			return
+		}
+		q = q.Where("node_id IN ?", nodes)
 	}
 	var segs []models.TranslationSegment
 	if err := q.Order("chapter_index, ordinal").Offset(offset).Limit(limit).Find(&segs).Error; err != nil {

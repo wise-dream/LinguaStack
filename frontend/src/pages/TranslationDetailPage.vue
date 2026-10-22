@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // Перевод книги: живой прогресс, управление и сегменты с фильтрами по
 // ошибкам и замечаниям — чтобы найти и повторить проблемные (ТЗ §5.3).
-import { NButton, NEmpty } from 'naive-ui'
+import { NButton, NEmpty, NInput } from 'naive-ui'
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 
@@ -43,6 +43,9 @@ const now = useNow()
 const progress = useProgress(id)
 
 const filter = ref<Filter>('all')
+// Поиск фрагмента по тексту: text — в поле, searched — применённый запрос.
+const text = ref('')
+const searched = ref('')
 const segments = ref<Segment[]>([])
 const hasMore = ref(false)
 const segmentError = ref<Record<string, string>>({})
@@ -92,9 +95,18 @@ async function retryAllProblems() {
 const canCancel = computed(() => !!project.value && (!isTerminal(project.value.status) || project.value.status === 'failed'))
 
 function filterQuery(f: Filter): SegmentFilter {
-  if (f === 'failed') return { status: 'failed' }
-  if (f === 'warning') return { severity: 'warning' }
-  return {}
+  const q = searched.value || undefined
+  if (f === 'failed') return { status: 'failed', q }
+  if (f === 'warning') return { severity: 'warning', q }
+  return { q }
+}
+
+function searchSegments() {
+  const t = text.value.trim()
+  // Одна буква — не запрос (сервер ищет от двух символов).
+  if (t.length === 1) return
+  searched.value = t
+  void loadSegments(true)
 }
 
 async function loadSegments(reset: boolean) {
@@ -230,6 +242,19 @@ const readerLink = (s: Segment) => ({
 
       <section class="segments card">
         <h2>Фрагменты</h2>
+        <form
+          class="segment-search"
+          role="search"
+          @submit.prevent="searchSegments"
+        >
+          <NInput
+            v-model:value="text"
+            placeholder="Найти фрагмент по тексту"
+            clearable
+            :input-props="{ type: 'search', 'aria-label': 'Найти фрагмент по тексту' }"
+            @clear="() => { text = ''; searchSegments() }"
+          />
+        </form>
         <div
           class="filters"
           role="group"
@@ -275,7 +300,7 @@ const readerLink = (s: Segment) => ({
         <NEmpty
           v-if="!segments.length"
           size="small"
-          :description="filter === 'all' ? 'Фрагменты появятся, когда перевод начнётся.' : 'Таких фрагментов нет.'"
+          :description="searched ? 'Ничего не нашлось.' : filter === 'all' ? 'Фрагменты появятся, когда перевод начнётся.' : 'Таких фрагментов нет.'"
         />
         <ol class="segment-list">
           <li
@@ -412,6 +437,11 @@ h1 {
 
 h2 {
   font-size: var(--step-1);
+  margin-bottom: var(--space-3);
+}
+
+.segment-search {
+  max-width: 28rem;
   margin-bottom: var(--space-3);
 }
 

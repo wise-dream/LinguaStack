@@ -34,6 +34,8 @@ export interface SegmentFilter {
   chapter?: number
   status?: SegmentStatus
   severity?: Severity
+  /** Текст в оригинале или переводе — правила как у поиска в читалке. */
+  q?: string
   limit?: number
   offset?: number
 }
@@ -41,7 +43,7 @@ export interface SegmentFilter {
 export const listSegments = (id: string, f: SegmentFilter) =>
   request<Segment[]>(
     'GET',
-    `${project(id)}/segments${query({ chapter: f.chapter, status: f.status, severity: f.severity, limit: f.limit, offset: f.offset })}`,
+    `${project(id)}/segments${query({ chapter: f.chapter, status: f.status, severity: f.severity, q: f.q, limit: f.limit, offset: f.offset })}`,
   )
 
 export const patchSegment = (id: string, translatedText: string) =>

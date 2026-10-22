@@ -72,34 +72,11 @@ type side struct {
 // так ничего — подсказывает исправленный запрос.
 func Search(ctx context.Context, db *gorm.DB, p Params) (Result, error) {
 	db = db.WithContext(ctx)
-	q := Parse(p.Query)
-	lang, err := originalLanguage(db, p)
+	m, err := find(ctx, db, p)
 	if err != nil {
 		return Result{}, err
 	}
-	if err := EnsureIndex(ctx, db, p.Book, lang); err != nil {
-		return Result{}, err
-	}
-	sides := []side{{in: InOriginal, lang: lang, from: "book_blocks", text: "text", filter: "book_id = ?", arg: p.Book.ID}}
-	if p.Project != nil {
-		sides = append(sides, side{in: InTranslation, lang: p.Project.TargetLang, from: "translation_segments",
-			text: "translated_text", filter: "project_id = ? AND translated_text IS NOT NULL", arg: p.Project.ID})
-	}
-
-	var hits []Hit
-	words := !q.CJK && len(q.Phrases)+len(q.Words) > 0
-	if words {
-		if hits, err = byWords(db, sides, q); err != nil {
-			return Result{}, err
-		}
-	}
-	bySubstring := len(hits) == 0
-	if bySubstring {
-		if hits, err = substring(db, sides, q.Raw); err != nil {
-			return Result{}, err
-		}
-	}
-
+	hits := m.hits
 	order := readingOrder(&p.Book.CDM.Data)
 	slices.SortStableFunc(hits, func(a, b Hit) int {
 		if d := order[a.ChapterIndex] - order[b.ChapterIndex]; d != 0 {
@@ -112,8 +89,8 @@ func Search(ctx context.Context, db *gorm.DB, p Params) (Result, error) {
 	})
 	res := Result{Total: len(hits), Truncated: len(hits) > p.Limit}
 	hits = hits[:min(len(hits), p.Limit)]
-	if !bySubstring {
-		if err := headlines(db, sides, q, hits); err != nil {
+	if !m.bySubstring {
+		if err := headlines(db, m.sides, m.q, hits); err != nil {
 			return Result{}, err
 		}
 	}
@@ -121,12 +98,69 @@ func Search(ctx context.Context, db *gorm.DB, p Params) (Result, error) {
 	if res.Results == nil {
 		res.Results = []Hit{}
 	}
-	if res.Total == 0 && words {
-		if res.Suggestion, err = suggest(db, sides, q); err != nil {
+	if res.Total == 0 && m.words {
+		if res.Suggestion, err = suggest(db, m.sides, m.q); err != nil {
 			return Result{}, err
 		}
 	}
 	return res, nil
+}
+
+// Nodes — блоки, где есть запрос (в оригинале или в переводе), по тем же
+// правилам, что Search, но без отрывков и без предела: для фильтра
+// фрагментов перевода по тексту. Порядок не определён.
+func Nodes(ctx context.Context, db *gorm.DB, p Params) ([]string, error) {
+	m, err := find(ctx, db.WithContext(ctx), p)
+	if err != nil {
+		return nil, err
+	}
+	seen := make(map[string]bool, len(m.hits))
+	nodes := make([]string, 0, len(m.hits))
+	for _, h := range m.hits {
+		if !seen[h.NodeID] {
+			seen[h.NodeID] = true
+			nodes = append(nodes, h.NodeID)
+		}
+	}
+	return nodes, nil
+}
+
+// found — все совпадения запроса и то, как они найдены.
+type found struct {
+	q           Query
+	sides       []side
+	hits        []Hit
+	words       bool // запрос искался по словам
+	bySubstring bool // по словам ничего — найдено подстрокой
+}
+
+// find ищет по словам, если по словам ничего нет — подстрокой.
+func find(ctx context.Context, db *gorm.DB, p Params) (found, error) {
+	m := found{q: Parse(p.Query)}
+	lang, err := originalLanguage(db, p)
+	if err != nil {
+		return m, err
+	}
+	if err := EnsureIndex(ctx, db, p.Book, lang); err != nil {
+		return m, err
+	}
+	m.sides = []side{{in: InOriginal, lang: lang, from: "book_blocks", text: "text", filter: "book_id = ?", arg: p.Book.ID}}
+	if p.Project != nil {
+		m.sides = append(m.sides, side{in: InTranslation, lang: p.Project.TargetLang, from: "translation_segments",
+			text: "translated_text", filter: "project_id = ? AND translated_text IS NOT NULL", arg: p.Project.ID})
+	}
+	m.words = !m.q.CJK && len(m.q.Phrases)+len(m.q.Words) > 0
+	if m.words {
+		if m.hits, err = byWords(db, m.sides, m.q); err != nil {
+			return m, err
+		}
+	}
+	if m.bySubstring = len(m.hits) == 0; m.bySubstring {
+		if m.hits, err = substring(db, m.sides, m.q.Raw); err != nil {
+			return m, err
+		}
+	}
+	return m, nil
 }
 
 // originalLanguage — язык оригинала: метаданные книги, язык оригинала у

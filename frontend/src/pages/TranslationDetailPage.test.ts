@@ -186,3 +186,37 @@ describe('перевести заново с ошибками и предупр�
     }
   })
 })
+
+describe('поиск фрагмента по тексту', () => {
+  it('запрос уходит вместе с фильтром; ничего не нашлось — так и сказано; очистка возвращает всё', async () => {
+    const { w, calls } = await mountDetail({
+      'GET /api/translations/p1': { body: project() },
+      'GET /api/translations/p1/segments': ({ url }) =>
+        url.includes('q=') ? { body: url.includes('zebra') ? [] : [segment()] } : { body: [segment(), segment({ id: 's2' })] },
+      'GET /api/books/b1/exports': { body: [] },
+    })
+    const form = w.find('form.segment-search')
+    expect(form.find('input').attributes('placeholder')).toBe('Найти фрагмент по тексту')
+    await form.find('input').setValue('tired')
+    await form.trigger('submit')
+    await flushPromises()
+    const last = () => new URL(calls.filter((c) => c.path === '/api/translations/p1/segments').at(-1)!.url, 'http://x').searchParams
+    expect(last().get('q')).toBe('tired')
+    expect(w.findAll('[data-segment]')).toHaveLength(1)
+
+    await w.find('[data-filter="warning"]').trigger('click')
+    await flushPromises()
+    expect(last().get('q')).toBe('tired')
+    expect(last().get('severity')).toBe('warning')
+
+    await form.find('input').setValue('zebra')
+    await form.trigger('submit')
+    await flushPromises()
+    expect(w.find('.segments').text()).toContain('Ничего не нашлось.')
+
+    await form.find('input').setValue('')
+    await form.trigger('submit')
+    await flushPromises()
+    expect(last().get('q')).toBeNull()
+  })
+})

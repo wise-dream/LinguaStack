@@ -104,6 +104,17 @@ test('импорт → перевод → экспорт → чтение', asyn
   await expect(page.getByText('5 из 5')).toBeVisible()
   await shot(page, 'translation-done')
 
+  // Фрагмент находится по тексту оригинала или перевода.
+  const search = page.getByRole('searchbox', { name: 'Найти фрагмент по тексту' })
+  await search.fill('Rabbit')
+  await search.press('Enter')
+  await expect(page.locator('[data-segment]')).toHaveCount(1)
+  await expect(page.locator('[data-segment]')).toContainText('The Rabbit ran away.')
+  await shot(page, 'segment-search')
+  await search.fill('')
+  await search.press('Enter')
+  await expect(page.locator('[data-segment]')).toHaveCount(5)
+
   // Экспорт: файл собирает worker, панель ждёт его и даёт скачать.
   const exportPanel = page.locator('section.export')
   await pick(page, exportPanel, 'Формат файла', 'Markdown')
