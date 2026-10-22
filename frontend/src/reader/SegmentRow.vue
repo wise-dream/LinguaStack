@@ -10,6 +10,7 @@ import { patchSegment, retrySegment } from '../api/translations'
 import type { Block, ReadMode, Segment } from '../api/types'
 import { renderInline } from '../lib/inline'
 import ErrorAlert from '../components/ErrorAlert.vue'
+import ImageViewer from '../components/ImageViewer.vue'
 import ProofMark from './ProofMark.vue'
 
 const props = withDefaults(defineProps<{
@@ -43,6 +44,8 @@ const tag = computed(() => {
 })
 
 const editing = ref(false)
+/** Картинка открыта в просмотре с масштабом. */
+const viewing = ref(false)
 // На телефоне наведения нет: действия появляются по касанию строки.
 const revealed = ref(false)
 
@@ -107,11 +110,24 @@ async function retry() {
         class="math"
       >{{ block.text }}</pre>
       <figure v-else-if="block.type === 'image' && block.meta?.src">
-        <img
+        <button
+          type="button"
+          class="zoom"
+          :aria-label="block.meta.alt ? `Открыть картинку: ${block.meta.alt}` : 'Открыть картинку'"
+          @click="viewing = true"
+        >
+          <img
+            :src="assetUrl(bookId, block.meta.src)"
+            :alt="block.meta.alt ?? ''"
+            loading="lazy"
+          >
+        </button>
+        <ImageViewer
+          v-if="viewing"
           :src="assetUrl(bookId, block.meta.src)"
           :alt="block.meta.alt ?? ''"
-          loading="lazy"
-        >
+          @close="viewing = false"
+        />
       </figure>
       <hr v-else-if="block.type === 'thematic_break'">
     </template>
@@ -352,8 +368,23 @@ figure {
   text-align: center;
 }
 
+/* Картинка не шире колонки и не выше экрана, пропорции сохраняются;
+   разглядеть подробности — в просмотре по нажатию. */
+.zoom {
+  display: inline-block;
+  max-width: 100%;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius);
+  background: none;
+  cursor: zoom-in;
+}
+
 figure img {
+  display: block;
+  max-width: 100%;
   max-height: 70vh;
+  height: auto;
 }
 
 hr {

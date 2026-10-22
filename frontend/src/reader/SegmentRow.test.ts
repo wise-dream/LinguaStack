@@ -1,5 +1,6 @@
 import { mount } from '@vue/test-utils'
 import { describe, expect, it } from 'vitest'
+import { nextTick } from 'vue'
 
 import SegmentRow from './SegmentRow.vue'
 
@@ -29,5 +30,26 @@ describe('чужой перевод', () => {
     expect(w.find('button.edit').exists()).toBe(false)
     expect(w.find('button.retry').exists()).toBe(false)
     expect(w.text()).toContain('Алиса.')
+  })
+})
+
+describe('картинка', () => {
+  const image = { node_id: 'n2', type: 'image' as const, text: '', source_hash: 'h2', meta: { src: 'img/scheme.png', alt: 'Схема' } }
+
+  it('по нажатию открывается просмотр с масштабом, Закрыть его убирает', async () => {
+    const w = mount(SegmentRow, { props: { block: image, mode: 'parallel', bookId: 'b1' }, attachTo: document.body })
+    const open = w.get('figure button')
+    expect(open.attributes('aria-label')).toBe('Открыть картинку: Схема')
+    expect(document.querySelector('.image-viewer')).toBeNull()
+
+    await open.trigger('click')
+    const viewer = document.querySelector('.image-viewer')
+    expect(viewer).not.toBeNull()
+    expect(viewer!.querySelector('img')!.getAttribute('src')).toBe(w.get('figure img').attributes('src'))
+
+    viewer!.querySelector<HTMLButtonElement>('button[aria-label="Закрыть"]')!.click()
+    await nextTick()
+    expect(w.findComponent({ name: 'ImageViewer' }).exists()).toBe(false)
+    w.unmount()
   })
 })

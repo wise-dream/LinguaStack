@@ -232,8 +232,15 @@ test('импорт → перевод → экспорт → чтение', asyn
 
 // Импорт HTML: главы по заголовкам, картинка из data: — ресурс книги.
 const PIXEL = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='
+// Схема шире любого экрана: в читалке она вписывается в колонку.
+const WIDE = Buffer.from(
+  '<svg xmlns="http://www.w3.org/2000/svg" width="2400" height="600" viewBox="0 0 2400 600">' +
+    '<rect width="2400" height="600" fill="#dfe8e4"/>' +
+    '<path d="M0 560L600 120L1200 420L1800 60L2400 500" fill="none" stroke="#1b2440" stroke-width="12"/></svg>',
+).toString('base64')
 const PAGE = `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Web Book</title></head>
 <body><nav>Menu</nav><main><h1>First</h1><p>Hello <b>world</b>.</p><p><img alt="dot" src="data:image/png;base64,${PIXEL}"></p>
+<p><img alt="Схема" src="data:image/svg+xml;base64,${WIDE}"></p>
 <h1>Second</h1><p>Bye.</p></main></body></html>`
 
 test('импорт HTML', async ({ page }, info) => {
@@ -253,6 +260,25 @@ test('импорт HTML', async ({ page }, info) => {
   await expect(page.getByRole('link', { name: 'Перевести книгу' })).toBeVisible()
   await shot(page, 'reader-untranslated')
   expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(0)
+
+  // Подробности схемы — в просмотре: масштаб, перетаскивание, Esc закрывает.
+  await page.getByRole('button', { name: 'Открыть картинку: Схема' }).click()
+  const viewer = page.getByRole('dialog', { name: 'Схема' })
+  await expect(viewer).toBeVisible()
+  await viewer.getByRole('button', { name: 'Увеличить' }).click()
+  await expect(viewer.locator('.zoom-level')).toHaveText('150%')
+  const img = viewer.locator('img')
+  const at = async () => img.evaluate((el) => (el as HTMLElement).style.transform)
+  const before = await at()
+  const box = (await img.boundingBox())!
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(box.x + box.width / 2 - 120, box.y + box.height / 2, { steps: 5 })
+  await page.mouse.up()
+  expect(await at()).not.toBe(before)
+  await shot(page, 'image-viewer')
+  await page.keyboard.press('Escape')
+  await expect(viewer).toHaveCount(0)
   await page.getByRole('link', { name: 'Перевести книгу' }).click()
   await expect(page.getByRole('heading', { name: 'Новый перевод' })).toBeVisible()
   await go(page, 'Библиотека')
