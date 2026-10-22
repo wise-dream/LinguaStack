@@ -301,3 +301,28 @@ func TestClaimRespectsUserTaskQuota(t *testing.T) {
 	}
 	require.Nil(t, claim(t, gdb, "w4", 3))
 }
+
+func TestServerOllamaOneTaskAtATime(t *testing.T) {
+	// Ollama сервера — один процессор: второй её перевод ждёт, пока идёт
+	// первый (иначе запросы делят CPU и падают по тайм-ауту), а перевод
+	// через внешний сервис идёт параллельно.
+	gdb := testdb.Committing(t, "queue")
+	ollamaTask := func() *models.TranslationTask {
+		owner := testdb.MakeUser(t, gdb).ID
+		cfg := testdb.MakeProviderConfig(t, gdb, owner, "ollama").ID
+		project := testdb.MakeProject(t, gdb, &testdb.ProjectOptions{Owner: &owner, ProviderConfig: &cfg})
+		task, err := queue.Enqueue(t.Context(), gdb, project, 0, 3)
+		require.NoError(t, err)
+		return task
+	}
+	first := ollamaTask()
+	second := ollamaTask()
+	external := enqueueFor(t, gdb, nil, 0)
+
+	require.Equal(t, first.ID, claim(t, gdb, "a", 3).ID)
+	require.Equal(t, external.ID, claim(t, gdb, "b", 3).ID, "вторая задача Ollama ждёт, внешняя идёт")
+	require.Nil(t, claim(t, gdb, "c", 3))
+
+	require.NoError(t, queue.Finish(t.Context(), gdb, first.ID, "a", models.TaskCompleted, ""))
+	require.Equal(t, second.ID, claim(t, gdb, "c", 3).ID, "Ollama освободилась")
+}

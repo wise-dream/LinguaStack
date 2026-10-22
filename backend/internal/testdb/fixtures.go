@@ -88,7 +88,9 @@ func MakeProject(t testing.TB, tx *gorm.DB, opts *ProjectOptions) *models.Transl
 	}
 	cfg := opts.ProviderConfig
 	if cfg == nil {
-		cfg = &MakeProviderConfig(t, tx, *owner, "ollama").ID
+		// Тестовый вид: у Ollama сервера своя очередь (одна задача за раз),
+		// тесты, которым она нужна, создают подключение сами.
+		cfg = &MakeProviderConfig(t, tx, *owner, "fake").ID
 	}
 	target, status := opts.TargetLang, opts.Status
 	if target == "" {

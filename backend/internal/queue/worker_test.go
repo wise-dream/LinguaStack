@@ -422,6 +422,58 @@ func TestServerOllamaOnlyForAdmins(t *testing.T) {
 	require.Contains(t, failed.LastError, "только администратору")
 }
 
+// gate держит вызовы модели, пока их не наберётся n одновременно: так
+// видно, что задачи действительно идут параллельно.
+type gate struct {
+	*providers.Fake
+	started chan struct{}
+	release chan struct{}
+}
+
+func (g gate) Complete(ctx context.Context, model string, req providers.CompletionRequest) (providers.CompletionResult, error) {
+	g.started <- struct{}{}
+	select {
+	case <-g.release:
+	case <-ctx.Done():
+		return providers.CompletionResult{}, ctx.Err()
+	}
+	return g.Fake.Complete(ctx, model, req)
+}
+
+func TestPoolRunsTasksInParallel(t *testing.T) {
+	// Несколько worker-ов в процессе (LINGUASTACK_WORKER_CONCURRENCY):
+	// большая книга одного пользователя не держит очередь остальных.
+	e := newWorkerEnv(t)
+	a := e.projectFromMarkdown("# A\n\nOne.")
+	b := e.projectFromMarkdown("# B\n\nTwo.")
+	g := gate{Fake: e.fake, started: make(chan struct{}, 8), release: make(chan struct{})}
+	pool := make([]*queue.Worker, 2)
+	for i := range pool {
+		pool[i] = queue.NewWorker(fmt.Sprintf("w%d", i), e.db, func(context.Context, *models.TranslationProject) (providers.Provider, error) {
+			return g, nil
+		}, e.cfg)
+		pool[i].PollInterval = 10 * time.Millisecond
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+	go func() { done <- queue.RunPool(ctx, pool) }()
+
+	for range 2 {
+		select {
+		case <-g.started:
+		case <-time.After(10 * time.Second):
+			cancel()
+			t.Fatal("вторая задача не началась, пока идёт первая")
+		}
+	}
+	close(g.release)
+	require.Eventually(t, func() bool {
+		return e.reload(a).Status == models.ProjectCompleted && e.reload(b).Status == models.ProjectCompleted
+	}, 10*time.Second, 20*time.Millisecond)
+	cancel()
+	require.NoError(t, <-done)
+}
+
 func TestWorkerStopsGracefullyFinishingCurrentBatch(t *testing.T) {
 	// SIGTERM: текущий батч дописывается, задача отпускается без траты попытки.
 	e := newWorkerEnv(t)

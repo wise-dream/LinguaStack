@@ -24,6 +24,7 @@ func TestLoadAppliesSpecDefaults(t *testing.T) {
 		{"MaxZipTotalBytes", cfg.MaxZipTotalBytes, 200 * 1024 * 1024},
 		{"MaxZipRatio", int64(cfg.MaxZipRatio), 100},
 		{"MaxTasksPerUser", int64(cfg.MaxTasksPerUser), 3},
+		{"WorkerConcurrency", int64(cfg.WorkerConcurrency), 4},
 		{"MaxProjectsPerUser", int64(cfg.MaxProjectsPerUser), 20},
 		{"MaxSegmentAttempts", int64(cfg.MaxSegmentAttempts), 3},
 		{"MaxBatchSegments", int64(cfg.MaxBatchSegments), 20},

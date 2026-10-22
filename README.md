@@ -177,9 +177,12 @@ docker compose pull && docker compose up -d
   compose — `172.16.0.0/12`), а прокси должен передавать
   `X-Forwarded-For` (nginx: `proxy_set_header X-Forwarded-For
   $proxy_add_x_forwarded_for;`, Caddy — по умолчанию).
-* Больше worker-ов: `docker compose up -d --scale worker=3`. Сколько задач
-  одного пользователя выполняется одновременно, ограничивает
-  `LINGUASTACK_MAX_TASKS_PER_USER`.
+* Параллельность: процесс worker ведёт `LINGUASTACK_WORKER_CONCURRENCY`
+  задач сразу (по умолчанию 4) — большая книга одного пользователя не держит
+  очередь остальных; ещё больше — `docker compose up -d --scale worker=3`.
+  Сколько задач одного пользователя выполняется одновременно, ограничивает
+  `LINGUASTACK_MAX_TASKS_PER_USER`; Ollama сервера всегда получает одну
+  задачу за раз — она одна на весь процессор.
 * Остановка и обновление безопасны: по SIGTERM worker дописывает начатый
   батч (не дольше `LINGUASTACK_WORKER_SHUTDOWN_GRACE`, 25 с) и возвращает
   задачу в очередь без траты попытки; `stop_grace_period` worker-а — 40 с.

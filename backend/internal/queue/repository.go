@@ -26,7 +26,8 @@ const maxLastError = 4000
 // FOR UPDATE SKIP LOCKED: несколько worker-ов не берут одну задачу.
 // Подзапрос count — честность: пользователь не занимает больше
 // maxPerUser worker-ов (или своей квоты из users, дополнение §18); задачи
-// с истёкшей арендой лимит не занимают.
+// с истёкшей арендой лимит не занимают. Ollama сервера — один процессор:
+// её задача не берётся, пока идёт другая задача Ollama.
 const claimSQL = `
 UPDATE translation_tasks
    SET status = 'running', locked_by = ?, locked_until = now() + make_interval(secs => ?),
@@ -39,6 +40,14 @@ UPDATE translation_tasks
             WHERE r.owner_id = t.owner_id AND r.status = 'running'
               AND r.locked_until > now() AND r.id <> t.id)
           < COALESCE((SELECT u.max_concurrent_tasks FROM users u WHERE u.id = t.owner_id), ?)
+      AND NOT (
+        EXISTS (SELECT 1 FROM translation_projects p JOIN provider_configs c ON c.id = p.provider_config_id
+                 WHERE p.id = t.project_id AND c.provider_id = 'ollama')
+        AND EXISTS (SELECT 1 FROM translation_tasks r
+                      JOIN translation_projects rp ON rp.id = r.project_id
+                      JOIN provider_configs rc ON rc.id = rp.provider_config_id
+                     WHERE r.status = 'running' AND r.locked_until > now() AND r.id <> t.id
+                       AND rc.provider_id = 'ollama'))
     ORDER BY t.priority DESC, t.created_at, t.id
     FOR UPDATE SKIP LOCKED
     LIMIT 1)
@@ -69,10 +78,23 @@ func Enqueue(ctx context.Context, db *gorm.DB, project *models.TranslationProjec
 	return &task, nil
 }
 
+// claimLock — ключ рекомендательной блокировки захвата. Лимиты захвата
+// считаются по выполняющимся задачам: два worker-а, захватывающие
+// одновременно, оба увидели бы «ещё есть место» и вместе превысили бы лимит
+// пользователя или запустили бы две задачи Ollama. Захват — миллисекунды,
+// поэтому очередь из worker-ов за блокировкой не заметна.
+const claimLock = 0x4c53_636c_6169_6d // «LSclaim»
+
 // ClaimNext берёт задачу в аренду. nil, nil — задач нет.
 func ClaimNext(ctx context.Context, db *gorm.DB, workerID string, lease time.Duration, maxPerUser int) (*models.TranslationTask, error) {
 	var task models.TranslationTask
-	if err := db.WithContext(ctx).Raw(claimSQL, workerID, lease.Seconds(), maxPerUser).Scan(&task).Error; err != nil {
+	err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Exec(`SELECT pg_advisory_xact_lock(?)`, int64(claimLock)).Error; err != nil {
+			return err
+		}
+		return tx.Raw(claimSQL, workerID, lease.Seconds(), maxPerUser).Scan(&task).Error
+	})
+	if err != nil {
 		return nil, fmt.Errorf("захват задачи: %w", err)
 	}
 	if task.ID == [16]byte{} {

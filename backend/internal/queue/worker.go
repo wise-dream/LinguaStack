@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -60,6 +61,23 @@ func defaultBackoff(attempt int) time.Duration {
 		d *= 2
 	}
 	return min(d, 10*time.Minute)
+}
+
+// RunPool выполняет задачи несколькими worker-ами сразу (дополнение §7):
+// большая книга одного пользователя не держит очередь остальных. Возврат —
+// когда остановятся все: каждый дописывает свой батч (WorkerShutdownGrace).
+func RunPool(ctx context.Context, workers []*Worker) error {
+	var wg sync.WaitGroup
+	errs := make([]error, len(workers))
+	for i, w := range workers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			errs[i] = w.Run(ctx)
+		}()
+	}
+	wg.Wait()
+	return errors.Join(errs...)
 }
 
 // Run выполняет задачи до отмены ctx.

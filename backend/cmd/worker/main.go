@@ -80,15 +80,24 @@ func run() error {
 	exportsDone := make(chan error, 1)
 	go func() { exportsDone <- runner.Run(ctx) }()
 
-	worker := queue.NewWorker(workerID(), gdb, resolver, cfg)
-	_, stopMetrics, err := serveMetrics(ctx, cfg, worker)
+	// Несколько worker-ов в одном процессе: у каждого своё имя для аренд,
+	// счётчики общие.
+	base := workerID()
+	pool := make([]*queue.Worker, max(cfg.WorkerConcurrency, 1))
+	for i := range pool {
+		pool[i] = queue.NewWorker(fmt.Sprintf("%s-%d", base, i+1), gdb, resolver, cfg)
+	}
+	collector, _, stopMetrics, err := serveMetrics(ctx, cfg)
 	if err != nil {
 		return err
 	}
 	defer stopMetrics()
-	slog.Info("worker запущен", "max_tasks_per_user", cfg.MaxTasksPerUser, "lease", cfg.TaskLease,
-		"export_timeout", cfg.ExportTimeout)
-	err = worker.Run(ctx)
+	for _, w := range pool {
+		w.Metrics = collector
+	}
+	slog.Info("worker запущен", "concurrency", len(pool), "max_tasks_per_user", cfg.MaxTasksPerUser,
+		"lease", cfg.TaskLease, "export_timeout", cfg.ExportTimeout)
+	err = queue.RunPool(ctx, pool)
 	if exportErr := <-exportsDone; err == nil {
 		err = exportErr
 	}
@@ -99,20 +108,22 @@ func run() error {
 // serveMetrics отдаёт счётчики worker-а на LINGUASTACK_WORKER_METRICS_ADDR
 // (дополнение §18) с тем же токеном, что /metrics у api. Адрес занят —
 // ошибка запуска, а не молча пропавшие метрики.
-func serveMetrics(ctx context.Context, cfg config.Settings, worker *queue.Worker) (string, func(), error) {
+//
+// Счётчики общие для всех worker-ов пула; nil — метрики выключены.
+func serveMetrics(ctx context.Context, cfg config.Settings) (*metrics.Worker, string, func(), error) {
 	if cfg.WorkerMetricsAddr == "" {
-		return "", func() {}, nil
+		return nil, "", func() {}, nil
 	}
 	if cfg.MetricsToken == "" {
 		slog.Warn("LINGUASTACK_WORKER_METRICS_ADDR задан без LINGUASTACK_METRICS_TOKEN — метрики worker-а выключены")
-		return "", func() {}, nil
+		return nil, "", func() {}, nil
 	}
 	ln, err := (&net.ListenConfig{}).Listen(ctx, "tcp", cfg.WorkerMetricsAddr)
 	if err != nil {
-		return "", nil, fmt.Errorf("адрес метрик worker-а: %w", err)
+		return nil, "", nil, fmt.Errorf("адрес метрик worker-а: %w", err)
 	}
 	reg := metrics.NewRegistry()
-	worker.Metrics = metrics.NewWorker(reg)
+	collector := metrics.NewWorker(reg)
 	srv := &http.Server{Handler: metrics.Handler(reg, cfg.MetricsToken), ReadHeaderTimeout: 10 * time.Second}
 	go func() {
 		if err := srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
@@ -120,7 +131,7 @@ func serveMetrics(ctx context.Context, cfg config.Settings, worker *queue.Worker
 		}
 	}()
 	slog.Info("метрики worker-а", "addr", ln.Addr().String())
-	return ln.Addr().String(), func() { _ = srv.Close() }, nil
+	return collector, ln.Addr().String(), func() { _ = srv.Close() }, nil
 }
 
 // workerID — уникальное имя для аренд: хост, процесс и случайный хвост

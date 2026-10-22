@@ -8,21 +8,19 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/vnovels/linguastack/internal/config"
-	"github.com/vnovels/linguastack/internal/queue"
 )
 
 func TestServeMetrics(t *testing.T) {
-	w := &queue.Worker{}
-	addr, stop, err := serveMetrics(t.Context(), config.Settings{WorkerMetricsAddr: "127.0.0.1:0"}, w)
+	collector, addr, stop, err := serveMetrics(t.Context(), config.Settings{WorkerMetricsAddr: "127.0.0.1:0"})
 	require.NoError(t, err)
 	stop()
 	require.Empty(t, addr, "без токена метрики не отдаются")
-	require.Nil(t, w.Metrics)
+	require.Nil(t, collector)
 
-	addr, stop, err = serveMetrics(t.Context(), config.Settings{WorkerMetricsAddr: "127.0.0.1:0", MetricsToken: "tok"}, w)
+	collector, addr, stop, err = serveMetrics(t.Context(), config.Settings{WorkerMetricsAddr: "127.0.0.1:0", MetricsToken: "tok"})
 	require.NoError(t, err)
 	t.Cleanup(stop)
-	require.NotNil(t, w.Metrics)
+	require.NotNil(t, collector)
 
 	get := func(auth string) (int, string) {
 		req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://"+addr+"/metrics", nil)
@@ -42,6 +40,6 @@ func TestServeMetrics(t *testing.T) {
 	require.Equal(t, http.StatusOK, code)
 	require.Contains(t, body, "linguastack_worker_batch_duration_seconds")
 
-	_, _, err = serveMetrics(t.Context(), config.Settings{WorkerMetricsAddr: addr, MetricsToken: "tok"}, &queue.Worker{})
+	_, _, _, err = serveMetrics(t.Context(), config.Settings{WorkerMetricsAddr: addr, MetricsToken: "tok"})
 	require.Error(t, err, "занятый адрес — ошибка запуска")
 }
