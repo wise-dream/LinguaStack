@@ -95,7 +95,7 @@ func TestLiveOllamaEndToEnd(t *testing.T) {
 
 	w := queue.NewWorker("live", e.db, queue.ConfigResolver(e.db, nil, providers.BuildOptions{
 		OllamaBaseURL: "http://localhost:11434", OllamaNumCtx: 8192, Timeout: 5 * time.Minute,
-	}), e.cfg)
+	}, false), e.cfg)
 	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Minute)
 	defer cancel()
 	for {

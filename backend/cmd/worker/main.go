@@ -67,7 +67,7 @@ func run() error {
 		OllamaBaseURL: cfg.OllamaBaseURL, OllamaNumCtx: cfg.OllamaNumCtx,
 		Timeout: cfg.ProviderTimeout, AllowPrivateURLs: cfg.AllowPrivateProviderURLs,
 		Fake: cfg.E2EFakeProvider, FakeDelay: cfg.E2EFakeDelay,
-	})
+	}, cfg.OllamaAdminOnly)
 	if cfg.E2EFakeProvider {
 		slog.Warn("включён тестовый провайдер fake (LINGUASTACK_E2E_FAKE_PROVIDER): только для сквозных тестов")
 	}

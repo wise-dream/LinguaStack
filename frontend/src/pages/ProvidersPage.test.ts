@@ -57,6 +57,21 @@ describe('модели и провайдеры', () => {
     expect(w.find('.consent').exists()).toBe(false)
   })
 
+  it('без Ollama сервера (не администратор) — подключить свой сервис', async () => {
+    const { w } = await mountPage({
+      'GET /api/providers': { body: kinds.filter((k) => k.provider_id !== 'ollama') },
+      'GET /api/provider-configs': { body: [] },
+    })
+    const intro = w.find('.intro').text()
+    expect(intro).not.toContain('Ollama')
+    expect(intro).toContain('со своим ключом API')
+  })
+
+  it('с Ollama сервера — она упомянута во введении', async () => {
+    const { w } = await mountPage({ 'GET /api/provider-configs': { body: [] } })
+    expect(w.find('.intro').text()).toContain('локальную модель Ollama')
+  })
+
   it('503 без ключа шифрования и 409 при удалении — понятным текстом', async () => {
     const { w } = await mountPage({
       'GET /api/provider-configs': { body: [providerConfig()] },

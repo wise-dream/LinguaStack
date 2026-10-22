@@ -11,6 +11,7 @@ import (
 
 	"github.com/vnovels/linguastack/internal/db/models"
 	"github.com/vnovels/linguastack/internal/providers"
+	"github.com/vnovels/linguastack/internal/queue"
 	"github.com/vnovels/linguastack/internal/security"
 	"github.com/vnovels/linguastack/internal/store"
 )
@@ -34,17 +35,32 @@ func (s *server) buildOptions() providers.BuildOptions {
 	}
 }
 
-// kinds — виды провайдеров этого сервера: тестовый — только с флагом.
-func (s *server) kinds() []providers.Kind {
-	kinds := providers.Kinds()
+// ollamaAdminOnlyMessage — ответ, когда Ollama сервера пользователю
+// недоступна (LINGUASTACK_OLLAMA_ADMIN_ONLY).
+const ollamaAdminOnlyMessage = "Локальные модели сервера (Ollama) доступны только администратору — подключите свой сервис с ключом API"
+
+// serverOllamaFor — может ли пользователь занимать Ollama сервера.
+func (s *server) serverOllamaFor(u *models.User) bool {
+	return !s.Cfg.OllamaAdminOnly || (u != nil && u.Role == models.RoleAdmin)
+}
+
+// kinds — виды провайдеров, доступные пользователю: тестовый — только с
+// флагом, Ollama сервера — по serverOllamaFor.
+func (s *server) kinds(u *models.User) []providers.Kind {
+	var kinds []providers.Kind
+	for _, k := range providers.Kinds() {
+		if k.ID != "ollama" || s.serverOllamaFor(u) {
+			kinds = append(kinds, k)
+		}
+	}
 	if s.Cfg.E2EFakeProvider {
 		kinds = append(kinds, providers.FakeKind)
 	}
 	return kinds
 }
 
-func (s *server) lookupKind(id string) (providers.Kind, bool) {
-	for _, k := range s.kinds() {
+func (s *server) lookupKind(u *models.User, id string) (providers.Kind, bool) {
+	for _, k := range s.kinds(u) {
 		if k.ID == id {
 			return k, true
 		}
@@ -52,15 +68,15 @@ func (s *server) lookupKind(id string) (providers.Kind, bool) {
 	return providers.Kind{}, false
 }
 
-func (s *server) listKinds(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, s.kinds())
+func (s *server) listKinds(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, s.kinds(UserFromContext(r.Context())))
 }
 
 // kindModels — модели вида провайдера без пользовательской конфигурации:
 // Ollama сервера и каталог Anthropic. Список OpenAI-совместимого сервиса
 // зависит от адреса и ключа — для него есть /provider-configs/{id}/models.
 func (s *server) kindModels(w http.ResponseWriter, r *http.Request) {
-	kind, ok := s.lookupKind(r.PathValue("kind"))
+	kind, ok := s.lookupKind(UserFromContext(r.Context()), r.PathValue("kind"))
 	if !ok {
 		writeError(w, http.StatusNotFound, "Не найдено")
 		return
@@ -124,8 +140,8 @@ func configResponse(c *models.ProviderConfig) providerConfigOut {
 }
 
 // validateConfig возвращает текст ошибки для пользователя или "".
-func (s *server) validateConfig(in providerConfigIn) string {
-	kind, ok := s.lookupKind(in.ProviderID)
+func (s *server) validateConfig(u *models.User, in providerConfigIn) string {
+	kind, ok := s.lookupKind(u, in.ProviderID)
 	if !ok {
 		return "Неизвестный провайдер"
 	}
@@ -156,7 +172,11 @@ func (s *server) createProviderConfig(w http.ResponseWriter, r *http.Request) {
 	}
 	in.APIKey = strings.TrimSpace(in.APIKey)
 	in.BaseURL = strings.TrimSpace(in.BaseURL)
-	if msg := s.validateConfig(in); msg != "" {
+	if in.ProviderID == "ollama" && !s.serverOllamaFor(UserFromContext(r.Context())) {
+		writeError(w, http.StatusForbidden, ollamaAdminOnlyMessage)
+		return
+	}
+	if msg := s.validateConfig(UserFromContext(r.Context()), in); msg != "" {
 		writeError(w, http.StatusUnprocessableEntity, msg)
 		return
 	}
@@ -263,8 +283,11 @@ func (s *server) deleteProviderConfig(w http.ResponseWriter, r *http.Request) {
 }
 
 // providerFor собирает адаптер конфигурации, расшифровывая ключ только
-// на время запроса.
-func (s *server) providerFor(cfg *models.ProviderConfig) (providers.Provider, error) {
+// на время запроса. Ollama сервера — только тем, кому она доступна.
+func (s *server) providerFor(u *models.User, cfg *models.ProviderConfig) (providers.Provider, error) {
+	if cfg.ProviderID == "ollama" && !s.serverOllamaFor(u) {
+		return nil, queue.ErrOllamaAdminOnly
+	}
 	key := ""
 	if cfg.SecretCiphertext != "" {
 		if s.Secrets == nil {
@@ -285,7 +308,11 @@ func (s *server) configModels(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	p, err := s.providerFor(cfg)
+	p, err := s.providerFor(UserFromContext(r.Context()), cfg)
+	if errors.Is(err, queue.ErrOllamaAdminOnly) {
+		writeError(w, http.StatusForbidden, ollamaAdminOnlyMessage)
+		return
+	}
 	if err != nil {
 		writeError(w, http.StatusServiceUnavailable, err.Error())
 		return
@@ -298,7 +325,7 @@ func (s *server) configHealth(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	p, err := s.providerFor(cfg)
+	p, err := s.providerFor(UserFromContext(r.Context()), cfg)
 	if err != nil {
 		writeJSON(w, http.StatusOK, providers.Health{Available: false, Detail: err.Error()})
 		return

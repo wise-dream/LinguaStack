@@ -169,6 +169,10 @@ func (s *server) createTranslation(w http.ResponseWriter, r *http.Request) {
 		internalError(w, r, err)
 		return
 	}
+	if cfg.ProviderID == "ollama" && !s.serverOllamaFor(user) {
+		writeError(w, http.StatusForbidden, ollamaAdminOnlyMessage)
+		return
+	}
 	if providers.SendsDataExternally(cfg.ProviderID, cfg.BaseURL) && !cfg.AllowExternal {
 		writeError(w, http.StatusBadRequest,
 			"Текст книги будет отправлен внешнему сервису, но передача наружу запрещена в настройках провайдера (ТЗ §6.4)")

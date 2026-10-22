@@ -398,13 +398,28 @@ func TestExternalEgressRevokedMidwayIsRespected(t *testing.T) {
 	// к внешнему сервису не уходит.
 	e := newWorkerEnv(t)
 	project := e.projectFromMarkdown("# Ch\n\nOne.")
-	w := queue.NewWorker("w", e.db, queue.ConfigResolver(e.db, nil, providers.BuildOptions{}), e.cfg)
+	w := queue.NewWorker("w", e.db, queue.ConfigResolver(e.db, nil, providers.BuildOptions{}, false), e.cfg)
 	require.NoError(t, e.db.Model(&models.ProviderConfig{}).Where("id = ?", project.ProviderConfigID).
 		Updates(map[string]any{"provider_id": "openai_compatible", "base_url": "https://api.example.com/v1", "allow_external": false}).Error)
 	e.runUntilIdle(w)
 	failed := e.reload(project)
 	require.Equal(t, models.ProjectFailed, failed.Status)
 	require.Contains(t, failed.LastError, "запрещ")
+}
+
+func TestServerOllamaOnlyForAdmins(t *testing.T) {
+	// Подключение к Ollama сервера осталось у обычного пользователя (создано
+	// до ограничения или его разжаловали): перевод не занимает общий CPU, а
+	// падает с понятной причиной.
+	e := newWorkerEnv(t)
+	project := e.projectFromMarkdown("# Ch\n\nOne.")
+	require.NoError(t, e.db.Model(&models.ProviderConfig{}).Where("id = ?", project.ProviderConfigID).
+		Update("provider_id", "ollama").Error)
+	w := queue.NewWorker("w", e.db, queue.ConfigResolver(e.db, nil, providers.BuildOptions{}, true), e.cfg)
+	e.runUntilIdle(w)
+	failed := e.reload(project)
+	require.Equal(t, models.ProjectFailed, failed.Status)
+	require.Contains(t, failed.LastError, "только администратору")
 }
 
 func TestWorkerStopsGracefullyFinishingCurrentBatch(t *testing.T) {

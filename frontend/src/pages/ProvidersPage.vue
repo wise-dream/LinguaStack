@@ -34,6 +34,9 @@ const rowError = reactive<Record<string, string>>({})
 const kind = computed(() => kinds.value.find((k) => k.provider_id === form.provider_id))
 const kindName = (id: string) => kinds.value.find((k) => k.provider_id === id)?.name ?? id
 const kindOptions = computed(() => kinds.value.map((k) => ({ label: k.name, value: k.provider_id })))
+// Ollama сервера видна не всем (на сервере она может быть только для
+// администратора) — введение не обещает того, чего нет в списке.
+const serverOllama = computed(() => kinds.value.some((k) => k.provider_id === 'ollama'))
 const healthType = (text: string) =>
   text.startsWith('Доступен') ? 'success' : text.startsWith('Недоступен') ? 'error' : 'default'
 
@@ -117,8 +120,13 @@ async function remove(c: ProviderConfig) {
   <main class="page providers">
     <h1>Модели</h1>
     <p class="intro">
-      Подключите локальную модель Ollama или внешний сервис. Ключи API хранятся на сервере зашифрованными
-      и после сохранения не показываются.
+      <template v-if="serverOllama">
+        Подключите локальную модель Ollama или внешний сервис.
+      </template>
+      <template v-else>
+        Подключите внешний сервис моделей — Anthropic или OpenAI-совместимый — со своим ключом API.
+      </template>
+      Ключи API хранятся на сервере зашифрованными и после сохранения не показываются.
     </p>
 
     <ErrorAlert :message="loadError" />

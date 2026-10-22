@@ -49,6 +49,9 @@ func newTestEnvWith(t *testing.T, adjust func(*httpapi.Deps)) *testEnv {
 	// Тесты шлют десятки регистраций и запросов с одного адреса за
 	// миллисекунды; лимиты частоты включают тесты самих лимитов.
 	cfg.RateLimitRPS, cfg.UploadsPerHour, cfg.RegisterPerHour, cfg.ResetPerHour = 0, 0, 0, 0
+	// Тесты переводов подключают Ollama (сборку подменяет Fake) обычному
+	// пользователю; ограничение роли включают его собственные тесты.
+	cfg.OllamaAdminOnly = false
 	tx := testdb.New(t)
 	root := t.TempDir()
 	store, err := storage.New(root, cfg.MaxUploadBytes)
