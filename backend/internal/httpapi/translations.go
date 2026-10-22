@@ -337,6 +337,68 @@ func (s *server) resumeTranslation(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// errNothingToRetry — в проекте нет сегментов с ошибками и предупреждениями.
+var errNothingToRetry = errors.New("нечего переводить заново")
+
+// retryProblems ставит заново все сегменты с ошибками и с предупреждениями
+// (ТЗ §12, дополнение §5). Правила — как у повтора одного сегмента: во
+// время перевода — 409 (worker уже взял список ожидающих), на паузе —
+// сегменты ждут «Продолжить». Прежний перевод сегмента с предупреждением
+// останется, если повтор не удастся (queue.Worker.persist).
+func (s *server) retryProblems(w http.ResponseWriter, r *http.Request) {
+	project, ok := loadOwned[models.TranslationProject](s, w, r, "id")
+	if !ok {
+		return
+	}
+	switch project.Status {
+	case models.ProjectRunning:
+		writeError(w, http.StatusConflict, "Перевод идёт — поставьте его на паузу или дождитесь окончания")
+		return
+	case models.ProjectCancelled:
+		writeError(w, http.StatusConflict, "Перевод отменён")
+		return
+	}
+	var queued int64
+	err := s.DB.WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
+		res := tx.Model(&models.TranslationSegment{}).
+			Where("project_id = ? AND (status = ? OR (status = ? AND severity = ?))",
+				project.ID, models.SegmentFailed, models.SegmentCompleted, string(translation.Warning)).
+			Updates(map[string]any{"status": models.SegmentPending, "attempts": 0, "last_error": "", "updated_at": time.Now().UTC()})
+		if res.Error != nil {
+			return res.Error
+		}
+		if queued = res.RowsAffected; queued == 0 {
+			return errNothingToRetry
+		}
+		if err := queue.RefreshCounters(r.Context(), tx, project.ID, queue.Usage{}); err != nil {
+			return err
+		}
+		if project.Status == models.ProjectPaused {
+			return nil // переведутся после «Продолжить»
+		}
+		res = tx.Model(&models.TranslationProject{}).Where("id = ?", project.ID).
+			Updates(map[string]any{"status": models.ProjectQueued, "finished_at": nil, "last_error": "", "updated_at": time.Now().UTC()})
+		if res.Error != nil {
+			return res.Error
+		}
+		_, err := queue.Enqueue(r.Context(), tx, project, 0, s.Cfg.MaxSegmentAttempts)
+		return err
+	})
+	if errors.Is(err, errNothingToRetry) {
+		writeError(w, http.StatusConflict, "Фрагментов с ошибками и предупреждениями нет")
+		return
+	}
+	if err != nil {
+		internalError(w, r, err)
+		return
+	}
+	if err := s.DB.WithContext(r.Context()).First(project, "id = ?", project.ID).Error; err != nil {
+		internalError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusAccepted, map[string]any{"queued": queued, "project": s.projectFor(r, project)})
+}
+
 func (s *server) cancelTranslation(w http.ResponseWriter, r *http.Request) {
 	s.transition(w, r, func(ctx context.Context, id, owner uuid.UUID) (*models.TranslationProject, error) {
 		return queue.Cancel(ctx, s.DB, id, owner)

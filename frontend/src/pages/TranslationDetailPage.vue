@@ -12,6 +12,7 @@ import {
   listSegments,
   pauseTranslation,
   resumeTranslation,
+  retryProblems,
   retrySegment,
   type SegmentFilter,
 } from '../api/translations'
@@ -24,6 +25,7 @@ import LinkButton from '../components/LinkButton.vue'
 import ProgressBar from '../components/ProgressBar.vue'
 import ProjectFacts from '../components/ProjectFacts.vue'
 import StatusMark from '../components/StatusMark.vue'
+import { plural } from '../lib/format'
 import { renderInline } from '../lib/inline'
 import { useNow } from '../lib/now'
 import { isTerminal, useProgress } from '../lib/progress'
@@ -62,6 +64,30 @@ watch(progress.event, (e) => {
 
 const canPause = computed(() => project.value?.status === 'running' || project.value?.status === 'queued')
 const canResume = computed(() => project.value?.status === 'paused' || project.value?.status === 'failed')
+// Фрагменты с ошибками и предупреждениями — заново одной кнопкой, когда
+// перевод стоит: идущий уже взял список фрагментов (сервер ответил бы 409).
+const problems = computed(() => (project.value?.segments_failed ?? 0) + (project.value?.warnings_count ?? 0))
+const canRetryProblems = computed(
+  () => problems.value > 0 && !!project.value && ['completed', 'completed_with_warnings', 'failed', 'paused'].includes(project.value.status),
+)
+const retryNotice = ref('')
+const retryError = ref('')
+
+async function retryAllProblems() {
+  retryError.value = ''
+  retryNotice.value = ''
+  try {
+    const res = await retryProblems(id.value)
+    project.value = res.project
+    retryNotice.value =
+      `${res.queued} ${plural(res.queued, ['фрагмент поставлен', 'фрагмента поставлены', 'фрагментов поставлены'])} в очередь на перевод.`
+    progress.restart()
+    void loadSegments(true)
+  } catch (e) {
+    retryError.value = errorMessage(e)
+  }
+}
+
 // Упавший перевод тоже можно отменить: он ждёт «Продолжить».
 const canCancel = computed(() => !!project.value && (!isTerminal(project.value.status) || project.value.status === 'failed'))
 
@@ -222,6 +248,30 @@ const readerLink = (s: Segment) => ({
             {{ f.label }}
           </NButton>
         </div>
+        <div
+          v-if="canRetryProblems || retryNotice || retryError"
+          class="retry-row"
+        >
+          <NButton
+            v-if="canRetryProblems"
+            class="retry-problems"
+            size="small"
+            @click="retryAllProblems"
+          >
+            Перевести заново с ошибками и предупреждениями ({{ problems }})
+          </NButton>
+          <p
+            v-if="retryNotice"
+            role="status"
+            class="notice"
+          >
+            {{ retryNotice }}
+          </p>
+          <ErrorAlert
+            :message="retryError"
+            size="small"
+          />
+        </div>
         <NEmpty
           v-if="!segments.length"
           size="small"
@@ -370,6 +420,31 @@ h2 {
   flex-wrap: wrap;
   gap: var(--space-2);
   margin-bottom: var(--space-4);
+}
+
+.retry-row {
+  display: grid;
+  justify-items: start;
+  gap: var(--space-2);
+  margin-bottom: var(--space-4);
+}
+
+.retry-row .notice {
+  margin: 0;
+}
+
+/* Длинная подпись на телефоне переносится, а не вылезает за карточку. */
+.retry-problems {
+  max-width: 100%;
+  height: auto;
+  min-height: 1.75rem;
+  padding-block: var(--space-1);
+  white-space: normal;
+  text-align: left;
+}
+
+.retry-problems :deep(.n-button__content) {
+  white-space: normal;
 }
 
 .segment-list {

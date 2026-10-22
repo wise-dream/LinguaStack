@@ -26,6 +26,9 @@ export const createTranslation = (bookId: string, input: TranslationInput) =>
 export const pauseTranslation = (id: string) => request<Project>('POST', `${project(id)}/pause`)
 export const resumeTranslation = (id: string) => request<Project>('POST', `${project(id)}/resume`)
 export const cancelTranslation = (id: string) => request<Project>('POST', `${project(id)}/cancel`)
+/** Заново — все фрагменты с ошибками и с предупреждениями. */
+export const retryProblems = (id: string) =>
+  request<{ queued: number; project: Project }>('POST', `${project(id)}/retry-problems`)
 
 export interface SegmentFilter {
   chapter?: number

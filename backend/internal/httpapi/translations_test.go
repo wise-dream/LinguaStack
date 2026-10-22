@@ -300,6 +300,81 @@ func TestResumeRetriesFailedSegments(t *testing.T) {
 	}
 }
 
+// problemProject — переведённая книга из трёх фрагментов: заголовок,
+// первый абзац «упал», второй принят с предупреждением.
+func problemProject(t *testing.T, e *translationEnv) (projectBody, []segmentBody) {
+	t.Helper()
+	p := e.project(t, e.book(t, "# Ch\n\nOne.\n\nTwo."))
+	e.runWorker(t)
+	segs := e.segments(t, p.ID)
+	require.Len(t, segs, 3)
+	require.NoError(t, e.db.Model(&models.TranslationSegment{}).Where("id = ?", segs[1].ID).
+		Updates(map[string]any{"status": "failed", "severity": "error", "translated_text": nil}).Error)
+	require.NoError(t, e.db.Model(&models.TranslationSegment{}).Where("id = ?", segs[2].ID).
+		Update("severity", "warning").Error)
+	require.NoError(t, e.db.Model(&models.TranslationProject{}).Where("id = ?", p.ID).Update("status", "failed").Error)
+	return p, segs
+}
+
+func TestRetryProblemSegments(t *testing.T) {
+	// Одной кнопкой — заново все фрагменты с ошибками и предупреждениями;
+	// нормальные не трогаются.
+	e := newTranslationEnv(t, nil)
+	p, segs := problemProject(t, e)
+
+	r := e.c.do(http.MethodPost, "/api/translations/"+p.ID+"/retry-problems", nil)
+	require.Equal(t, http.StatusAccepted, r.Status, "тело: %s", r.Body)
+	var out struct {
+		Queued  int         `json:"queued"`
+		Project projectBody `json:"project"`
+	}
+	r.JSON(t, &out)
+	require.Equal(t, 2, out.Queued)
+	require.Equal(t, "queued", out.Project.Status)
+	status := map[string]string{}
+	for _, s := range e.segments(t, p.ID) {
+		status[s.ID] = s.Status
+	}
+	require.Equal(t, "completed", status[segs[0].ID], "нормальный фрагмент не трогается")
+	require.Equal(t, "pending", status[segs[1].ID])
+	require.Equal(t, "pending", status[segs[2].ID])
+
+	e.runWorker(t)
+	require.Equal(t, "completed", e.get(t, p.ID).Status)
+	for _, s := range e.segments(t, p.ID) {
+		require.Equal(t, "completed", s.Status, s.NodeID)
+		require.Equal(t, "ok", s.Severity, s.NodeID)
+	}
+	require.Equal(t, http.StatusConflict, e.c.do(http.MethodPost, "/api/translations/"+p.ID+"/retry-problems", nil).Status,
+		"повторять нечего")
+}
+
+func TestRetryProblemSegmentsRespectsState(t *testing.T) {
+	e := newTranslationEnv(t, nil)
+	p, segs := problemProject(t, e)
+	retry := func() int { return e.c.do(http.MethodPost, "/api/translations/"+p.ID+"/retry-problems", nil).Status }
+
+	// Идёт перевод — worker уже взял список фрагментов: позже.
+	require.NoError(t, e.db.Model(&models.TranslationProject{}).Where("id = ?", p.ID).Update("status", "running").Error)
+	require.Equal(t, http.StatusConflict, retry())
+
+	// На паузе — фрагменты ждут «Продолжить», задача не ставится.
+	require.NoError(t, e.db.Model(&models.TranslationProject{}).Where("id = ?", p.ID).Update("status", "paused").Error)
+	require.Equal(t, http.StatusAccepted, retry())
+	require.Equal(t, "paused", e.get(t, p.ID).Status)
+	var tasks int64
+	require.NoError(t, e.db.Model(&models.TranslationTask{}).Where("project_id = ? AND status = 'pending'", p.ID).Count(&tasks).Error)
+	require.Zero(t, tasks)
+	for _, s := range e.segments(t, p.ID) {
+		if s.ID == segs[1].ID {
+			require.Equal(t, "pending", s.Status)
+		}
+	}
+
+	require.NoError(t, e.db.Model(&models.TranslationProject{}).Where("id = ?", p.ID).Update("status", "cancelled").Error)
+	require.Equal(t, http.StatusConflict, retry())
+}
+
 func TestCompletedProjectCannotBeCancelledOrPaused(t *testing.T) {
 	e := newTranslationEnv(t, nil)
 	p := e.project(t, e.book(t, "# Ch\n\nOne."))

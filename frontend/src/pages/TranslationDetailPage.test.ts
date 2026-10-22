@@ -146,3 +146,43 @@ describe('страница перевода', () => {
     expect(segmentLoads()).toBe(3)
   })
 })
+
+describe('перевести заново с ошибками и предупреждениями', () => {
+  const routes = (p: ReturnType<typeof project>) => ({
+    'GET /api/translations/p1': { body: p },
+    'GET /api/translations/p1/segments': { body: [] },
+    'GET /api/books/b1/exports': { body: [] },
+  })
+
+  it('кнопка со счётом; нажатие ставит их в очередь и перезапускает прогресс', async () => {
+    const before = project({ status: 'failed', segments_failed: 7, warnings_count: 2 })
+    const { w, calls, streams } = await mountDetail({
+      ...routes(before),
+      'POST /api/translations/p1/retry-problems': {
+        status: 202,
+        body: { queued: 9, project: { ...before, status: 'queued', segments_failed: 0 } },
+      },
+    })
+    const button = w.find('button.retry-problems')
+    expect(button.text()).toBe('Перевести заново с ошибками и предупреждениями (9)')
+    const streamsBefore = streams.length
+    await button.trigger('click')
+    await flushPromises()
+    expect(calls.some((c) => c.method === 'POST' && c.path === '/api/translations/p1/retry-problems')).toBe(true)
+    expect(w.find('[role=status]').text()).toBe('9 фрагментов поставлены в очередь на перевод.')
+    expect(streams.length).toBeGreaterThan(streamsBefore)
+    expect(w.find('button.retry-problems').exists()).toBe(false)
+  })
+
+  it('нечего повторять — кнопки нет', async () => {
+    const { w } = await mountDetail(routes(project({ status: 'completed', segments_failed: 0, warnings_count: 0 })))
+    expect(w.find('button.retry-problems').exists()).toBe(false)
+  })
+
+  it('пока перевод в очереди или идёт — кнопки нет (сервер ответил бы «перевод идёт»)', async () => {
+    for (const status of ['running', 'queued'] as const) {
+      const { w } = await mountDetail(routes(project({ status, segments_failed: 1, warnings_count: 0 })))
+      expect(w.find('button.retry-problems').exists()).toBe(false)
+    }
+  })
+})

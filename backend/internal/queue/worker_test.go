@@ -18,6 +18,7 @@ import (
 	"github.com/vnovels/linguastack/internal/providers"
 	"github.com/vnovels/linguastack/internal/queue"
 	"github.com/vnovels/linguastack/internal/testdb"
+	"github.com/vnovels/linguastack/internal/translation"
 )
 
 // workerEnv — worker с Fake-провайдером поверх коммитящей базы пакета.
@@ -472,6 +473,30 @@ func TestPoolRunsTasksInParallel(t *testing.T) {
 	}, 10*time.Second, 20*time.Millisecond)
 	cancel()
 	require.NoError(t, <-done)
+}
+
+func TestFailedRetryKeepsPreviousTranslation(t *testing.T) {
+	// Повтор фрагмента с предупреждением не удался — прежний перевод
+	// остаётся: приемлемый текст лучше пустого места в книге.
+	e := newWorkerEnv(t)
+	project := e.projectFromMarkdown("# Ch\n\nCall `run()` now.")
+	e.runUntilIdle(e.worker("w"))
+	seg := e.segments(project)[1]
+	require.Equal(t, "RU:Call `run()` now.", *seg.TranslatedText)
+	require.NoError(t, e.db.Model(&models.TranslationSegment{}).Where("id = ?", seg.ID).Updates(map[string]any{
+		"status": models.SegmentPending, "severity": "warning",
+		"findings": models.NewJSON([]translation.Finding{{Code: "length_ratio", Severity: "warning", Message: "короче"}}),
+	}).Error)
+	e.requeue(project)
+
+	e.fake.Scenario = "drops_placeholder"
+	e.runUntilIdle(e.worker("w"))
+	got := e.segments(project)[1]
+	require.Equal(t, models.SegmentCompleted, got.Status)
+	require.Equal(t, "RU:Call `run()` now.", *got.TranslatedText)
+	require.Equal(t, "warning", got.Severity)
+	require.Equal(t, "length_ratio", got.Findings.Data[0].Code, "замечания прежнего перевода на месте")
+	require.Equal(t, models.ProjectCompletedWithWarnings, e.reload(project).Status)
 }
 
 func TestWorkerStopsGracefullyFinishingCurrentBatch(t *testing.T) {

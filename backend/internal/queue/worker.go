@@ -425,9 +425,17 @@ RETURNING id`, *r.Translated, string(r.Severity), models.NewJSON(findings), proj
 				}
 				continue
 			}
+			// Повтор сегмента, у которого уже есть перевод (с предупреждением
+			// или правленный вручную), не удался — прежний перевод остаётся
+			// вместе со своими замечаниями: приемлемый текст лучше пустого
+			// места в книге.
 			err := tx.Exec(`
 UPDATE translation_segments
-   SET status = 'failed', severity = 'error', findings = ?, last_error = ?, attempts = attempts + 1, updated_at = now()
+   SET status = CASE WHEN translated_text IS NULL THEN 'failed' ELSE 'completed' END,
+       severity = CASE WHEN translated_text IS NULL THEN 'error' ELSE severity END,
+       findings = CASE WHEN translated_text IS NULL THEN ? ELSE findings END,
+       last_error = CASE WHEN translated_text IS NULL THEN ? ELSE '' END,
+       attempts = attempts + 1, updated_at = now()
  WHERE project_id = ? AND node_id = ? AND status <> 'completed'`,
 				models.NewJSON(findings), clip(r.Err), projectID, nodeID).Error
 			if err != nil {
