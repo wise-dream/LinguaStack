@@ -189,6 +189,22 @@ test('импорт → перевод → экспорт → чтение', asyn
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)
     expect(overflow).toBeLessThanOrEqual(0)
   }
+
+  // Список переводов: готовый перевод — карточкой в своей группе.
+  await go(page, 'Переводы')
+  const tile = page.locator('[data-group="finished"] .tile')
+  await expect(tile).toHaveCount(1)
+  await shot(page, 'translations')
+  // Строки карточки не слипаются: полоса прогресса — с отступом от подписи.
+  const sub = (await tile.locator('.sub').boundingBox())!
+  const bar = (await tile.getByRole('progressbar').boundingBox())!
+  expect(bar.y - (sub.y + sub.height)).toBeGreaterThanOrEqual(12)
+  if (info.project.name === 'desktop') {
+    // Карточке хватает места: не уже 30rem.
+    expect((await tile.boundingBox())!.width).toBeGreaterThanOrEqual(480)
+  } else {
+    expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(0)
+  }
 })
 
 // Импорт HTML: главы по заголовкам, картинка из data: — ресурс книги.

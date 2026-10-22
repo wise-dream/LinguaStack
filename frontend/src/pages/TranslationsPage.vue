@@ -84,23 +84,25 @@ onBeforeUnmount(() => clearTimeout(timer))
           :key="p.id"
           :data-project="p.id"
           class="tile"
-          size="small"
+          content-class="tile-body"
         >
-          <div class="row-head">
-            <RouterLink
-              :to="`/translations/${p.id}`"
-              class="title"
-            >
-              {{ p.book_title }}
-            </RouterLink>
-            <StatusMark :status="p.status" />
-          </div>
-          <p class="sub">
-            <LangPair
-              :source="p.source_lang"
-              :target="p.target_lang"
-            />, {{ p.model_id }}
-          </p>
+          <header class="tile-head">
+            <div class="row-head">
+              <RouterLink
+                :to="`/translations/${p.id}`"
+                class="title"
+              >
+                {{ p.book_title }}
+              </RouterLink>
+              <StatusMark :status="p.status" />
+            </div>
+            <p class="sub">
+              <LangPair
+                :source="p.source_lang"
+                :target="p.target_lang"
+              />, {{ p.model_id }}
+            </p>
+          </header>
           <ProgressBar
             :done="p.segments_done"
             :failed="p.segments_failed"
@@ -142,21 +144,31 @@ h2 {
   font-variant-numeric: tabular-nums;
 }
 
-/* Переводы группы — сеткой карточек: на широком экране по три-четыре в ряд. */
+/* Переводы группы — сеткой карточек: не уже 30rem, чтобы название книги,
+   прогресс и цифры не теснились (на 1440 px — две в ряд, на 1920 px — три);
+   на телефоне карточка — во всю ширину. */
 .tiles {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(22rem, 1fr));
-  gap: var(--space-4);
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 30rem), 1fr));
+  gap: var(--space-5);
 }
 
 .tile {
   box-shadow: var(--shadow-card);
 }
 
-.tile :deep(.n-card__content) {
+/* Содержимое карточки — через content-class: внутренние классы Naive
+   меняются от версии к версии (n-card__content стал n-card-content). */
+.tile :deep(.tile-body) {
   display: grid;
-  gap: var(--space-2);
+  gap: var(--space-4);
   align-content: start;
+  padding: var(--space-5);
+}
+
+.tile-head {
+  display: grid;
+  gap: var(--space-1);
 }
 
 .row-head {
@@ -169,7 +181,8 @@ h2 {
 
 .title {
   font-family: var(--font-book);
-  font-size: var(--step-1);
+  font-size: var(--step-2);
+  line-height: 1.25;
   font-weight: 500;
   text-decoration: none;
 }
@@ -181,7 +194,6 @@ h2 {
 .sub {
   margin: 0;
   color: var(--muted);
-  font-size: var(--step--1);
 }
 
 .last-error {
