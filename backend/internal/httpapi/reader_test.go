@@ -152,9 +152,11 @@ func TestPositionRoundTrip(t *testing.T) {
 	require.Equal(t, 0, got.ChapterIndex)
 	require.Nil(t, got.TranslationID)
 
-	// Позиция своя у каждого пользователя.
+	// Позиция своя у каждого читателя общей книги.
 	other := e.signedIn(t, "other@example.com")
-	require.Equal(t, http.StatusNotFound, other.do(http.MethodGet, "/api/books/"+bookID+"/position", nil).Status)
+	r = other.do(http.MethodGet, "/api/books/"+bookID+"/position", nil)
+	require.Equal(t, http.StatusOK, r.Status)
+	require.JSONEq(t, "null", string(r.Body), "у другого читателя позиции ещё нет")
 }
 
 func TestPositionUnknownChapter422(t *testing.T) {

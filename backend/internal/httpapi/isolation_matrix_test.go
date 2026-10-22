@@ -13,6 +13,35 @@ import (
 // Матрица изоляции (ТЗ §2.2, §12): каждая операция с ресурсом проверяет
 // права. Маршруты берутся из сервера, а не дублируются здесь: новый
 // эндпоинт с параметром, не внесённый в матрицу, роняет тест.
+//
+// Общая библиотека (дополнение §9): книги и переводы читают и скачивают
+// все — эти маршруты чужому отвечают, их проверяет shared_test.go.
+// Остальное — только владельцу: чужому 404.
+var sharedRoutes = map[string]bool{
+	"GET /api/books/{id}":                  true,
+	"GET /api/books/{id}/toc":              true,
+	"GET /api/books/{id}/chapters/{index}": true,
+	"GET /api/books/{id}/assets/{path...}": true,
+	"GET /api/books/{id}/search":           true,
+	"GET /api/books/{id}/position":         true,
+	"PUT /api/books/{id}/position":         true,
+	"POST /api/books/{id}/exports":         true,
+	"GET /api/books/{id}/exports":          true,
+	"GET /api/translations/{id}":           true,
+	"GET /api/translations/{id}/segments":  true,
+	"GET /api/translations/{id}/events":    true,
+}
+
+func TestSharedRoutesExist(t *testing.T) {
+	// Опечатка в списке общих маршрутов тихо вывела бы маршрут из матрицы.
+	all := map[string]bool{}
+	for _, route := range httpapi.Routes() {
+		all[route.Method+" "+route.Path] = true
+	}
+	for r := range sharedRoutes {
+		require.True(t, all[r], "общий маршрут %s не зарегистрирован", r)
+	}
+}
 
 type foreignResources struct {
 	book, project, segment, config, export, user string
@@ -63,7 +92,7 @@ func TestEveryResourceEndpointIs404ForForeignUser(t *testing.T) {
 	_, intruder, foreign := setupForeign(t)
 	checked := 0
 	for _, route := range httpapi.Routes() {
-		if !route.Auth || !strings.Contains(route.Path, "{") {
+		if !route.Auth || !strings.Contains(route.Path, "{") || sharedRoutes[route.Method+" "+route.Path] {
 			continue
 		}
 		url, ok := foreign.url(t, route.Path)
@@ -78,14 +107,15 @@ func TestEveryResourceEndpointIs404ForForeignUser(t *testing.T) {
 }
 
 func TestAdminHasNoContentAccess(t *testing.T) {
-	// Роль admin не даёт доступа к содержимому (ТЗ §2.1, дополнение §9):
-	// для администратора-чужака каждый ресурсный маршрут — тот же 404.
+	// Роль admin не даёт прав сверх обычного пользователя (ТЗ §2.1,
+	// дополнение §9): чужое — только общее чтение, остальное — тот же 404.
 	owner, intruder, foreign := setupForeign(t)
 	owner.promote(t, "intruder@example.com")
 	require.Equal(t, http.StatusOK, intruder.do(http.MethodGet, "/api/admin/users", nil).Status, "чужак стал администратором")
 	checked := 0
 	for _, route := range httpapi.Routes() {
-		if !route.Auth || !strings.Contains(route.Path, "{") || strings.HasPrefix(route.Path, "/api/admin/") {
+		if !route.Auth || !strings.Contains(route.Path, "{") || strings.HasPrefix(route.Path, "/api/admin/") ||
+			sharedRoutes[route.Method+" "+route.Path] {
 			continue
 		}
 		url, ok := foreign.url(t, route.Path)

@@ -136,6 +136,7 @@ func buildRoutes(s *server) *router {
 
 	rt.protected("POST /api/books", limited(s.limits.uploads, byUser, tooManyUploads, s.uploadBook))
 	rt.protected("GET /api/books", s.listBooks)
+	rt.protected("GET /api/library", s.library)
 	rt.protected("GET /api/books/{id}", s.getBook)
 	rt.protected("DELETE /api/books/{id}", s.deleteBook)
 	rt.protected("GET /api/books/{id}/toc", s.getTOC)

@@ -106,8 +106,10 @@ func validExportMode(mode string) bool {
 	return mode == string(exporters.ModeTranslation) || mode == string(exporters.ModeBilingual)
 }
 
+// createExport — скачать книгу с переводом может любой (общая библиотека,
+// дополнение §9): задание и файл — того, кто скачивает.
 func (s *server) createExport(w http.ResponseWriter, r *http.Request) {
-	book, ok := loadOwned[models.Book](s, w, r, "id")
+	book, ok := loadShared[models.Book](s, w, r, "id")
 	if !ok {
 		return
 	}
@@ -129,7 +131,7 @@ func (s *server) createExport(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnprocessableEntity, "Перевод не найден")
 		return
 	}
-	project, err := store.Owned[models.TranslationProject](r.Context(), s.DB, projectID, user.ID)
+	project, err := store.Owned[models.TranslationProject](r.Context(), s.DB, projectID, book.OwnerID)
 	if errors.Is(err, store.ErrNotFound) {
 		writeError(w, http.StatusUnprocessableEntity, "Перевод не найден")
 		return
@@ -167,13 +169,15 @@ func (s *server) createExport(w http.ResponseWriter, r *http.Request) {
 
 const maxListedExports = 100
 
+// listBookExports — свои экспорты этой книги: чужие задания не видны и
+// владельцу книги.
 func (s *server) listBookExports(w http.ResponseWriter, r *http.Request) {
-	book, ok := loadOwned[models.Book](s, w, r, "id")
+	book, ok := loadShared[models.Book](s, w, r, "id")
 	if !ok {
 		return
 	}
 	var jobs []models.ExportJob
-	err := s.DB.WithContext(r.Context()).Scopes(store.OwnedScope(book.OwnerID)).
+	err := s.DB.WithContext(r.Context()).Scopes(store.OwnedScope(UserFromContext(r.Context()).ID)).
 		Where("book_id = ?", book.ID).Order("created_at DESC, id").Limit(maxListedExports).Find(&jobs).Error
 	if err != nil {
 		internalError(w, r, err)

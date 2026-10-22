@@ -458,11 +458,18 @@ func TestTranslationsFilterByBook(t *testing.T) {
 	require.Len(t, list, 1)
 	require.Equal(t, p.ID, list[0].ID)
 
-	// Чужая книга — пустой список, а не 404: фильтр не раскрывает,
-	// существует ли книга.
+	// Общая библиотека (дополнение §9): переводы чужой книги видны всем.
 	other := e.signedIn(t, "other@example.com")
+	var shared []projectBody
 	r := other.do(http.MethodGet, "/api/translations?book_id="+first, nil)
 	require.Equal(t, http.StatusOK, r.Status)
+	r.JSON(t, &shared)
+	require.Len(t, shared, 1)
+	require.Equal(t, p.ID, shared[0].ID)
+	// Своих переводов у другого нет; несуществующая книга — пустой список.
+	r = other.do(http.MethodGet, "/api/translations", nil)
+	require.JSONEq(t, "[]", string(r.Body))
+	r = other.do(http.MethodGet, "/api/translations?book_id=00000000-0000-0000-0000-000000000001", nil)
 	require.JSONEq(t, "[]", string(r.Body))
 
 	require.Equal(t, http.StatusUnprocessableEntity, e.c.do(http.MethodGet, "/api/translations?book_id=nope", nil).Status)

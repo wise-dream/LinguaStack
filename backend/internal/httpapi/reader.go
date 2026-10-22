@@ -27,7 +27,7 @@ var readModes = []string{models.ReadParallel, models.ReadOriginal, models.ReadTr
 // searchBook — поиск по тексту книги и одного её перевода (ТЗ §8.3,
 // дополнение §19). Порядок результатов — порядок чтения.
 func (s *server) searchBook(w http.ResponseWriter, r *http.Request) {
-	book, ok := loadOwned[models.Book](s, w, r, "id")
+	book, ok := loadShared[models.Book](s, w, r, "id")
 	if !ok {
 		return
 	}
@@ -53,7 +53,7 @@ func (s *server) searchBook(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, res)
 }
 
-// bookProject — перевод пользователя, принадлежащий этой книге.
+// bookProject — перевод этой книги (их делает только владелец книги).
 func (s *server) bookProject(r *http.Request, book *models.Book, raw string) (*models.TranslationProject, bool) {
 	id, err := uuid.Parse(raw)
 	if err != nil {
@@ -82,7 +82,7 @@ type positionOut struct {
 
 // getPosition — позиция чтения или null, если книгу ещё не открывали.
 func (s *server) getPosition(w http.ResponseWriter, r *http.Request) {
-	book, ok := loadOwned[models.Book](s, w, r, "id")
+	book, ok := loadShared[models.Book](s, w, r, "id")
 	if !ok {
 		return
 	}
@@ -102,7 +102,7 @@ func (s *server) getPosition(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) putPosition(w http.ResponseWriter, r *http.Request) {
-	book, ok := loadOwned[models.Book](s, w, r, "id")
+	book, ok := loadShared[models.Book](s, w, r, "id")
 	if !ok {
 		return
 	}

@@ -97,8 +97,10 @@ func (r *Runner) process(ctx context.Context, job *models.ExportJob) error {
 	work, cancel := context.WithTimeout(ctx, r.timeout)
 	defer cancel()
 
+	// Книга и перевод могут быть чужими (общая библиотека, дополнение §9):
+	// право скачать проверил api, здесь — только что они ещё есть.
 	var book models.Book
-	err := r.db.WithContext(work).First(&book, "id = ? AND owner_id = ?", job.BookID, job.OwnerID).Error
+	err := r.db.WithContext(work).First(&book, "id = ?", job.BookID).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil // книгу удалили — задача ушла вместе с ней (каскад)
 	}
@@ -106,7 +108,7 @@ func (r *Runner) process(ctx context.Context, job *models.ExportJob) error {
 		return fmt.Errorf("книга для экспорта: %w", err)
 	}
 	var project models.TranslationProject
-	if err := r.db.WithContext(work).First(&project, "id = ? AND owner_id = ?", job.ProjectID, job.OwnerID).Error; err != nil {
+	if err := r.db.WithContext(work).First(&project, "id = ? AND book_id = ?", job.ProjectID, book.ID).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil
 		}
@@ -134,7 +136,9 @@ func (r *Runner) process(ctx context.Context, job *models.ExportJob) error {
 		return io.ReadAll(f)
 	}
 	out := exporter.Describe(doc)
-	size, err := r.store.SaveExport(book.OwnerID, book.ID, job.ID, out.Ext, func(w io.Writer) error {
+	// Файл — в каталоге того, кто скачивает: так его находят скачивание и
+	// удаление, и он уходит вместе с его аккаунтом.
+	size, err := r.store.SaveExport(job.OwnerID, book.ID, job.ID, out.Ext, func(w io.Writer) error {
 		return exporter.Write(ctxWriter{ctx: work, w: w}, doc)
 	})
 	if err != nil {

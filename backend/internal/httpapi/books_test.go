@@ -132,17 +132,18 @@ func TestLibraryDoesNotShipDocumentBodies(t *testing.T) {
 	require.NotContains(t, string(r.Body), "Уникальный текст абзаца")
 }
 
-func TestForeignBookIs404(t *testing.T) {
+func TestForeignBookReadOnly(t *testing.T) {
+	// Общая библиотека (дополнение §9): чужую книгу читают, но не меняют.
 	env := newTestEnv(t)
 	owner, intruder := env.signedIn(t, "owner@example.com"), env.signedIn(t, "intruder@example.com")
 	b := uploadBook(t, owner, "a.md", "# A\n\nx.\n\n# B\n\ny.")
 
+	require.Equal(t, http.StatusOK, intruder.do(http.MethodGet, "/api/books/"+b.ID, nil).Status)
+	require.Equal(t, []string{"A", "B"}, tocTitles(t, intruder, b.ID))
 	for _, req := range []struct {
 		method, path string
 		body         any
 	}{
-		{http.MethodGet, "/api/books/" + b.ID, nil},
-		{http.MethodGet, "/api/books/" + b.ID + "/toc", nil},
 		{http.MethodPut, "/api/books/" + b.ID + "/toc", map[string][]int{"order": {1, 0}}},
 		{http.MethodDelete, "/api/books/" + b.ID, nil},
 	} {

@@ -49,6 +49,22 @@ func Owned[T any](ctx context.Context, db *gorm.DB, id, ownerID uuid.UUID) (*T, 
 	return &row, nil
 }
 
+// Shared загружает книгу или перевод из общей библиотеки (дополнение §9):
+// их читают все вошедшие пользователи. Тип ограничен книгами и переводами
+// — подключение с ключом, экспорт или аккаунт так не загрузить даже по
+// ошибке. Изменения — по-прежнему только через Owned.
+func Shared[T models.Book | models.TranslationProject](ctx context.Context, db *gorm.DB, id uuid.UUID) (*T, error) {
+	var row T
+	err := db.WithContext(ctx).Where("id = ?", id).First(&row).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("загрузка ресурса: %w", err)
+	}
+	return &row, nil
+}
+
 // OwnedScope ограничивает выборку ресурсами владельца — для списков.
 func OwnedScope(ownerID uuid.UUID) func(*gorm.DB) *gorm.DB {
 	return func(db *gorm.DB) *gorm.DB {

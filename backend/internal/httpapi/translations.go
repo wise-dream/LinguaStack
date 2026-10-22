@@ -45,6 +45,8 @@ type translationIn struct {
 }
 
 type projectOut struct {
+	// Owned — перевод того, кто спрашивает: только он им управляет.
+	Owned            bool              `json:"owned"`
 	ID               uuid.UUID         `json:"id"`
 	BookID           uuid.UUID         `json:"book_id"`
 	ProviderConfigID uuid.UUID         `json:"provider_config_id"`
@@ -215,7 +217,9 @@ func (s *server) createTranslation(w http.ResponseWriter, r *http.Request) {
 		internalError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, projectResponse(&project, cfg, book.Title))
+	out := projectResponse(&project, cfg, book.Title)
+	out.Owned = true
+	writeJSON(w, http.StatusCreated, out)
 }
 
 // translationOptions — списки для формы настройки перевода. Языки, которые
@@ -230,18 +234,33 @@ func (s *server) translationOptions(w http.ResponseWriter, _ *http.Request) {
 	})
 }
 
+// listTranslations — свои переводы; с book_id — переводы этой книги, чья
+// бы она ни была (общая библиотека, дополнение §9): их делает только её
+// владелец.
 func (s *server) listTranslations(w http.ResponseWriter, r *http.Request) {
 	user := UserFromContext(r.Context())
-	q := s.DB.WithContext(r.Context()).Scopes(store.OwnedScope(user.ID))
+	owner := user.ID
+	var bookID *uuid.UUID
 	if raw := r.URL.Query().Get("book_id"); raw != "" {
-		bookID, err := uuid.Parse(raw)
+		id, err := uuid.Parse(raw)
 		if err != nil {
 			writeError(w, http.StatusUnprocessableEntity, "book_id должен быть UUID")
 			return
 		}
-		// Фильтр по владельцу уже в OwnedScope: для чужой книги список
-		// пуст, а не 404 — существование книги не раскрывается.
-		q = q.Where("book_id = ?", bookID)
+		book, err := store.Shared[models.Book](r.Context(), s.DB, id)
+		if errors.Is(err, store.ErrNotFound) {
+			writeJSON(w, http.StatusOK, []projectOut{})
+			return
+		}
+		if err != nil {
+			internalError(w, r, err)
+			return
+		}
+		owner, bookID = book.OwnerID, &book.ID
+	}
+	q := s.DB.WithContext(r.Context()).Scopes(store.OwnedScope(owner))
+	if bookID != nil {
+		q = q.Where("book_id = ?", *bookID)
 	}
 	var list []models.TranslationProject
 	if err := q.Order("created_at DESC").Find(&list).Error; err != nil {
@@ -249,7 +268,7 @@ func (s *server) listTranslations(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var books []models.Book
-	if err := s.DB.WithContext(r.Context()).Scopes(store.OwnedScope(user.ID)).Select("id", "title").Find(&books).Error; err != nil {
+	if err := s.DB.WithContext(r.Context()).Scopes(store.OwnedScope(owner)).Select("id", "title").Find(&books).Error; err != nil {
 		internalError(w, r, err)
 		return
 	}
@@ -258,7 +277,7 @@ func (s *server) listTranslations(w http.ResponseWriter, r *http.Request) {
 		titles[b.ID] = b.Title
 	}
 	var configs []models.ProviderConfig
-	if err := s.DB.WithContext(r.Context()).Scopes(store.OwnedScope(user.ID)).Find(&configs).Error; err != nil {
+	if err := s.DB.WithContext(r.Context()).Scopes(store.OwnedScope(owner)).Find(&configs).Error; err != nil {
 		internalError(w, r, err)
 		return
 	}
@@ -269,6 +288,64 @@ func (s *server) listTranslations(w http.ResponseWriter, r *http.Request) {
 	out := make([]projectOut, len(list))
 	for i := range list {
 		out[i] = projectResponse(&list[i], byID[list[i].ProviderConfigID], titles[list[i].BookID])
+		out[i].Owned = list[i].OwnerID == user.ID
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+type libraryTranslation struct {
+	ID            uuid.UUID `json:"id"`
+	SourceLang    string    `json:"source_lang"`
+	TargetLang    string    `json:"target_lang"`
+	ModelID       string    `json:"model_id"`
+	Status        string    `json:"status"`
+	SegmentsDone  int       `json:"segments_done"`
+	SegmentsTotal int       `json:"segments_total"`
+}
+
+type libraryBook struct {
+	ID           uuid.UUID            `json:"id"`
+	Title        string               `json:"title"`
+	Author       string               `json:"author,omitempty"`
+	Language     string               `json:"language,omitempty"`
+	SourceFormat string               `json:"source_format"`
+	CreatedAt    time.Time            `json:"created_at"`
+	Owned        bool                 `json:"owned"`
+	Translations []libraryTranslation `json:"translations"`
+}
+
+// library — общая библиотека (дополнение §9): все книги всех пользователей
+// с их переводами, новые сверху. Владельцы не называются.
+func (s *server) library(w http.ResponseWriter, r *http.Request) {
+	user := UserFromContext(r.Context())
+	var books []models.Book
+	err := s.DB.WithContext(r.Context()).Select("id", "owner_id", "title", "author", "language", "source_format", "created_at").
+		Order("created_at DESC, id").Find(&books).Error
+	if err != nil {
+		internalError(w, r, err)
+		return
+	}
+	var projects []models.TranslationProject
+	err = s.DB.WithContext(r.Context()).Select("id", "book_id", "source_lang", "target_lang", "model_id", "status",
+		"segments_done", "segments_total", "created_at").Order("created_at DESC, id").Find(&projects).Error
+	if err != nil {
+		internalError(w, r, err)
+		return
+	}
+	byBook := map[uuid.UUID][]libraryTranslation{}
+	for _, p := range projects {
+		byBook[p.BookID] = append(byBook[p.BookID], libraryTranslation{ID: p.ID, SourceLang: p.SourceLang,
+			TargetLang: p.TargetLang, ModelID: p.ModelID, Status: p.Status,
+			SegmentsDone: p.SegmentsDone, SegmentsTotal: p.SegmentsTotal})
+	}
+	out := make([]libraryBook, len(books))
+	for i, b := range books {
+		tr := byBook[b.ID]
+		if tr == nil {
+			tr = []libraryTranslation{}
+		}
+		out[i] = libraryBook{ID: b.ID, Title: b.Title, Author: b.Author, Language: b.Language, SourceFormat: b.SourceFormat,
+			CreatedAt: b.CreatedAt.UTC(), Owned: b.OwnerID == user.ID, Translations: tr}
 	}
 	writeJSON(w, http.StatusOK, out)
 }
@@ -287,11 +364,13 @@ func (s *server) projectFor(r *http.Request, p *models.TranslationProject) proje
 	var title string
 	_ = s.DB.WithContext(r.Context()).Model(&models.Book{}).
 		Where("id = ? AND owner_id = ?", p.BookID, p.OwnerID).Pluck("title", &title).Error
-	return projectResponse(p, s.projectConfig(r, p), title)
+	out := projectResponse(p, s.projectConfig(r, p), title)
+	out.Owned = p.OwnerID == UserFromContext(r.Context()).ID
+	return out
 }
 
 func (s *server) getTranslation(w http.ResponseWriter, r *http.Request) {
-	if p, ok := loadOwned[models.TranslationProject](s, w, r, "id"); ok {
+	if p, ok := loadShared[models.TranslationProject](s, w, r, "id"); ok {
 		writeJSON(w, http.StatusOK, s.projectFor(r, p))
 	}
 }
@@ -471,7 +550,7 @@ func queryInt(r *http.Request, name string, def int) (int, bool) {
 }
 
 func (s *server) listSegments(w http.ResponseWriter, r *http.Request) {
-	p, ok := loadOwned[models.TranslationProject](s, w, r, "id")
+	p, ok := loadShared[models.TranslationProject](s, w, r, "id")
 	if !ok {
 		return
 	}
@@ -558,7 +637,7 @@ type progressEvent struct {
 // терминальном статусе, при отключении клиента и при остановке сервера
 // (клиент EventSource переподключится сам).
 func (s *server) translationEvents(w http.ResponseWriter, r *http.Request) {
-	p, ok := loadOwned[models.TranslationProject](s, w, r, "id")
+	p, ok := loadShared[models.TranslationProject](s, w, r, "id")
 	if !ok {
 		return
 	}

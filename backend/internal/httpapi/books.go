@@ -44,9 +44,11 @@ type bookOut struct {
 	Translatable     int               `json:"translatable"`
 	Issues           []importers.Issue `json:"issues"`
 	CreatedAt        time.Time         `json:"created_at"`
+	// Owned — книгу загрузил тот, кто спрашивает: только он её меняет.
+	Owned bool `json:"owned"`
 }
 
-func bookResponse(b *models.Book) bookOut {
+func bookResponse(b *models.Book, viewer uuid.UUID) bookOut {
 	issues := b.Issues.Data
 	if issues == nil {
 		issues = []importers.Issue{}
@@ -55,8 +57,28 @@ func bookResponse(b *models.Book) bookOut {
 		ID: b.ID, Title: b.Title, Author: b.Author, Language: b.Language, SourceFormat: b.SourceFormat,
 		OriginalFilename: b.OriginalFilename, OriginalSize: b.OriginalSize, Status: b.Status,
 		Chapters: b.ChaptersCount, Blocks: b.BlocksCount, Translatable: b.TranslatableCount,
-		Issues: issues, CreatedAt: b.CreatedAt.UTC(),
+		Issues: issues, CreatedAt: b.CreatedAt.UTC(), Owned: b.OwnerID == viewer,
 	}
+}
+
+// loadShared — книга или перевод общей библиотеки по параметру пути, иначе
+// 404: читать их может любой вошедший (дополнение §9).
+func loadShared[T models.Book | models.TranslationProject](s *server, w http.ResponseWriter, r *http.Request, param string) (*T, bool) {
+	id, err := uuid.Parse(r.PathValue(param))
+	if err != nil {
+		writeError(w, http.StatusNotFound, "Не найдено")
+		return nil, false
+	}
+	row, err := store.Shared[T](r.Context(), s.DB, id)
+	if errors.Is(err, store.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "Не найдено")
+		return nil, false
+	}
+	if err != nil {
+		internalError(w, r, err)
+		return nil, false
+	}
+	return row, true
 }
 
 // loadOwned — ресурс пользователя по параметру пути, иначе 404.
@@ -244,7 +266,7 @@ func (s *server) uploadBook(w http.ResponseWriter, r *http.Request) {
 		internalError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, bookResponse(&book))
+	writeJSON(w, http.StatusCreated, bookResponse(&book, book.OwnerID))
 }
 
 // saveAsset сохраняет ресурс. Повреждённый или слишком большой ресурс —
@@ -287,14 +309,14 @@ func (s *server) listBooks(w http.ResponseWriter, r *http.Request) {
 	}
 	out := make([]bookOut, len(books))
 	for i := range books {
-		out[i] = bookResponse(&books[i])
+		out[i] = bookResponse(&books[i], books[i].OwnerID)
 	}
 	writeJSON(w, http.StatusOK, out)
 }
 
 func (s *server) getBook(w http.ResponseWriter, r *http.Request) {
-	if book, ok := loadOwned[models.Book](s, w, r, "id"); ok {
-		writeJSON(w, http.StatusOK, bookResponse(book))
+	if book, ok := loadShared[models.Book](s, w, r, "id"); ok {
+		writeJSON(w, http.StatusOK, bookResponse(book, UserFromContext(r.Context()).ID))
 	}
 }
 
@@ -311,7 +333,7 @@ func tocResponse(doc cdm.Document) tocOut {
 }
 
 func (s *server) getTOC(w http.ResponseWriter, r *http.Request) {
-	if book, ok := loadOwned[models.Book](s, w, r, "id"); ok {
+	if book, ok := loadShared[models.Book](s, w, r, "id"); ok {
 		writeJSON(w, http.StatusOK, tocResponse(book.CDM.Data))
 	}
 }
@@ -374,11 +396,24 @@ func (s *server) deleteBook(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	// Файлы экспорта читателей общей библиотеки лежат в их каталогах
+	// (дополнение §9): их задания уходят каскадом, файлы — здесь же.
+	var readers []uuid.UUID
+	if err := s.DB.WithContext(r.Context()).Model(&models.ExportJob{}).
+		Where("book_id = ? AND owner_id <> ?", book.ID, book.OwnerID).Distinct().Pluck("owner_id", &readers).Error; err != nil {
+		internalError(w, r, err)
+		return
+	}
 	// Строка и файлы удаляются вместе (ТЗ §13): если файлы не удалились,
 	// откатывается и удаление строки.
 	err := s.DB.WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Delete(&models.Book{}, "id = ?", book.ID).Error; err != nil {
 			return err
+		}
+		for _, reader := range readers {
+			if err := s.Store.DeleteBook(reader, book.ID); err != nil {
+				return err
+			}
 		}
 		return s.Store.DeleteBook(book.OwnerID, book.ID)
 	})
@@ -412,7 +447,7 @@ func findChapter(chapters []cdm.Chapter, index int) (*cdm.Chapter, bool) {
 // главам, а не целиком. Блоки вложенных глав сюда не входят — у них свой
 // index в оглавлении.
 func (s *server) getChapter(w http.ResponseWriter, r *http.Request) {
-	book, ok := loadOwned[models.Book](s, w, r, "id")
+	book, ok := loadShared[models.Book](s, w, r, "id")
 	if !ok {
 		return
 	}
@@ -444,7 +479,7 @@ const assetCSP = "default-src 'none'; style-src 'unsafe-inline'; sandbox"
 // getAsset — ресурс книги (картинка из EPUB или ZIP) по имени из meta.src
 // блока image.
 func (s *server) getAsset(w http.ResponseWriter, r *http.Request) {
-	book, ok := loadOwned[models.Book](s, w, r, "id")
+	book, ok := loadShared[models.Book](s, w, r, "id")
 	if !ok {
 		return
 	}
