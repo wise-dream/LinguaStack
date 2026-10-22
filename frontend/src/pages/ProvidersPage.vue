@@ -55,6 +55,8 @@ onMounted(async () => {
     const [k, c] = await Promise.all([listKinds(), listProviderConfigs()])
     kinds.value = k
     configs.value = c
+    // Ollama сервера видна не всем: форма начинает с доступного вида.
+    if (!k.some((x) => x.provider_id === form.provider_id)) form.provider_id = k[0]?.provider_id ?? ''
   } catch (e) {
     loadError.value = errorMessage(e)
   }

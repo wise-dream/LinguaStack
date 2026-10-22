@@ -2,7 +2,7 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { stubApi } from '../test/fakeApi'
-import { choose } from '../test/select'
+import { choose, selected } from '../test/select'
 import { kinds, providerConfig } from '../test/fixtures'
 import ProvidersPage from './ProvidersPage.vue'
 
@@ -65,6 +65,14 @@ describe('модели и провайдеры', () => {
     const intro = w.find('.intro').text()
     expect(intro).not.toContain('Ollama')
     expect(intro).toContain('со своим ключом API')
+  })
+
+  it('без Ollama сервера форма выбирает первый доступный вид', async () => {
+    const { w } = await mountPage({
+      'GET /api/providers': { body: kinds.filter((k) => k.provider_id !== 'ollama') },
+      'GET /api/provider-configs': { body: [] },
+    })
+    expect(selected(w, 'provider_id')).toBe('anthropic')
   })
 
   it('с Ollama сервера — она упомянута во введении', async () => {

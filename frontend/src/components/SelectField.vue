@@ -5,6 +5,8 @@
 import { NSelect, type SelectOption } from 'naive-ui'
 import { useId } from 'vue'
 
+import { useMediaQuery } from '../lib/media'
+
 withDefaults(
   defineProps<{
     label: string
@@ -20,6 +22,10 @@ withDefaults(
 
 const model = defineModel<string>({ required: true })
 const labelId = useId()
+// Меню начинается от левого края поля. На узком экране оно шириной поля —
+// иначе длинный вариант выводит его за край и даёт прокрутку вбок; на
+// широком — по содержимому, чтобы короткое поле не обрезало варианты.
+const narrow = useMediaQuery('(max-width: 40rem)')
 </script>
 
 <template>
@@ -39,7 +45,7 @@ const labelId = useId()
       :size="size"
       :aria-labelledby="labelId"
       :input-props="{ name, 'aria-labelledby': labelId }"
-      :consistent-menu-width="false"
+      :consistent-menu-width="narrow"
     />
   </div>
 </template>
