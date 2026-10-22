@@ -222,6 +222,8 @@ func countMarkers(text string) map[string]int {
 // в ответе: так перевод слабой модели не отвергается из-за одной скобки, а
 // выдуманную или лишнюю метку по-прежнему ловит VerifyPlaceholders.
 // Неоднозначный случай (две потерянные метки на одну скобку) не трогается.
+// Когда все метки на месте, одиночные скобки выбрасываются: скобки
+// исходника сами стали метками (Mask), так что в ответе это мусор модели.
 func RepairMarkers(masked, translated string) string {
 	missing := countMarkers(masked)
 	for k, n := range countMarkers(translated) {
@@ -231,7 +233,7 @@ func RepairMarkers(masked, translated string) string {
 	for _, n := range missing {
 		lost += max(n, 0)
 	}
-	if lost == 0 {
+	if lost == 0 && !strings.ContainsAny(markerRe.ReplaceAllString(translated, ""), "⟦⟧") {
 		return translated
 	}
 	take := func(num string) bool {
@@ -283,6 +285,13 @@ func RepairMarkers(masked, translated string) string {
 		i += size
 	}
 	out := b.String()
+	if lost == 0 {
+		for i := len(orphans) - 1; i >= 0; i-- {
+			_, size := utf8.DecodeRuneInString(out[orphans[i]:])
+			out = out[:orphans[i]] + out[orphans[i]+size:]
+		}
+		return out
+	}
 	if lost != 1 || len(orphans) != 1 {
 		return out
 	}
