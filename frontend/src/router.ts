@@ -24,6 +24,7 @@ export function createAppRouter(history: RouterHistory = createWebHistory()) {
       { path: '/register', component: () => import('./pages/RegisterPage.vue'), meta: { title: 'Регистрация', public: true } },
       { path: '/forgot-password', component: () => import('./pages/ForgotPasswordPage.vue'), meta: { title: 'Восстановление доступа', public: true } },
       { path: '/reset-password', component: () => import('./pages/ResetPasswordPage.vue'), meta: { title: 'Новый пароль', public: true } },
+      { path: '/terms', component: () => import('./pages/TermsPage.vue'), meta: { title: 'Условия и конфиденциальность', public: true } },
       { path: '/', component: () => import('./pages/LibraryPage.vue'), meta: { title: 'Библиотека', section: 'library' } },
       { path: '/import', component: () => import('./pages/ImportPage.vue'), meta: { title: 'Загрузка книги', section: 'library' } },
       { path: '/books/:id', component: () => import('./pages/BookPage.vue'), meta: { title: 'Книга', section: 'library' } },

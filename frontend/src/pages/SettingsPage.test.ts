@@ -171,6 +171,13 @@ describe('профиль', () => {
   })
 })
 
+describe('условия', () => {
+  it('ссылка на условия и конфиденциальность — в разделе аккаунта', async () => {
+    const { w } = await mountSettings({ 'GET /api/telegram': { body: state({ enabled: false, bot_username: undefined }) } })
+    expect(w.find('section.account a[href="/terms"]').text()).toBe('Условия и конфиденциальность')
+  })
+})
+
 describe('удаление аккаунта', () => {
   const telegramOff = { 'GET /api/telegram': { body: state({ enabled: false, bot_username: undefined }) } }
 

@@ -170,6 +170,9 @@ async function unlink() {
           <RouterLink to="/settings/providers">
             Подключения моделей
           </RouterLink>
+          <RouterLink to="/terms">
+            Условия и конфиденциальность
+          </RouterLink>
         </section>
 
         <section

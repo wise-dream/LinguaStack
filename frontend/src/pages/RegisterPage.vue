@@ -22,8 +22,22 @@ async function submit(email: string, password: string) {
     password-autocomplete="new-password"
     :submit="submit"
   >
+    <template #after-submit>
+      <p class="consent">
+        <!-- eslint-disable-next-line vue/singleline-html-element-content-newline -- перенос внутри ссылки дал бы лишний подчёркнутый пробел -->
+        Создавая аккаунт, вы принимаете <RouterLink to="/terms">условия и правила обработки данных</RouterLink>.
+      </p>
+    </template>
     Уже есть аккаунт? <RouterLink :to="{ path: '/login', query: route.query }">
       Войти
     </RouterLink>
   </AuthForm>
 </template>
+
+<style scoped>
+.consent {
+  margin: 0;
+  font-size: var(--step--1);
+  color: var(--muted);
+}
+</style>

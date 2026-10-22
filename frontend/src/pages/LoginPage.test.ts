@@ -19,6 +19,7 @@ async function mountPage(component: object, api: AuthApi, path: string) {
       { path: '/login', component: LoginPage, meta: { title: 'Вход', public: true } },
       { path: '/register', component: RegisterPage, meta: { title: 'Регистрация', public: true } },
       { path: '/forgot-password', component: { template: '<div />' }, meta: { title: '', public: true } },
+      { path: '/terms', component: { template: '<div />' }, meta: { title: '', public: true } },
     ],
   })
   await router.push(path)
@@ -103,5 +104,13 @@ describe('вход после удаления аккаунта', () => {
   it('сообщение, что аккаунт и данные удалены', async () => {
     const { wrapper } = await mountPage(LoginPage, api({}), '/login?deleted=1')
     expect(wrapper.find('[role=status]').text()).toBe('Аккаунт и все его данные удалены.')
+  })
+})
+
+describe('регистрация и условия', () => {
+  it('ссылка на условия у формы регистрации', async () => {
+    const { wrapper } = await mountPage(RegisterPage, api({}), '/register')
+    const link = wrapper.find('a[href="/terms"]')
+    expect(link.text()).toBe('условия и правила обработки данных')
   })
 })

@@ -381,3 +381,11 @@ test('удаление аккаунта', async ({ page }, info) => {
   await page.getByRole('button', { name: 'Войти' }).click()
   await expect(page.getByRole('alert')).toHaveText('Неверный адрес или пароль')
 })
+
+test('условия и конфиденциальность — без входа, со ссылки на регистрации', async ({ page }) => {
+  await page.goto('/register')
+  await page.getByRole('link', { name: 'условия и правила обработки данных' }).click()
+  await expect(page.getByRole('heading', { name: 'Условия и конфиденциальность', level: 1 })).toBeVisible()
+  await shot(page, 'terms')
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(0)
+})

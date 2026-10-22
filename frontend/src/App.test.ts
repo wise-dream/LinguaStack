@@ -163,3 +163,20 @@ describe('меню на телефоне', () => {
     expect(wrapper.find('button.burger').attributes('aria-expanded')).toBe('false')
   })
 })
+
+describe('условия и конфиденциальность', () => {
+  it('открываются без входа — их читают до регистрации', async () => {
+    const wrapper = await mountAt('/terms', false)
+    expect(wrapper.find('h1').text()).toBe('Условия и конфиденциальность')
+    expect(wrapper.find('nav').exists()).toBe(false)
+    // Шапки нет — путь обратно даёт название сервиса.
+    expect(wrapper.find('main a.back').attributes('href')).toBe('/')
+  })
+
+  it('и после входа — с шапкой', async () => {
+    const wrapper = await mountAt('/terms')
+    expect(wrapper.find('h1').text()).toBe('Условия и конфиденциальность')
+    expect(wrapper.find('nav').exists()).toBe(true)
+    expect(wrapper.find('main a.back').exists()).toBe(false)
+  })
+})
