@@ -5,7 +5,8 @@ import { createMemoryHistory, createRouter } from 'vue-router'
 import type { Segment } from '../api/types'
 import { stubApi } from '../test/fakeApi'
 import { stubEventSource } from '../test/fakeEventSource'
-import { project } from '../test/fixtures'
+import { project, providerConfig } from '../test/fixtures'
+import { choose, selected } from '../test/select'
 import TranslationDetailPage from './TranslationDetailPage.vue'
 
 afterEach(() => vi.unstubAllGlobals())
@@ -234,5 +235,75 @@ describe('чужой перевод из общей библиотеки', () =>
     expect(w.text()).not.toContain('Отменить перевод')
     expect(w.find('section.export').exists()).toBe(true)
     expect(w.find('form.segment-search').exists()).toBe(true)
+  })
+})
+
+describe('смена модели', () => {
+  const configs = [
+    providerConfig(),
+    providerConfig({ id: 'c2', provider_id: 'anthropic', name: 'Anthropic', sends_data_externally: true, allow_external: true }),
+    providerConfig({ id: 'c3', provider_id: 'anthropic', name: 'Без разрешения', sends_data_externally: true }),
+  ]
+  const routes = (status: 'running' | 'cancelled' = 'running', owned = true) => ({
+    'GET /api/translations/p1': { body: project({ status, owned }) },
+    'GET /api/translations/p1/segments': { body: [] },
+    'GET /api/books/b1/exports': { body: [] },
+    'GET /api/provider-configs': { body: configs },
+    'GET /api/provider-configs/c1/models': { body: [{ model_id: 'qwen3:8b' }, { model_id: 'qwen2.5-coder:14b' }] },
+    'GET /api/provider-configs/c2/models': { body: [{ model_id: 'claude-haiku-5-5', display_name: 'Claude Haiku 5.5' }] },
+    'GET /api/provider-configs/c3/models': { body: [{ model_id: 'claude-haiku-5-5' }] },
+    'PATCH /api/translations/p1': (c: { body: unknown }) => ({
+      body: project({ status, ...(c.body as { provider_config_id: string; model_id: string }) }),
+    }),
+  })
+
+  it('форма открыта на текущей модели; смена уходит на сервер, страница показывает новую', async () => {
+    const { w, calls } = await mountDetail(routes())
+    await w.find('button.change-model').trigger('click')
+    await flushPromises()
+    const form = w.find('form.model-change')
+    expect(selected(w, 'provider_config_id')).toBe('c1')
+    expect(selected(w, 'model_id')).toBe('qwen3:8b')
+    expect(form.find('button[type=submit]').attributes('disabled'), 'та же модель — менять нечего').toBeDefined()
+    expect(w.find('button.change-model').exists(), 'форма открыта — второй кнопки нет').toBe(false)
+
+    await choose(w, 'provider_config_id', 'c2')
+    await flushPromises()
+    expect(selected(w, 'model_id')).toBe('claude-haiku-5-5')
+    expect(form.text()).toContain('Текст книги будет отправлен в «Anthropic»')
+    await form.trigger('submit')
+    await flushPromises()
+
+    const patch = calls.find((c) => c.method === 'PATCH')
+    expect(patch?.body).toEqual({ provider_config_id: 'c2', model_id: 'claude-haiku-5-5' })
+    expect(w.find('form.model-change').exists()).toBe(false)
+    expect(w.find('.model').text()).toBe('claude-haiku-5-5')
+    expect(w.find('[role=status]').text()).toContain('Следующие фрагменты переведёт claude-haiku-5-5')
+  })
+
+  it('подключение без разрешения на передачу наружу — сменить нельзя', async () => {
+    const { w } = await mountDetail(routes())
+    await w.find('button.change-model').trigger('click')
+    await flushPromises()
+    await choose(w, 'provider_config_id', 'c3')
+    await flushPromises()
+    expect(w.find('form.model-change').text()).toContain('не разрешает отправку текста книг наружу')
+    expect(w.find('form.model-change button[type=submit]').attributes('disabled')).toBeDefined()
+  })
+
+  it('чужой и отменённый перевод — без смены модели', async () => {
+    expect((await mountDetail(routes('running', false))).w.find('button.change-model').exists()).toBe(false)
+    expect((await mountDetail(routes('cancelled'))).w.find('button.change-model').exists()).toBe(false)
+  })
+})
+
+describe('экспорт на странице перевода', () => {
+  it('экспортов ещё нет — так и сказано', async () => {
+    const { w } = await mountDetail({
+      'GET /api/translations/p1': { body: project() },
+      'GET /api/translations/p1/segments': { body: [] },
+      'GET /api/books/b1/exports': { body: [] },
+    })
+    expect(w.find('section.export .no-exports').text()).toBe('Экспортов ещё нет — готовые файлы появятся здесь.')
   })
 })

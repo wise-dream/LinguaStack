@@ -91,6 +91,12 @@ const formatOptions = exportFormats.map((f) => ({ label: f.label, value: f.id })
       </NButton>
     </form>
     <ErrorAlert :message="error || exports.error.value" />
+    <p
+      v-if="exports.loaded.value && !exports.items.value.length"
+      class="no-exports"
+    >
+      Экспортов ещё нет — готовые файлы появятся здесь.
+    </p>
     <ExportList
       :items="exports.items.value"
       @retry="(j) => start(j.format, j.mode)"
@@ -107,11 +113,24 @@ const formatOptions = exportFormats.map((f) => ({ label: f.label, value: f.id })
   gap: var(--space-3) var(--space-5);
 }
 
-/* Черта под формой — только когда под ней есть экспорты. */
+/* Черта под формой — только когда под ней есть экспорты. Список — не выше
+   нескольких файлов: длинная история прокручивается внутри панели, а не
+   растягивает страницу. */
 .export :deep(.exports:has(li)) {
   margin-top: var(--space-4);
   padding-top: var(--space-4);
   border-top: 1px solid var(--rule-soft);
+  max-height: 22rem;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.no-exports {
+  margin: var(--space-4) 0 0;
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--rule-soft);
+  color: var(--muted);
+  font-size: var(--step--1);
 }
 
 .export-form .format {

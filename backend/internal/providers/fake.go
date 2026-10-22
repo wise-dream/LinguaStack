@@ -42,6 +42,7 @@ type Fake struct {
 
 	mu         sync.Mutex
 	calls      []CompletionRequest
+	models     []string
 	failed     int
 	succeeded  int
 	violated   int
@@ -114,6 +115,7 @@ func (f *Fake) Complete(ctx context.Context, modelID string, req CompletionReque
 func (f *Fake) complete(ctx context.Context, modelID string, req CompletionRequest) (CompletionResult, error) {
 	f.mu.Lock()
 	f.calls = append(f.calls, req)
+	f.models = append(f.models, modelID)
 	switch {
 	case f.Unavailable:
 		f.mu.Unlock()
@@ -237,6 +239,13 @@ func (f *Fake) Calls() []CompletionRequest {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return append([]CompletionRequest(nil), f.calls...)
+}
+
+// Models — модель каждого вызова, по порядку.
+func (f *Fake) Models() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.models...)
 }
 
 // CallCount — число вызовов Complete.

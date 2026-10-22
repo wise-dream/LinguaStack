@@ -21,6 +21,8 @@ import (
 type projectBody struct {
 	ID                  string  `json:"id"`
 	BookID              string  `json:"book_id"`
+	ProviderConfigID    string  `json:"provider_config_id"`
+	ModelID             string  `json:"model_id"`
 	TargetLang          string  `json:"target_lang"`
 	SourceLang          string  `json:"source_lang"`
 	Status              string  `json:"status"`

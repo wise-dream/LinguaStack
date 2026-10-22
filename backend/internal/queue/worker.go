@@ -49,6 +49,12 @@ type Worker struct {
 
 var errStopping = errors.New("worker останавливается")
 
+// errReconnect — у проекта сменилось подключение к модели посреди
+// перевода. Задача возвращается в очередь, как при остановке: при новом
+// захвате снова действуют правила очереди (одна задача Ollama сервера за
+// раз, лимит пользователя).
+var errReconnect = errors.New("подключение перевода сменилось")
+
 // NewWorker создаёт worker.
 func NewWorker(id string, db *gorm.DB, resolve ProviderResolver, cfg config.Settings) *Worker {
 	return &Worker{id: id, db: db, resolve: resolve, cfg: cfg, PollInterval: time.Second, RetryBackoff: defaultBackoff}
@@ -173,6 +179,9 @@ func (w *Worker) settle(ctx context.Context, task *models.TranslationTask, statu
 	case errors.Is(err, errStopping):
 		log.Info("worker: задача возвращена в очередь при остановке")
 		return ignoreLeaseLost(Release(ctx, w.db, task.ID, w.id))
+	case errors.Is(err, errReconnect):
+		log.Info("worker: задача возвращена в очередь — сменилось подключение к модели")
+		return ignoreLeaseLost(Release(ctx, w.db, task.ID, w.id))
 	case providers.Retryable(err):
 		retryIn := w.RetryBackoff(task.Attempts)
 		if d, ok := providers.RetryAfter(err); ok {
@@ -267,8 +276,22 @@ func (w *Worker) process(stop, work, calls context.Context, task *models.Transla
 		if stop.Err() != nil {
 			return "", errStopping
 		}
-		if active, err := w.stillRunning(work, project.ID); err != nil || !active {
+		// Пауза, отмена и смена модели — между батчами (дополнение §5):
+		// текущий батч доводится прежней моделью.
+		current, err := w.current(work, project.ID)
+		if err != nil {
 			return models.TaskCancelled, err
+		}
+		if current.Status != models.ProjectRunning {
+			return models.TaskCancelled, nil
+		}
+		if current.ProviderConfigID != project.ProviderConfigID {
+			return "", errReconnect
+		}
+		if current.ModelID != project.ModelID {
+			slog.Info("worker: модель перевода сменилась", "worker", w.id, "project", project.ID,
+				"from", project.ModelID, "to", current.ModelID)
+			project.ModelID = current.ModelID
 		}
 
 		provider, err := w.resolve(work, &project)
@@ -348,11 +371,12 @@ UPDATE translation_projects SET status = 'running', started_at = COALESCE(starte
 	return res.RowsAffected == 1, res.Error
 }
 
-// stillRunning — проверка паузы и отмены между батчами.
-func (w *Worker) stillRunning(ctx context.Context, projectID uuid.UUID) (bool, error) {
-	var status string
-	err := w.db.WithContext(ctx).Model(&models.TranslationProject{}).Where("id = ?", projectID).Pluck("status", &status).Error
-	return status == models.ProjectRunning, err
+// current — то, что меняется посреди перевода: статус (пауза, отмена) и
+// модель с подключением.
+func (w *Worker) current(ctx context.Context, projectID uuid.UUID) (models.TranslationProject, error) {
+	var p models.TranslationProject
+	err := w.db.WithContext(ctx).Select("status", "provider_config_id", "model_id").First(&p, "id = ?", projectID).Error
+	return p, err
 }
 
 func (w *Worker) pendingNodes(ctx context.Context, projectID uuid.UUID) (map[string]bool, error) {

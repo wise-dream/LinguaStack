@@ -49,4 +49,12 @@ func TestExistingOllamaConfigOfRegularUserIsBlocked(t *testing.T) {
 	require.Equal(t, http.StatusForbidden, e.c.do(http.MethodGet, "/api/provider-configs/"+cfgID+"/models", nil).Status)
 	r := e.create(t, bookID, map[string]any{"provider_config_id": cfgID})
 	require.Equal(t, http.StatusForbidden, r.Status, "тело: %s", r.Body)
+
+	// И сменить на неё модель идущего перевода нельзя.
+	_, own := createConfig(t, e.c, map[string]any{"provider_id": "anthropic", "api_key": secretKey, "allow_external": true})
+	r = e.create(t, bookID, map[string]any{"provider_config_id": own.ID, "model_id": "claude-haiku-5-5"})
+	require.Equal(t, http.StatusCreated, r.Status, "тело: %s", r.Body)
+	var p projectBody
+	r.JSON(t, &p)
+	require.Equal(t, http.StatusForbidden, changeModel(e.c, p.ID, cfgID, "qwen3:8b").Status)
 }

@@ -697,3 +697,46 @@ func TestWorkerReportsBatchMetrics(t *testing.T) {
 	require.InDelta(t, 4, values["linguastack_worker_segments_total/translated"], 0)
 	require.InDelta(t, 2, values["linguastack_worker_provider_calls_total"], 0)
 }
+
+func TestWorkerPicksUpModelChangeBetweenBatches(t *testing.T) {
+	// Модель сменили посреди перевода (дополнение §5): следующий батч идёт
+	// уже новой моделью, переведённое остаётся.
+	e := newWorkerEnv(t)
+	project := e.projectFromMarkdown(paragraphs(5)) // 6 сегментов — 3 батча
+	e.hook = func(p uuid.UUID, batch int) {
+		if batch == 1 {
+			require.NoError(t, e.db.Model(&models.TranslationProject{}).Where("id = ?", p).Update("model_id", "fake-2").Error)
+		}
+	}
+	e.runUntilIdle(e.worker("w"))
+	require.Equal(t, []string{"fake-1", "fake-2", "fake-2"}, e.fake.Models())
+	require.Equal(t, models.ProjectCompleted, e.reload(project).Status)
+}
+
+func TestWorkerRequeuesTaskWhenConnectionChanges(t *testing.T) {
+	// Сменилось подключение: задача возвращается в очередь без траты
+	// попытки — при новом захвате снова действуют правила очереди (одна
+	// задача Ollama сервера за раз, лимит пользователя).
+	e := newWorkerEnv(t)
+	project := e.projectFromMarkdown(paragraphs(5))
+	other := testdb.MakeProviderConfig(t, e.db, project.OwnerID, "fake")
+	e.hook = func(p uuid.UUID, batch int) {
+		if batch == 1 {
+			require.NoError(t, e.db.Model(&models.TranslationProject{}).Where("id = ?", p).
+				Update("provider_config_id", other.ID).Error)
+		}
+	}
+	w := e.worker("w")
+	worked, err := w.RunOnce(t.Context())
+	require.NoError(t, err)
+	require.True(t, worked)
+	var task models.TranslationTask
+	require.NoError(t, e.db.First(&task, "project_id = ?", project.ID).Error)
+	require.Equal(t, models.TaskPending, task.Status, "задача вернулась в очередь")
+	require.Equal(t, 0, task.Attempts, "попытка не потрачена")
+	require.Equal(t, models.ProjectRunning, e.reload(project).Status)
+	require.Len(t, e.fake.Models(), 1, "после смены подключения прежним — ни одного вызова")
+
+	e.runUntilIdle(w)
+	require.Equal(t, models.ProjectCompleted, e.reload(project).Status)
+}

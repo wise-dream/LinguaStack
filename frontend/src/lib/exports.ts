@@ -50,6 +50,8 @@ export const POLL_MS = 1000
 export function useExports(bookId: () => string, translationId?: () => string) {
   const items = ref<ExportJob[]>([])
   const error = ref('')
+  /** Список хотя бы раз пришёл: пустой — значит, экспортов правда нет. */
+  const loaded = ref(false)
   let timer: ReturnType<typeof setTimeout> | undefined
   let stopped = false
 
@@ -63,6 +65,7 @@ export function useExports(bookId: () => string, translationId?: () => string) {
       const all = await listBookExports(bookId())
       items.value = translationId ? all.filter((j) => j.translation_id === translationId()) : all
       error.value = ''
+      loaded.value = true
     } catch (e) {
       error.value = errorMessage(e)
     }
@@ -86,5 +89,5 @@ export function useExports(bookId: () => string, translationId?: () => string) {
     clearTimeout(timer)
   })
 
-  return { items, error, load, create, remove }
+  return { items, error, loaded, load, create, remove }
 }

@@ -158,27 +158,8 @@ func (s *server) createTranslation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	user := UserFromContext(r.Context())
-	cfgID, err := uuid.Parse(in.ProviderConfigID)
-	if err != nil {
-		writeError(w, http.StatusUnprocessableEntity, "Конфигурация провайдера не найдена")
-		return
-	}
-	cfg, err := store.Owned[models.ProviderConfig](r.Context(), s.DB, cfgID, user.ID)
-	if errors.Is(err, store.ErrNotFound) {
-		writeError(w, http.StatusUnprocessableEntity, "Конфигурация провайдера не найдена")
-		return
-	}
-	if err != nil {
-		internalError(w, r, err)
-		return
-	}
-	if cfg.ProviderID == "ollama" && !s.serverOllamaFor(user) {
-		writeError(w, http.StatusForbidden, ollamaAdminOnlyMessage)
-		return
-	}
-	if providers.SendsDataExternally(cfg.ProviderID, cfg.BaseURL) && !cfg.AllowExternal {
-		writeError(w, http.StatusBadRequest,
-			"Текст книги будет отправлен внешнему сервису, но передача наружу запрещена в настройках провайдера (ТЗ §6.4)")
+	cfg, ok := s.usableConfig(w, r, user, in.ProviderConfigID)
+	if !ok {
 		return
 	}
 
@@ -206,7 +187,7 @@ func (s *server) createTranslation(w http.ResponseWriter, r *http.Request) {
 		ModelID: in.ModelID, Style: in.Style, Determinism: in.Determinism, Glossary: models.NewJSON(glossary),
 		Status: models.ProjectQueued,
 	}
-	err = s.DB.WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
+	err := s.DB.WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Create(&project).Error; err != nil {
 			return err
 		}
@@ -220,6 +201,78 @@ func (s *server) createTranslation(w http.ResponseWriter, r *http.Request) {
 	out := projectResponse(&project, cfg, book.Title)
 	out.Owned = true
 	writeJSON(w, http.StatusCreated, out)
+}
+
+// usableConfig — подключение, которым пользователь может переводить: своё
+// (иначе 422), Ollama сервера — только администратору (403), внешний
+// сервис — если передача текста наружу разрешена (ТЗ §6.4, иначе 400).
+// false — ответ с ошибкой уже записан.
+func (s *server) usableConfig(w http.ResponseWriter, r *http.Request, user *models.User, rawID string) (*models.ProviderConfig, bool) {
+	cfgID, err := uuid.Parse(rawID)
+	if err != nil {
+		writeError(w, http.StatusUnprocessableEntity, "Конфигурация провайдера не найдена")
+		return nil, false
+	}
+	cfg, err := store.Owned[models.ProviderConfig](r.Context(), s.DB, cfgID, user.ID)
+	if errors.Is(err, store.ErrNotFound) {
+		writeError(w, http.StatusUnprocessableEntity, "Конфигурация провайдера не найдена")
+		return nil, false
+	}
+	if err != nil {
+		internalError(w, r, err)
+		return nil, false
+	}
+	if cfg.ProviderID == "ollama" && !s.serverOllamaFor(user) {
+		writeError(w, http.StatusForbidden, ollamaAdminOnlyMessage)
+		return nil, false
+	}
+	if providers.SendsDataExternally(cfg.ProviderID, cfg.BaseURL) && !cfg.AllowExternal {
+		writeError(w, http.StatusBadRequest,
+			"Текст книги будет отправлен внешнему сервису, но передача наружу запрещена в настройках провайдера (ТЗ §6.4)")
+		return nil, false
+	}
+	return cfg, true
+}
+
+type modelChangeIn struct {
+	ProviderConfigID string `json:"provider_config_id"`
+	ModelID          string `json:"model_id"`
+}
+
+// changeTranslation — смена модели перевода (дополнение §5) в любом
+// состоянии, кроме отмены. Переведённое остаётся; идущий перевод
+// подхватывает новую модель со следующего батча.
+func (s *server) changeTranslation(w http.ResponseWriter, r *http.Request) {
+	project, ok := loadOwned[models.TranslationProject](s, w, r, "id")
+	if !ok {
+		return
+	}
+	var in modelChangeIn
+	if !decodeJSON(w, r, &in) {
+		return
+	}
+	if in.ModelID = strings.TrimSpace(in.ModelID); in.ModelID == "" || len(in.ModelID) > maxModelID {
+		writeError(w, http.StatusUnprocessableEntity, "Не указана модель")
+		return
+	}
+	user := UserFromContext(r.Context())
+	cfg, ok := s.usableConfig(w, r, user, in.ProviderConfigID)
+	if !ok {
+		return
+	}
+	res := s.DB.WithContext(r.Context()).Model(&models.TranslationProject{}).
+		Where("id = ? AND owner_id = ? AND status <> ?", project.ID, user.ID, models.ProjectCancelled).
+		Updates(map[string]any{"provider_config_id": cfg.ID, "model_id": in.ModelID, "updated_at": time.Now()})
+	if res.Error != nil {
+		internalError(w, r, res.Error)
+		return
+	}
+	if res.RowsAffected == 0 {
+		writeError(w, http.StatusConflict, "Отменённый перевод не продолжить — начните новый")
+		return
+	}
+	project.ProviderConfigID, project.ModelID = cfg.ID, in.ModelID
+	writeJSON(w, http.StatusOK, s.projectFor(r, project))
 }
 
 // translationOptions — списки для формы настройки перевода. Языки, которые

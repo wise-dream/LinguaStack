@@ -166,6 +166,7 @@ func buildRoutes(s *server) *router {
 	rt.protected("GET /api/translation-options", s.translationOptions)
 	rt.protected("GET /api/translations", s.listTranslations)
 	rt.protected("GET /api/translations/{id}", s.getTranslation)
+	rt.protected("PATCH /api/translations/{id}", s.changeTranslation)
 	rt.protected("POST /api/translations/{id}/pause", s.pauseTranslation)
 	rt.protected("POST /api/translations/{id}/resume", s.resumeTranslation)
 	rt.protected("POST /api/translations/{id}/cancel", s.cancelTranslation)

@@ -26,6 +26,9 @@ export const createTranslation = (bookId: string, input: TranslationInput) =>
 export const pauseTranslation = (id: string) => request<Project>('POST', `${project(id)}/pause`)
 export const resumeTranslation = (id: string) => request<Project>('POST', `${project(id)}/resume`)
 export const cancelTranslation = (id: string) => request<Project>('POST', `${project(id)}/cancel`)
+/** Другое подключение и модель: дальше переводит она, переведённое остаётся. */
+export const changeTranslationModel = (id: string, input: { provider_config_id: string; model_id: string }) =>
+  request<Project>('PATCH', project(id), input)
 /** Заново — все фрагменты с ошибками и с предупреждениями. */
 export const retryProblems = (id: string) =>
   request<{ queued: number; project: Project }>('POST', `${project(id)}/retry-problems`)

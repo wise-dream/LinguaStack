@@ -2,21 +2,22 @@
 // Настройка перевода (ТЗ §8.1 п.5): подключение и модель, языки по
 // возможностям модели (§5.2), стиль, точность, глоссарий и
 // предупреждение о передаче текста наружу (§6.4).
-import { NAlert, NButton, NRadio, NRadioGroup } from 'naive-ui'
+import { NButton, NRadio, NRadioGroup } from 'naive-ui'
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import { estimateTranslation, getBook } from '../api/books'
 import { errorMessage } from '../api/client'
-import { configModels, listProviderConfigs } from '../api/providers'
 import { createTranslation, getTranslationOptions } from '../api/translations'
-import type { Book, BookEstimate, Determinism, ModelCaps, ProviderConfig, TranslationOptions } from '../api/types'
+import type { Book, BookEstimate, Determinism, TranslationOptions } from '../api/types'
+import EgressNotice from '../components/EgressNotice.vue'
 import ErrorAlert from '../components/ErrorAlert.vue'
 import GlossaryEditor from '../components/GlossaryEditor.vue'
 import LinkButton from '../components/LinkButton.vue'
 import SelectField from '../components/SelectField.vue'
 import { glossaryFromRows, type GlossaryRow } from '../components/glossary'
 import { capitalize, languageName } from '../lib/format'
+import { useModelChoice } from '../lib/modelChoice'
 
 const route = useRoute()
 const router = useRouter()
@@ -24,10 +25,7 @@ const bookId = String(route.params.id)
 
 const book = ref<Book | null>(null)
 const options = ref<TranslationOptions | null>(null)
-const configs = ref<ProviderConfig[]>([])
-const models = ref<ModelCaps[]>([])
 const loadError = ref('')
-const modelsError = ref('')
 const submitError = ref('')
 const busy = ref(false)
 
@@ -40,6 +38,8 @@ const form = reactive({
   determinism: 'strict' as Determinism,
 })
 const glossary = ref<GlossaryRow[]>([])
+const { configs, models, modelsError, config, model, configOptions, modelOptions, egress, loadConfigs } =
+  useModelChoice(form)
 
 const styleText: Record<string, { label: string; hint: string }> = {
   literary: { label: 'Художественный', hint: 'Сохраняет голос автора, образы и ритм.' },
@@ -64,9 +64,6 @@ const styles = computed(() =>
   }),
 )
 
-const config = computed(() => configs.value.find((c) => c.id === form.provider_config_id))
-const model = computed(() => models.value.find((m) => m.model_id === form.model_id))
-
 /** Языки, которые понимает модель; если она их не сообщает — все. */
 const languages = computed(() => {
   const all = options.value?.languages.map((l) => l.code) ?? []
@@ -76,8 +73,6 @@ const languages = computed(() => {
 })
 
 const langOption = (code: string) => ({ label: capitalize(languageName(code)), value: code })
-const configOptions = computed(() => configs.value.map((c) => ({ label: c.name, value: c.id })))
-const modelOptions = computed(() => models.value.map((m) => ({ label: m.display_name || m.model_id, value: m.model_id })))
 
 // Примерная цена книги (дополнение §20): объём в токенах считает сервер по
 // настоящим запросам, цены — у модели. Модели без цены (Ollama на сервере,
@@ -108,11 +103,6 @@ const priceText = computed(() => {
 const sourceOptions = computed(() => [langOption('auto'), ...languages.value.map(langOption)])
 const targetOptions = computed(() => languages.value.map(langOption))
 
-const egress = computed(() => {
-  if (!config.value?.sends_data_externally) return null
-  return config.value.allow_external ? 'allowed' : 'blocked'
-})
-
 const canSubmit = computed(() => !!form.model_id && egress.value !== 'blocked' && !busy.value)
 
 function primary(lang?: string) {
@@ -127,29 +117,11 @@ watch(languages, (allowed) => {
   }
 })
 
-watch(
-  () => form.provider_config_id,
-  async (id) => {
-    models.value = []
-    form.model_id = ''
-    modelsError.value = ''
-    if (!id) return
-    try {
-      models.value = await configModels(id)
-      form.model_id = models.value[0]?.model_id ?? ''
-      if (!models.value.length) modelsError.value = 'У этого подключения нет доступных моделей.'
-    } catch (e) {
-      modelsError.value = errorMessage(e)
-    }
-  },
-)
-
 onMounted(async () => {
   try {
-    const [b, o, c] = await Promise.all([getBook(bookId), getTranslationOptions(), listProviderConfigs()])
+    const [b, o, c] = await Promise.all([getBook(bookId), getTranslationOptions(), loadConfigs()])
     book.value = b
     options.value = o
-    configs.value = c
     const lang = primary(b.language)
     form.source_lang = o.languages.some((l) => l.code === lang) ? lang : 'auto'
     form.target_lang = form.source_lang === 'ru' ? 'en' : 'ru'
@@ -227,23 +199,10 @@ async function submit() {
             {{ priceText }}
           </p>
           <ErrorAlert :message="modelsError" />
-          <NAlert
-            v-if="egress === 'allowed'"
-            class="egress"
-            type="warning"
-          >
-            Текст книги будет отправлен в «{{ config?.name }}» и покинет этот сервер.
-          </NAlert>
-          <NAlert
-            v-else-if="egress === 'blocked'"
-            class="egress blocked"
-            type="error"
-          >
-            Подключение «{{ config?.name }}» не разрешает отправку текста книг наружу. Разрешите её в разделе
-            <RouterLink to="/settings/providers">
-              «Модели»
-            </RouterLink> или выберите локальную модель.
-          </NAlert>
+          <EgressNotice
+            :egress="egress"
+            :name="config?.name"
+          />
           <div class="pair">
             <SelectField
               v-model="form.source_lang"

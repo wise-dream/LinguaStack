@@ -22,11 +22,13 @@ import ErrorAlert from '../components/ErrorAlert.vue'
 import ExportPanel from '../components/ExportPanel.vue'
 import LangPair from '../components/LangPair.vue'
 import LinkButton from '../components/LinkButton.vue'
+import ModelChangeForm from '../components/ModelChangeForm.vue'
 import ProgressBar from '../components/ProgressBar.vue'
 import ProjectFacts from '../components/ProjectFacts.vue'
 import StatusMark from '../components/StatusMark.vue'
 import { plural } from '../lib/format'
 import { renderInline } from '../lib/inline'
+import { useMediaQuery } from '../lib/media'
 import { useNow } from '../lib/now'
 import { isTerminal, useProgress } from '../lib/progress'
 
@@ -93,6 +95,21 @@ async function retryAllProblems() {
     retryError.value = errorMessage(e)
   }
 }
+
+// Смена модели (дополнение §5): владельцу, пока перевод не отменён.
+const canChangeModel = computed(() => owned.value && !!project.value && project.value.status !== 'cancelled')
+const changingModel = ref(false)
+const modelNotice = ref('')
+
+function modelChanged(p: Project) {
+  project.value = p
+  changingModel.value = false
+  modelNotice.value = `Модель сменена. Следующие фрагменты переведёт ${p.model_id}.`
+}
+
+// На телефоне кнопки управления — мелкие и с короткими подписями: одной
+// строкой, а не столбиком.
+const narrow = useMediaQuery('(max-width: 40rem)')
 
 // Упавший перевод тоже можно отменить: он ждёт «Продолжить».
 const canCancel = computed(() => owned.value && !!project.value && (!isTerminal(project.value.status) || project.value.status === 'failed'))
@@ -175,17 +192,37 @@ const readerLink = (s: Segment) => ({
               {{ project.book_title }}
             </RouterLink>
           </p>
-          <header class="head">
-            <h1>
-              <LangPair
-                :source="project.source_lang"
-                :target="project.target_lang"
-              />
-            </h1>
+          <h1>
+            <LangPair
+              :source="project.source_lang"
+              :target="project.target_lang"
+            />
+          </h1>
+          <p class="meta">
             <StatusMark :status="project.status" />
-          </header>
-          <p class="sub">
-            {{ project.model_id }}
+            <span class="model">{{ project.model_id }}</span>
+            <NButton
+              v-if="canChangeModel && !changingModel"
+              class="change-model"
+              size="small"
+              text
+              @click="changingModel = true; modelNotice = ''"
+            >
+              Сменить модель
+            </NButton>
+          </p>
+          <ModelChangeForm
+            v-if="changingModel"
+            :project="project"
+            @changed="modelChanged"
+            @cancel="changingModel = false"
+          />
+          <p
+            v-if="modelNotice"
+            role="status"
+            class="notice"
+          >
+            {{ modelNotice }}
           </p>
           <ProgressBar
             :done="project.segments_done"
@@ -208,12 +245,14 @@ const readerLink = (s: Segment) => ({
               v-if="project.segments_done > 0"
               :to="{ path: `/read/${project.book_id}`, query: { t: project.id } }"
               type="primary"
+              :size="narrow ? 'small' : 'medium'"
             >
               Читать
             </LinkButton>
             <NButton
               v-if="canPause"
               class="pause"
+              :size="narrow ? 'small' : 'medium'"
               @click="act(pauseTranslation)"
             >
               Приостановить
@@ -223,14 +262,16 @@ const readerLink = (s: Segment) => ({
               class="resume"
               type="primary"
               secondary
+              :size="narrow ? 'small' : 'medium'"
               @click="act(resumeTranslation, true)"
             >
               Продолжить
             </NButton>
             <ConfirmButton
               v-if="canCancel"
-              label="Отменить перевод"
-              confirm-label="Точно отменить?"
+              :label="narrow ? 'Отменить' : 'Отменить перевод'"
+              :confirm-label="narrow ? 'Точно?' : 'Точно отменить?'"
+              :size="narrow ? 'small' : 'medium'"
               @confirm="act(cancelTranslation)"
             />
           </div>
@@ -386,11 +427,14 @@ const readerLink = (s: Segment) => ({
   align-content: start;
 }
 
-/* Сводка и экспорт — рядом, фрагменты — под ними во всю ширину. */
+/* Сводка и экспорт — рядом, фрагменты — под ними во всю ширину. Карточки
+   не тянутся до высоты соседки: длинный список экспортов не оставляет
+   пустоты в сводке. */
 .top {
   display: grid;
   grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
   gap: var(--space-5);
+  align-items: start;
 }
 
 .summary {
@@ -405,11 +449,17 @@ const readerLink = (s: Segment) => ({
   color: var(--muted);
 }
 
-.head {
+.meta {
   display: flex;
   flex-wrap: wrap;
-  align-items: baseline;
-  gap: var(--space-2) var(--space-4);
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+  margin: 0;
+  color: var(--muted);
+}
+
+.notice {
+  margin: 0;
 }
 
 h1 {
@@ -418,7 +468,6 @@ h1 {
   font-weight: 600;
 }
 
-.sub,
 .muted {
   margin: 0;
   color: var(--muted);
@@ -564,6 +613,20 @@ h2 {
 @media (max-width: 40rem) {
   .segment-list > li {
     grid-template-columns: 1fr;
+  }
+
+  /* Пара языков — одной строкой, цифры — мельче: сводка короче экрана. */
+  h1 {
+    font-size: var(--step-2);
+  }
+
+  .summary :deep(.facts) {
+    font-size: var(--step--1);
+  }
+
+  .controls {
+    gap: var(--space-2);
+    margin-top: var(--space-1);
   }
 }
 </style>
